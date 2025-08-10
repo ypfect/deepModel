@@ -1,0 +1,19 @@
+server:
+  port: 18080
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/testapp
+    username: postgres
+    password: 123
+    driver-class-name: org.postgresql.Driver
+  jackson:
+    serialization:
+      INDENT_OUTPUT: true
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+logging:
+  level:
+    root: INFO
+    com.deepmodel.relation: DEBUG

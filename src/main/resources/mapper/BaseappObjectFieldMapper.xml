@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.deepmodel.relation.dao.BaseappObjectFieldMapper">
+
+  <resultMap id="BaseappObjectFieldMap" type="com.deepmodel.relation.model.BaseappObjectField">
+    <id property="id" column="id"/>
+    <result property="objectType" column="object_type"/>
+    <result property="name" column="name"/>
+    <result property="apiName" column="api_name"/>
+    <result property="title" column="title"/>
+    <result property="type" column="type"/>
+    <result property="bizType" column="biz_type"/>
+    <result property="expression" column="expression"/>
+    <result property="triggerExpr" column="trigger_expr"/>
+    <result property="virtualExpr" column="virtual_expr"/>
+    <result property="writeBackExpr" column="write_back_expr" jdbcType="OTHER"/>
+  </resultMap>
+
+  <select id="selectByObjectType" resultMap="BaseappObjectFieldMap">
+    select id, object_type, name, api_name, title, type, biz_type, expression, trigger_expr, virtual_expr,
+           write_back_expr::text as write_back_expr
+    from baseapp_object_field
+    where object_type = #{objectType}
+  </select>
+
+  <!-- 放宽：仅在 DB 层筛选非空，命中逻辑放到服务层，更稳健 -->
+  <select id="selectWriteBackCandidates" resultMap="BaseappObjectFieldMap">
+    select id, object_type, name, api_name, title, type, biz_type, expression, trigger_expr, virtual_expr,
+           write_back_expr::text as write_back_expr
+    from baseapp_object_field
+    where write_back_expr is not null
+  </select>
+
+  <select id="selectAll" resultMap="BaseappObjectFieldMap">
+    select id, object_type, name, api_name, title, type, biz_type, expression, trigger_expr, virtual_expr,
+           write_back_expr::text as write_back_expr
+    from baseapp_object_field
+  </select>
+
+</mapper>
