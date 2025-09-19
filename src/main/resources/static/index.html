@@ -4,6 +4,7 @@
   <meta charset="utf-8"/>
   <title>模型字段影响范围</title>
   <style>body{font-family:Arial;margin:20px} textarea{width:100%;height:120px} pre{background:#f7f7f7;padding:12px;border-radius:6px} .mermaid{background:#fff;padding:12px;border-radius:6px}
+  label{margin-right:12px} select,input{margin-left:6px}
   </style>
   <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
   <script>mermaid.initialize({startOnLoad:false});</script>
@@ -14,6 +15,13 @@
   <label>对象: <input id="obj" value="ArReceipt"/></label>
   <label>字段: <input id="fld" value="originAmount"/></label>
   <label>深度: <input id="dep" type="number" value="3" min="1" max="6"/></label>
+  <label>关系类型:
+    <select id="rel">
+      <option value="0" selected>全部</option>
+      <option value="1">回写</option>
+      <option value="2">触发</option>
+    </select>
+  </label>
   <button onclick="run()">查询</button>
 </div>
 <pre id="outText"></pre>
@@ -23,7 +31,8 @@ async function run(){
   const o = document.getElementById('obj').value.trim();
   const f = document.getElementById('fld').value.trim();
   const d = document.getElementById('dep').value.trim();
-  const resp = await fetch(`/api/impact/mermaid?objectType=${encodeURIComponent(o)}&field=${encodeURIComponent(f)}&depth=${encodeURIComponent(d)}`);
+  const r = document.getElementById('rel').value;
+  const resp = await fetch(`/api/impact/mermaid?objectType=${encodeURIComponent(o)}&field=${encodeURIComponent(f)}&depth=${encodeURIComponent(d)}&relType=${encodeURIComponent(r)}&direction=downstream`);
   const txt = await resp.text();
   document.getElementById('outText').textContent = txt;
   document.getElementById('outViz').textContent = txt;
