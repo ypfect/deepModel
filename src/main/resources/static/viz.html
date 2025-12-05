@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8"/>
+  <title>模型关系可视化 · 对象/字段双视图</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+    #toolbar { padding: 10px 12px; background: #f5f7fa; border-bottom: 1px solid #e5e7eb; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    #toolbar label { margin-right: 6px; }
+    #toolbar input, #toolbar select, #toolbar button { margin-right: 10px; }
+    #legend { margin-left: auto; font-size: 12px; color: #555; white-space: nowrap; }
+    #cy { width: 100%; height: calc(100vh - 160px); display: block; }
+    #objFilters { max-height: 84px; overflow: auto; padding: 6px 10px; border-top: 1px solid #e5e7eb; background: #fafafa; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    #objFilters .group { margin-right: 10px; }
+    #tooltip { position: fixed; pointer-events: none; background: rgba(17,24,39,0.95); color: #fff; padding: 8px 10px; border-radius: 6px; font-size: 12px; line-height: 1.4; display: none; max-width: 420px; z-index: 9999; }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 10px; font-size: 12px; color: #fff; }
+    .badge-intra { background: #eb256a; }
+    .badge-wb { background: #16a34a; }
+    .hiddenSkeleton { display: none; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.28.0/dist/cytoscape.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/layout-base@1.0.2/layout-base.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cose-base@1.0.2/cose-base.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape-fcose@2.2.0/cytoscape-fcose.min.js"></script>
+  <script src="https://unpkg.com/cytoscape-navigator@2.2.2/cytoscape-navigator.min.js"></script>
+  <script>
+    try{
+      const plugin = window.cytoscapeFcose || (typeof cytoscapeFcose !== 'undefined' ? cytoscapeFcose : null);
+      if(window.cytoscape && plugin){ window.cytoscape.use(plugin); console.log('[viz] fcose registered'); }
+      else { console.warn('[viz] fcose plugin not detected, will fallback to other layouts'); }
+    }catch(e){ console.warn('[viz] fcose use() failed', e); }
+    try{
+      if(window.cytoscape && window.cytoscapeNavigator){ window.cytoscape.use(window.cytoscapeNavigator); console.log('[viz] navigator registered'); }
+    }catch(e){ console.warn('[viz] navigator use() failed', e); }
+  </script>
+</head>
+<body>
+  <div id="toolbar">
+    <label>视图
+      <select id="viewMode">
+        <option value="object" selected>对象总览</option>
+        <option value="field">字段明细</option>
+      </select>
+    </label>
+    <label>对象 <input id="obj" value="ArReceiptItem"/></label>
+    <label>字段 <input id="fld" value="originAmount"/></label>
+    <label>深度 <input id="dep" type="number" value="3" min="1" max="6"/></label>
+    <label>关系类型
+      <select id="rel">
+        <option value="0" selected>全部</option>
+        <option value="1">回写</option>
+        <option value="2">触发</option>
+      </select>
+    </label>
+    <label id="objEdgeThresholdWrap" style="display:inline-flex; align-items:center; gap:6px;">
+      边计数≥ <input id="edgeMin" type="number" value="1" min="1" max="999" style="width:72px"/>
+    </label>
+    <label id="kHopWrap" style="display:none; align-items:center; gap:6px;">邻域k跳 <input id="kHop" type="number" value="0" min="0" max="5" style="width:56px"/></label>
+    <label>布局
+      <select id="layout">
+        <option value="breadthfirst" selected>层次</option>
+        <option value="fcose">防重叠(fcose)</option>
+        <option value="cose">力导</option>
+        <option value="grid">网格</option>
+        <option value="circle">圆环</option>
+      </select>
+    </label>
+    <button id="btnLoad">加载</button>
+    <button id="btnExpand" style="display:none;">展开所选</button>
+    <label id="intraWrap" style="display:none;"><input type="checkbox" id="chkIntra" checked/> 显示触发</label>
+    <label id="wbWrap" style="display:none;"><input type="checkbox" id="chkWB" checked/> 显示回写</label>
+    <button id="btnFocus" style="display:none;">聚焦所选</button>
+    <label id="grpDragWrap" style="display:none;"><input type="checkbox" id="grpDrag"/> 允许拖动对象组</label>
+    <button id="btnDeoverlap" style="display:none;">防遮挡排布</button>
+    <label id="lodWrap" style="display:none; align-items:center; gap:6px;">自动分层 <input type="checkbox" id="autoLOD" checked/></label>
+    <label id="perObjWrap" style="display:none; align-items:center; gap:6px;">每对象字段上限 <input id="perObj" type="number" value="10" min="1" max="200" style="width:64px"/></label>
+    <label id="maxFldWrap" style="display:none; align-items:center; gap:6px;">总字段上限 <input id="maxFlds" type="number" value="200" min="50" max="2000" style="width:72px"/></label>
+    <label id="skeletonWrap" style="display:none; align-items:center; gap:6px;">骨架模式 <input type="checkbox" id="chkSkeleton"/></label>
+    <label id="searchWrap" style="display:inline-flex; align-items:center; gap:6px; margin-left:8px;">查找字段 <input id="searchFld" placeholder="Object.field" style="width:180px"/> <button id="btnLocate">定位</button></label>
+    <button id="btnReset">重置视图</button>
+    <div id="legend">
+      <span class="badge badge-intra">触发</span>
+      <span class="badge badge-wb">回写</span>
+    </div>
+  </div>
+  <div id="objFilters"></div>
+  <div id="cy"></div>
+  <div id="tooltip"></div>
+  <div id="miniNav" style="position:fixed; right:12px; bottom:12px; width:200px; height:130px; background:#fff; border:1px solid #e5e7eb; border-radius:6px; overflow:hidden; z-index:9997; box-shadow:0 2px 6px rgba(0,0,0,0.08);"></div>
+  <div id="sidepanel" data-dock="right" style="position:fixed;top:60px;right:10px;width:360px;max-height:70vh;overflow:auto;background:#ffffff;border:1px solid #e5e7eb;box-shadow:0 2px 8px rgba(0,0,0,0.08);border-radius:8px;display:none;font-size:12px;z-index:9998">
+    <div id="spHeader" style="cursor:move;display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #eef1f5;background:#f8fafc">
+      <div style="font-weight:bold">关系明细</div>
+      <div>
+        <button id="spDockLeft"  title="停靠到左侧">左</button>
+        <button id="spDockRight" title="停靠到右侧">右</button>
+        <button id="spFloat"     title="浮动窗口">浮</button>
+        <button id="spClear"     title="清空内容">清</button>
+        <button id="spClose"     title="关闭">×</button>
+      </div>
+    </div>
+    <div id="spBody" style="padding:8px 10px"></div>
+    <div id="spResizer" style="position:absolute;left:-4px;top:0;width:8px;height:100%;cursor:ew-resize"></div>
+  </div>
+
+  <script>
+    function log(){ try{ console.log('[viz]', ...arguments); }catch(e){} }
+    window.onerror = function(message, source, lineno, colno, error){
+      console.error('[viz:onerror]', message, source, lineno, colno, error);
+      alert('前端脚本错误：'+ message + '\n请打开控制台(Console)截图给我');
+    };
+
+    const cy = cytoscape({
+      container: document.getElementById('cy'),
+      elements: [],
+      style: [
+        { selector: 'node:parent', style: {
+            'shape': 'round-rectangle', 'background-color': '#f0f9ff', 'border-color': '#0ea5e9', 'border-width': 1,
+            'label': 'data(label)', 'color': '#0284c7', 'font-weight': 'bold', 'text-valign': 'top', 'text-halign': 'center', 'text-margin-y': -4, 'padding': 12,
+            'events': 'no'
+        }},
+        { selector: 'node:parent.groupDraggable', style: { 'events': 'yes', 'cursor': 'move' } },
+        { selector: 'node[field]', style: {
+            'background-color': ele => colorForObject(ele.data('object') || ''), 'label': ele => ele.data('field') || ele.data('label'),
+            'font-size': 12, 'text-valign': 'center', 'text-halign': 'center', 'color': '#111', 'text-wrap': 'wrap', 'text-max-width': 140,
+            'border-width': 1, 'border-color': '#64748b'
+        }},
+        { selector: 'node[field]:selected', style: { 'border-width': 4, 'border-color': '#f59e0b', 'background-color': '#fde68a' }},
+        { selector: 'node[?isObjectNode]', style: {
+            'shape':'round-rectangle','background-color':'#f0f9ff','border-color':'#0ea5e9','border-width':1,
+            'label':'data(label)','padding': 10, 'text-wrap':'wrap','text-max-width':160,
+            'font-size': 14, 'color': '#0f172a', 'text-halign': 'center', 'text-valign': 'center'
+        }},
+        { selector: 'node[?isObjectNode]:selected', style: { 'border-width': 4, 'border-color': '#2563eb', 'background-color': '#dbeafe' }},
+        { selector: 'edge', style: {
+            'width': 2, 'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'line-color': '#94a3b8', 'target-arrow-color': '#94a3b8',
+            'label': ele => ele.data('type')==='writeBack'? 'WB':'intra', 'font-size': 9, 'text-rotation': 'autorotate', 'text-margin-y': -6, 'color': '#555'
+        }},
+        { selector: 'edge[type = "intra"]', style: { 'line-color': '#eb256a', 'target-arrow-color': '#eb256a' } },
+        { selector: 'edge[type = "writeBack"]', style: { 'line-color': '#16a34a', 'target-arrow-color': '#16a34a' } },
+        { selector: 'edge[?count]', style: { 'label': ele => (ele.data('type')||'')+'('+ele.data('count')+')' } },
+        { selector: '.noLabel', style: { 'text-opacity': 0 } },
+        { selector: '.hiddenEdge', style: { 'display': 'none' } },
+        { selector: '.hiddenObj', style: { 'display': 'none' } }
+      ],
+      layout: { name: 'breadthfirst', directed: true, padding: 20, spacingFactor: 1.2 },
+      selectionType: 'single',
+      boxSelectionEnabled: true,
+      wheelSensitivity: 0.2
+    });
+    // 小地图
+    try{ cy.navigator({ container: document.getElementById('miniNav') }); }catch(e){ console.warn('navigator init failed', e); }
+
+    const tooltip = document.getElementById('tooltip');
+
+    function colorForObject(obj){
+      if(!obj) return '#e5e7eb';
+      let h = 0; for(let i=0;i<obj.length;i++){ h = (h*31 + obj.charCodeAt(i)) >>> 0; }
+      h = h % 360; return `hsl(${h},70%,70%)`;
+    }
+
+    function toFieldElements(graph){
+      const es = [];
+      const existingNodeIds = new Set(cy.nodes().map(n=>n.id()));
+      const existingEdgeIds = new Set(cy.edges().map(e=>e.id()));
+      const objects = new Set();
+      (graph.nodes||[]).forEach(n => objects.add(n.object));
+      objects.forEach(obj => {
+        const groupId = 'obj:' + obj;
+        if(!existingNodeIds.has(groupId)) es.push({ data: { id: groupId, label: obj, isGroup: true } });
+      });
+      (graph.nodes||[]).forEach(n=>{
+        if(!existingNodeIds.has(n.id)) es.push({ data: { id: n.id, object: n.object, field: n.field, label: n.field, full: n.object + '.' + n.field, parent: 'obj:' + n.object, meta: {
+          title: n.title||'', type: n.type||'', bizType: n.bizType||'', apiName: n.apiName||'', expression: n.expression||'', triggerExpr: n.triggerExpr||'', virtualExpr: n.virtualExpr||''
+        } }});
+      });
+      let seq=0;
+      (graph.edges||[]).forEach(e=>{
+        const id = e.source + '->' + e.target + '#' + (seq++);
+        if(!existingEdgeIds.has(id)) es.push({ data: { id, source: e.source, target: e.target, type: e.type }});
+      });
+      return es;
+    }
+
+    function toObjectElements(data){
+      const es = [];
+      const seenN = new Set();
+      const seenE = new Set();
+      (data.nodes||[]).forEach(n=>{
+        if(seenN.has(n.object)) return; seenN.add(n.object);
+        es.push({ data: { id: n.object, label: n.object + (n.fieldCount!=null? (' ('+n.fieldCount+')') : ''), isObjectNode: true },
+                  style: { 'background-color': colorForObject(n.object) } });
+      });
+      (data.edges||[]).forEach(e=>{
+        const id = e.sourceObject+'->'+e.type+'->'+e.targetObject;
+        if(seenE.has(id)) return; seenE.add(id);
+        es.push({ data: { id, source: e.sourceObject, target: e.targetObject, type: e.type, count: e.count } });
+      });
+      return es;
+    }
+
+    function applyLayout(name){
+      try{
+        let opt;
+        if(name==='breadthfirst') opt = { name, directed:true, padding:30, spacingFactor:1.15 };
+        else if(name==='fcose') opt = { name, quality:'proof', randomize:false, animate:false,
+          idealEdgeLength: 140, nodeRepulsion: 6000, nodeSeparation: 80, gravity: 0.25, gravityRange: 3.8,
+          gravityCompound: 1.0, nestingFactor: 0.9, packComponents: true, tile: true,
+          tilingPaddingVertical: 20, tilingPaddingHorizontal: 20 };
+        else opt = { name };
+        log('applyLayout', name, opt);
+      cy.layout(opt).run();
+      }catch(e){
+        console.warn('布局失败，降级为 breadthfirst：', e);
+        try{ cy.layout({ name:'breadthfirst', directed:true, padding:20, spacingFactor:1.2 }).run(); }catch(_){}
+      }
+    }
+
+    async function fetchFieldGraph(objectType, field, depth, relType){
+      const url = `/api/impact?objectType=${encodeURIComponent(objectType)}&field=${encodeURIComponent(field)}&depth=${encodeURIComponent(depth)}&relType=${encodeURIComponent(relType)}`;
+      log('fetch field graph', url);
+      const resp = await fetch(url); if(!resp.ok) throw new Error('字段图请求失败');
+      const data = await resp.json();
+      log('field graph ok', data?.nodes?.length, data?.edges?.length);
+      return data;
+    }
+
+    async function fetchObjectGraph(objectType, field, depth, relType){
+      const url = `/api/impact/objects?objectType=${encodeURIComponent(objectType)}&field=${encodeURIComponent(field)}&depth=${encodeURIComponent(depth)}&relType=${encodeURIComponent(relType)}`;
+      log('fetch object graph', url);
+      const resp = await fetch(url); if(!resp.ok) throw new Error('对象图请求失败');
+      const data = await resp.json();
+      log('object graph ok', data?.nodes?.length, data?.edges?.length);
+      return data;
+    }
+
+    function applyEdgeFilters(){
+      const showIntra = document.getElementById('chkIntra').checked;
+      const showWB = document.getElementById('chkWB').checked;
+      cy.edges().forEach(e=>{
+        const t = e.data('type');
+        const show = (t==='intra' && showIntra) || (t==='writeBack' && showWB);
+        if(show){ e.removeClass('hiddenEdge'); } else { e.addClass('hiddenEdge'); }
+      });
+    }
+
+    function applyObjectEdgeThreshold(){
+      const min = Math.max(1, parseInt(document.getElementById('edgeMin').value||'1',10));
+      cy.batch(()=>{
+        cy.edges().forEach(e=>{
+          const c = e.data('count') || 0;
+          if(c>0 && c < min) e.addClass('hiddenEdge');
+          else if(!e.hasClass('hiddenEdge')) e.removeClass('hiddenEdge');
+        });
+      });
+    }
+
+    function buildObjectFilterPanel(){
+      const panel = document.getElementById('objFilters');
+      panel.innerHTML = '';
+      const objects = new Set();
+      const isObjectMode = document.getElementById('viewMode').value === 'object';
+      if(isObjectMode){
+        cy.nodes('[?isObjectNode]').forEach(n=>objects.add(n.id()));
+      }else{
+        cy.nodes('node[?object]').forEach(n=>{ if(n.data('object')) objects.add(n.data('object')); });
+      }
+      const objs = Array.from(objects).sort();
+      if(objs.length === 0){ panel.textContent = '无对象可过滤'; return; }
+      const btnAll = document.createElement('button'); btnAll.textContent = '全选'; btnAll.onclick = ()=>{ setAllObjectChecks(true); };
+      const btnNone = document.createElement('button'); btnNone.textContent = '全不选'; btnNone.onclick = ()=>{ setAllObjectChecks(false); };
+      panel.appendChild(btnAll); panel.appendChild(btnNone);
+      objs.forEach(obj => {
+        const id = 'obj_ck_' + obj;
+        const label = document.createElement('label'); label.className = 'group';
+        const ck = document.createElement('input'); ck.type = 'checkbox'; ck.id = id; ck.value = obj; ck.checked = true; ck.onchange = applyObjectFilters;
+        label.appendChild(ck);
+        label.appendChild(document.createTextNode(' ' + obj));
+        panel.appendChild(label);
+      });
+    }
+
+    function setAllObjectChecks(val){
+      document.querySelectorAll('#objFilters input[type=checkbox]').forEach(ck=>{ ck.checked = val; });
+      applyObjectFilters();
+    }
+
+    function applyObjectFilters(){
+      const allowed = new Set();
+      document.querySelectorAll('#objFilters input[type=checkbox]').forEach(ck=>{ if(ck.checked) allowed.add(ck.value); });
+      const isObjectMode = document.getElementById('viewMode').value === 'object';
+      cy.batch(()=>{
+        if(isObjectMode){
+          cy.nodes('[?isObjectNode]').forEach(n=>{ if(allowed.has(n.id())) n.removeClass('hiddenObj'); else n.addClass('hiddenObj'); });
+        }else{
+          cy.nodes('node:parent').forEach(n=>{ const obj = n.data('label'); if(allowed.has(obj)) n.removeClass('hiddenObj'); else n.addClass('hiddenObj'); });
+          cy.nodes('node[field]').forEach(n=>{ const obj = n.data('object'); if(allowed.has(obj)) n.removeClass('hiddenObj'); else n.addClass('hiddenObj'); });
+        }
+        cy.edges().forEach(e=>{ const sHidden = e.source().hasClass('hiddenObj'); const tHidden = e.target().hasClass('hiddenObj'); if(sHidden || tHidden) e.addClass('hiddenObj'); else e.removeClass('hiddenObj'); });
+      });
+    }
+
+    function neighborhoodOf(node, k){
+      let sub = node.closedNeighborhood();
+      for(let i=1;i<k;i++){ sub = sub.closedNeighborhood(); }
+      return sub;
+    }
+
+    function currentToolbarRoot(){
+      return { object: document.getElementById('obj').value.trim(), field: document.getElementById('fld').value.trim() };
+    }
+
+    let lastHoveredFieldId = null;
+    let lastPickedField = null;
+
+    function takeSelectedFieldOrFallback(){
+      let s = cy.$('node:selected[field]');
+      if(s.length>0){
+        const n = s[0];
+        lastPickedField = { object: n.data('object'), field: n.data('field') };
+        return lastPickedField;
+      }
+      if(lastHoveredFieldId){
+        const n = cy.getElementById(lastHoveredFieldId);
+        if(n && n.nonempty() && n.data('field')){
+          lastPickedField = { object: n.data('object'), field: n.data('field') };
+          return lastPickedField;
+        }
+      }
+      const root = currentToolbarRoot();
+      if(root.object && root.field){ lastPickedField = root; return lastPickedField; }
+      const any = cy.$('node[field]:visible');
+      if(any.length>0){
+        lastPickedField = { object: any[0].data('object'), field: any[0].data('field') };
+        return lastPickedField;
+      }
+      return null;
+    }
+
+    function focusSelected(){
+      const k = Math.max(0, Math.min(5, parseInt(document.getElementById('kHop').value||'0', 10)));
+      const picked = takeSelectedFieldOrFallback();
+      if(!picked){ console.warn('focusSelected: 无可见字段'); alert('当前无可见字段节点'); return; }
+      const id = picked.object + '.' + picked.field;
+      const target = cy.getElementById(id);
+      if(target.empty()){ console.warn('focusSelected: 字段不可见', id); alert('当前选中或输入的字段不可见'); return; }
+      const keep = k>0 ? neighborhoodOf(target, k) : target.closedNeighborhood();
+      cy.batch(()=>{ cy.elements().addClass('hiddenObj'); keep.removeClass('hiddenObj'); });
+      cy.fit(keep, 40);
+    }
+
+    function resetView(){
+      cy.elements().removeClass('hiddenObj');
+      const isObjectMode = document.getElementById('viewMode').value === 'object';
+      if(isObjectMode) applyObjectEdgeThreshold(); else applyEdgeFilters();
+      cy.fit(cy.elements(), 40);
+    }
+
+    function buildTooltipHtml(meta, obj, fld){
+      return `
+        <div style="font-weight:bold;margin-bottom:4px">${obj}.${fld}</div>
+        <div>标题：${meta.title||''}</div>
+        <div>类型：${meta.type||''}${meta.bizType?(' / '+meta.bizType):''}</div>
+        <div>apiName：${meta.apiName||''}</div>
+        ${meta.expression?`<div>计算: <code>${escapeHtml(meta.expression)}</code></div>`:''}
+        ${meta.triggerExpr?`<div>触发: <code>${escapeHtml(meta.triggerExpr)}</code></div>`:''}
+        ${meta.virtualExpr?`<div>虚拟: <code>${escapeHtml(meta.virtualExpr)}</code></div>`:''}
+      `;
+    }
+
+    function positionTooltipAt(evtOrNode){
+      const rect = cy.container().getBoundingClientRect();
+      let x = 0, y = 0;
+      if(evtOrNode && evtOrNode.originalEvent && typeof evtOrNode.originalEvent.clientX === 'number'){
+        x = evtOrNode.originalEvent.clientX + 12;
+        y = evtOrNode.originalEvent.clientY + 12;
+      }else if(evtOrNode && evtOrNode.renderedPosition){
+        x = rect.left + evtOrNode.renderedPosition.x + 12;
+        y = rect.top + evtOrNode.renderedPosition.y + 12;
+      }
+      tooltip.style.left = x + 'px';
+      tooltip.style.top = y + 'px';
+    }
+
+    function showTooltip(node, evt){
+      const id = node.id(); lastHoveredFieldId = id;
+      const meta = node.data('meta') || {};
+      const obj = node.data('object'); const fld = node.data('field');
+      const html = buildTooltipHtml(meta, obj, fld);
+      tooltip.innerHTML = html;
+      positionTooltipAt(evt);
+      tooltip.style.display = 'block';
+    }
+
+    function moveTooltip(evt){ if(tooltip.style.display==='block'){ positionTooltipAt(evt); } }
+    function hideTooltip(){ tooltip.style.display='none'; }
+
+    function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    async function loadGraph(){
+      try{
+        const mode = document.getElementById('viewMode').value;
+        const o = document.getElementById('obj').value.trim();
+        const f = document.getElementById('fld').value.trim();
+        const d = parseInt(document.getElementById('dep').value||'3',10);
+        const r = parseInt(document.getElementById('rel').value||'0',10);
+        log('loadGraph start', {mode,o,f,d,r});
+
+        const isObjectMode = (mode === 'object');
+        document.getElementById('objEdgeThresholdWrap').style.display = isObjectMode ? 'inline-flex' : 'none';
+        document.getElementById('btnExpand').style.display = isObjectMode ? 'none' : 'inline-block';
+        document.getElementById('intraWrap').style.display = isObjectMode ? 'none' : 'inline-block';
+        document.getElementById('wbWrap').style.display = isObjectMode ? 'none' : 'inline-block';
+        document.getElementById('btnFocus').style.display = isObjectMode ? 'none' : 'inline-block';
+        document.getElementById('kHopWrap').style.display = isObjectMode ? 'none' : 'inline-flex';
+        document.getElementById('grpDragWrap').style.display = isObjectMode ? 'none' : 'inline-flex';
+        document.getElementById('btnDeoverlap').style.display = isObjectMode ? 'none' : 'inline-block';
+        document.getElementById('lodWrap').style.display = isObjectMode ? 'none' : 'inline-flex';
+        document.getElementById('perObjWrap').style.display = isObjectMode ? 'none' : 'inline-flex';
+        document.getElementById('maxFldWrap').style.display = isObjectMode ? 'none' : 'inline-flex';
+        document.getElementById('skeletonWrap').style.display = isObjectMode ? 'none' : 'inline-flex';
+
+        cy.elements().remove();
+        if(isObjectMode){
+          const data = await fetchObjectGraph(o, f, d, r);
+          cy.add(toObjectElements(data));
+        }else{
+          const data = await fetchFieldGraph(o, f, d, r);
+          cy.add(toFieldElements(data));
+          cy.nodes('[field]').grabify();
+          cy.nodes(':parent').ungrabify();
+          cy.nodes(':parent').unselectify();
+          // 多对象时默认切到防重叠布局
+          const objSet = new Set(); cy.nodes('node[field]').forEach(n=>objSet.add(n.data('object')));
+          if(objSet.size > 1 && document.getElementById('layout').value === 'breadthfirst'){
+            document.getElementById('layout').value = 'fcose';
+          }
+        }
+        applyLayout(document.getElementById('layout').value);
+        buildObjectFilterPanel();
+        applyObjectFilters();
+        if(isObjectMode) applyObjectEdgeThreshold(); else applyEdgeFilters();
+        if(!isObjectMode) applyLOD();
+        if(!isObjectMode) applySkeletonMode();
+        cy.fit(cy.elements(), 50);
+        log('loadGraph done');
+      }catch(err){
+        console.error('loadGraph error', err);
+        alert('加载失败：' + (err && err.message ? err.message : err));
+      }
+    }
+
+    // ==== 侧边面板（可停靠/浮动/拖拽/可调宽）====
+    const sidepanel = document.getElementById('sidepanel');
+    const spBody = document.getElementById('spBody');
+    const spHeader = document.getElementById('spHeader');
+    const spResizer = document.getElementById('spResizer');
+
+    function adjustCyForPanel(){
+      const cyDiv = document.getElementById('cy');
+      if(sidepanel.style.display === 'none'){
+        cyDiv.style.width = '';
+        cy.resize();
+        return;
+      }
+      if(sidepanel.getAttribute('data-dock') === 'right'){
+        const w = sidepanel.getBoundingClientRect().width + 20;
+        cyDiv.style.width = `calc(100% - ${w}px)`;
+        cy.resize();
+      }else if(sidepanel.getAttribute('data-dock') === 'left'){
+        const w = sidepanel.getBoundingClientRect().width + 20;
+        cyDiv.style.width = `calc(100% - ${w}px)`;
+        cyDiv.style.marginLeft = w + 'px';
+        cy.resize();
+      }else{
+        cyDiv.style.width = '';
+        cyDiv.style.marginLeft = '';
+        cy.resize();
+      }
+    }
+
+    function showPanel(){ sidepanel.style.display='block'; adjustCyForPanel(); }
+    function hidePanel(){ sidepanel.style.display='none'; document.getElementById('cy').style.marginLeft=''; adjustCyForPanel(); }
+    function clearPanel(){ spBody.innerHTML=''; }
+
+    function dockPanel(side){
+      if(side === 'left'){
+        sidepanel.setAttribute('data-dock','left');
+        sidepanel.style.left = '10px';
+        sidepanel.style.right = '';
+        sidepanel.style.position = 'fixed';
+        document.getElementById('cy').style.marginLeft='';
+        adjustCyForPanel();
+      }else if(side === 'right'){
+        sidepanel.setAttribute('data-dock','right');
+        sidepanel.style.right = '10px';
+        sidepanel.style.left = '';
+        sidepanel.style.position = 'fixed';
+        document.getElementById('cy').style.marginLeft='';
+        adjustCyForPanel();
+      }else{
+        sidepanel.setAttribute('data-dock','float');
+        sidepanel.style.position = 'fixed';
+        document.getElementById('cy').style.marginLeft='';
+        adjustCyForPanel();
+      }
+    }
+
+    // 拖动面板（浮动或停靠均可移动）
+    (function(){
+      let dragging=false, startX=0, startY=0, startLeft=0, startTop=0;
+      spHeader.addEventListener('mousedown', (e)=>{
+        dragging=true; startX=e.clientX; startY=e.clientY; const rect=sidepanel.getBoundingClientRect(); startLeft=rect.left; startTop=rect.top; document.body.style.userSelect='none';
+      });
+      window.addEventListener('mousemove', (e)=>{
+        if(!dragging) return; const dx=e.clientX-startX, dy=e.clientY-startY; sidepanel.style.left=(startLeft+dx)+'px'; sidepanel.style.top=(startTop+dy)+'px';
+      });
+      window.addEventListener('mouseup', ()=>{ if(dragging){ dragging=false; document.body.style.userSelect=''; adjustCyForPanel(); }});
+    })();
+
+    // 调整宽度（左右停靠时）
+    (function(){
+      let resizing=false, startX=0, startW=0;
+      spResizer.addEventListener('mousedown', (e)=>{ resizing=true; startX=e.clientX; startW=sidepanel.getBoundingClientRect().width; document.body.style.userSelect='none'; });
+      window.addEventListener('mousemove', (e)=>{
+        if(!resizing) return; const dx=e.clientX-startX; let w=startW - dx; if(sidepanel.getAttribute('data-dock')==='left') w=startW + dx; w=Math.max(260, Math.min(680, w)); sidepanel.style.width=w+'px'; adjustCyForPanel();
+      });
+      window.addEventListener('mouseup', ()=>{ if(resizing){ resizing=false; document.body.style.userSelect=''; }});
+    })();
+
+    document.getElementById('spDockLeft').onclick = ()=> dockPanel('left');
+    document.getElementById('spDockRight').onclick = ()=> dockPanel('right');
+    document.getElementById('spFloat').onclick    = ()=> dockPanel('float');
+    document.getElementById('spClear').onclick    = ()=> clearPanel();
+    document.getElementById('spClose').onclick    = ()=> hidePanel();
+
+    function appendDetailsSection(title, html){
+      const id = 'sec_' + Date.now() + '_' + Math.floor(Math.random()*10000);
+      const block = document.createElement('details');
+      block.open = true;
+      block.style.margin = '6px 0';
+      const sum = document.createElement('summary'); sum.textContent = title; sum.style.fontWeight='bold'; sum.style.cursor='pointer';
+      const body = document.createElement('div'); body.innerHTML = html; body.style.marginTop='6px';
+      block.appendChild(sum); block.appendChild(body); spBody.appendChild(block);
+    }
+
+    // 对象总览：点击边，拉取字段级明细
+    async function showObjectEdgeDetails(edge){
+      const o = document.getElementById('obj').value.trim();
+      const f = document.getElementById('fld').value.trim();
+      const d = parseInt(document.getElementById('dep').value||'3',10);
+      const r = parseInt(document.getElementById('rel').value||'0',10);
+      const type = edge.data('type');
+      const src = edge.source().id();
+      const dst = edge.target().id();
+      const url = `/api/impact/objectEdgeDetails?objectType=${encodeURIComponent(o)}&field=${encodeURIComponent(f)}&depth=${encodeURIComponent(d)}&relType=${encodeURIComponent(r)}&sourceObject=${encodeURIComponent(src)}&targetObject=${encodeURIComponent(dst)}&type=${encodeURIComponent(type)}`;
+      log('fetch details', url);
+      const resp = await fetch(url);
+      if(!resp.ok){ alert('明细请求失败'); return; }
+      const rows = await resp.json();
+      const list = rows.map(e=>{
+        const s = e.source; const t = e.target;
+        const sField = s.substring(s.indexOf('.')+1);
+        const tField = t.substring(t.indexOf('.')+1);
+        return `<li><a href=\"#\" data-obj=\"${src}\" data-fld=\"${sField}\" class=\"jumpField\">${src}.${sField}</a> → ${dst}.${tField} <span style=\"color:#666\">(${type})</span></li>`;
+      }).join('');
+      const html = `<ul style=\"padding-left:18px;line-height:1.6\">${list||'<li>无明细</li>'}</ul>`;
+      appendDetailsSection(`${src} → ${dst} · ${type}`, html);
+      // 自适应停靠（点击在左半屏，则停靠右；反之停靠左）
+      try{
+        const rect = cy.container().getBoundingClientRect();
+        const mid = rect.left + rect.width/2;
+        const ex = edge.renderedMidpoint().x + rect.left;
+        dockPanel(ex < mid ? 'right' : 'left');
+      }catch(_){}
+      showPanel();
+      // 绑定跳转
+      sidepanel.querySelectorAll('a.jumpField').forEach(a=>{
+        a.onclick = async (ev)=>{
+          ev.preventDefault();
+          const obj = a.getAttribute('data-obj');
+          const fld = a.getAttribute('data-fld');
+          document.getElementById('viewMode').value = 'field';
+          document.getElementById('obj').value = obj;
+          document.getElementById('fld').value = fld;
+          await loadGraph();
+        };
+      });
+    }
+
+    document.getElementById('btnLoad').onclick = ()=>{ loadGraph(); };
+    document.getElementById('btnExpand').onclick = async ()=>{
+      const picked = takeSelectedFieldOrFallback();
+      if(!picked){ console.warn('expand: 无可见字段'); alert('当前无可见字段节点'); return; }
+      document.getElementById('obj').value = picked.object;
+      document.getElementById('fld').value = picked.field;
+      await loadGraph();
+    };
+    document.getElementById('layout').onchange = ()=>applyLayout(document.getElementById('layout').value);
+    document.getElementById('chkIntra').onchange = applyEdgeFilters;
+    document.getElementById('chkWB').onchange = applyEdgeFilters;
+    document.getElementById('btnFocus').onclick = focusSelected;
+    document.getElementById('btnReset').onclick = resetView;
+    document.getElementById('viewMode').onchange = loadGraph;
+    document.getElementById('edgeMin').onchange = ()=>{ applyObjectEdgeThreshold(); };
+    document.getElementById('autoLOD').onchange = ()=>applyLOD();
+    document.getElementById('perObj').onchange = ()=>applyLOD();
+    document.getElementById('maxFlds').onchange = ()=>applyLOD();
+    document.getElementById('btnLocate').onclick = ()=>locateField();
+    document.getElementById('chkSkeleton').onchange = ()=>applySkeletonMode();
+    document.getElementById('kHop').onchange = ()=>{ if(document.getElementById('chkSkeleton').checked) applySkeletonMode(); };
+
+    // 对象组可拖动/防遮挡
+    function applyGroupDraggable(){
+      const enabled = document.getElementById('grpDrag').checked;
+      if(enabled){
+        cy.nodes(':parent').addClass('groupDraggable');
+        cy.nodes(':parent').grabify();
+      }else{
+        cy.nodes(':parent').removeClass('groupDraggable');
+        cy.nodes(':parent').ungrabify();
+      }
+    }
+    document.getElementById('grpDrag').onchange = applyGroupDraggable;
+    document.getElementById('btnDeoverlap').onclick = ()=>{
+      document.getElementById('layout').value = 'fcose';
+      applyLayout('fcose');
+    };
+
+    cy.on('mouseover', 'node[field]', (evt)=> showTooltip(evt.target, evt));
+    cy.on('mousemove', 'node[field]', (evt)=> moveTooltip(evt));
+    cy.on('mouseout',  'node[field]', hideTooltip);
+    cy.on('tap', 'node[field]', (evt)=>{ const n = evt.target; lastPickedField = { object: n.data('object'), field: n.data('field') }; });
+    cy.on('tap', 'edge[?count]', (evt)=>{ showObjectEdgeDetails(evt.target); });
+    let zoomTick = null;
+    cy.on('zoom', ()=>{
+      const z = cy.zoom();
+      if(z < 0.6){ cy.nodes().addClass('noLabel'); } else { cy.nodes().removeClass('noLabel'); }
+      if(document.getElementById('viewMode').value === 'field'){
+        if(zoomTick) clearTimeout(zoomTick);
+        zoomTick = setTimeout(()=>applyLOD(), 120);
+        if(document.getElementById('chkSkeleton').checked){
+          if(zoomTick) clearTimeout(zoomTick);
+          zoomTick = setTimeout(()=>applySkeletonMode(), 160);
+        }
+      }
+    });
+
+    loadGraph();
+
+    // ====== LOD 与字段上限 ======
+    function applyLOD(){
+      const mode = document.getElementById('viewMode').value;
+      if(mode !== 'field') return;
+      const auto = document.getElementById('autoLOD').checked;
+      const perObj = Math.max(1, parseInt(document.getElementById('perObj').value||'10',10));
+      const maxFld = Math.max(50, parseInt(document.getElementById('maxFlds').value||'200',10));
+      const z = cy.zoom();
+      const root = currentToolbarRoot(); const rootId = root.object && root.field ? (root.object+'.'+root.field) : null;
+      const keep = new Set();
+      if(rootId){ keep.add(rootId); cy.getElementById(rootId).closedNeighborhood().forEach(el=>keep.add(el.id())); }
+      // 自动分层：低倍仅显示对象组；中倍限制每对象字段数；高倍显示全部
+      cy.batch(()=>{
+        // reset
+        cy.nodes('node[field]').removeClass('hiddenObj');
+        if(auto && z < 0.55){
+          cy.nodes('node[field]').addClass('hiddenObj');
+          // 强制保留根邻域
+          keep.forEach(id=>{ const n=cy.getElementById(id); if(n && n.data('field')) n.removeClass('hiddenObj'); });
+          return;
+        }
+        // 统计每对象字段并按度排序
+        const byObj = new Map();
+        cy.nodes('node[field]').forEach(n=>{
+          const obj = n.data('object'); if(!byObj.has(obj)) byObj.set(obj, []);
+          const deg = n.connectedEdges().length;
+          byObj.get(obj).push({ id:n.id(), deg });
+        });
+        let shown = 0;
+        byObj.forEach(list=> list.sort((a,b)=> b.deg - a.deg));
+        byObj.forEach(list=>{
+          let quota = perObj;
+          for(let i=0;i<list.length;i++){
+            const id = list[i].id;
+            const mustKeep = keep.has(id);
+            if((auto && z < 0.9) || (!auto)){
+              if((i < quota && shown < maxFld) || mustKeep){
+                cy.getElementById(id).removeClass('hiddenObj'); shown++;
+              } else {
+                cy.getElementById(id).addClass('hiddenObj');
+              }
+            }
+          }
+        });
+      });
+      applyObjectFilters(); // 叠加对象过滤
+    }
+
+    // ====== 骨架模式：仅保留根字段的 k 跳邻域，并包含其相邻的回写跨对象路径 ======
+    function clearSkeleton(){
+      cy.batch(()=>{
+        cy.elements().removeClass('hiddenSkeleton');
+      });
+    }
+    function applySkeletonMode(){
+      if(document.getElementById('viewMode').value !== 'field'){ clearSkeleton(); return; }
+      const enabled = document.getElementById('chkSkeleton').checked;
+      if(!enabled){ clearSkeleton(); return; }
+      let rootObj = document.getElementById('obj').value.trim();
+      let rootFld = document.getElementById('fld').value.trim();
+      let rootId = rootObj && rootFld ? (rootObj + '.' + rootFld) : null;
+      if(!rootId || cy.getElementById(rootId).empty()){
+        const sel = cy.$('node:selected[field]');
+        if(sel.length>0) rootId = sel[0].id();
+      }
+      if(!rootId || cy.getElementById(rootId).empty()){
+        const any = cy.$('node[field]:visible'); if(any.length>0) rootId = any[0].id();
+      }
+      if(!rootId || cy.getElementById(rootId).empty()){
+        console.warn('骨架模式：无可用根节点');
+        return;
+      }
+      const k = Math.max(1, Math.min(5, parseInt(document.getElementById('kHop').value||'2', 10)));
+      // k跳邻域
+      let keep = cy.getElementById(rootId).closedNeighborhood();
+      for(let i=1;i<k;i++){ keep = keep.closedNeighborhood(); }
+      const keepIds = new Set(); keep.forEach(el=> keepIds.add(el.id()));
+      // 扩展：与 keep 节点相邻的回写边的另一端也纳入（强调跨对象路径）
+      cy.edges('[type = "writeBack"]').forEach(e=>{
+        const s = e.source().id(), t = e.target().id();
+        if(keepIds.has(s) && !keepIds.has(t)){ keepIds.add(t); }
+        if(keepIds.has(t) && !keepIds.has(s)){ keepIds.add(s); }
+      });
+      // 应用隐藏
+      cy.batch(()=>{
+        cy.nodes('node[field]').forEach(n=>{
+          if(keepIds.has(n.id())) n.removeClass('hiddenSkeleton'); else n.addClass('hiddenSkeleton');
+        });
+        // 父组：若包含可见子节点则可见
+        cy.nodes('node:parent').forEach(p=>{
+          const anyChildVisible = p.children().some(ch=> !ch.hasClass('hiddenSkeleton'));
+          if(anyChildVisible) p.removeClass('hiddenSkeleton'); else p.addClass('hiddenSkeleton');
+        });
+        // 边：若任一端隐藏，则隐藏
+        cy.edges().forEach(e=>{
+          const sHidden = e.source().hasClass('hiddenSkeleton');
+          const tHidden = e.target().hasClass('hiddenSkeleton');
+          if(sHidden || tHidden) e.addClass('hiddenSkeleton'); else e.removeClass('hiddenSkeleton');
+        });
+      });
+    }
+
+    function locateField(){
+      const q = (document.getElementById('searchFld').value||'').trim();
+      if(!q) return;
+      let id = q;
+      if(!cy.getElementById(id).nonempty()){
+        // 支持仅输入字段名时的模糊匹配（取第一个）
+        const cand = cy.nodes('node[field]').filter(n=> (n.data('field')||'').toLowerCase() === q.toLowerCase() || (n.data('full')||'').toLowerCase() === q.toLowerCase());
+        if(cand.length>0) id = cand[0].id(); else {
+          const part = cy.nodes('node[field]').filter(n=> (n.data('full')||'').toLowerCase().includes(q.toLowerCase()));
+          if(part.length>0) id = part[0].id();
+        }
+      }
+      const n = cy.getElementById(id);
+      if(n && n.nonempty()){
+        n.removeClass('hiddenObj');
+        const obj = n.data('object');
+        // 确保对象不过滤
+        document.querySelectorAll('#objFilters input[type=checkbox]').forEach(ck=>{ if(ck.value===obj) ck.checked=true; });
+        applyObjectFilters(); applyLOD();
+        cy.fit(n.closedNeighborhood(), 80);
+        n.select();
+      } else {
+        alert('未找到匹配字段');
+      }
+    }
+  </script>
+</body>
+</html>

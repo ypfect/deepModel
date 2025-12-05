@@ -1,0 +1,60 @@
+graph TD
+    subgraph ArReceiptItem
+        ArReceiptItem_originAmount[ArReceiptItem.originAmount]
+        ArReceiptItem_originShouldArAmount[ArReceiptItem.originShouldArAmount]
+        ArReceiptItem_originNotRedAmount[ArReceiptItem.originNotRedAmount]
+        ArReceiptItem_originRealDoDeclaredAmount[ArReceiptItem.originRealDoDeclaredAmount]
+        ArReceiptItem_receiptStatusId[ArReceiptItem.receiptStatusId]
+        ArReceiptItem_originDoDeclaredAmount[ArReceiptItem.originDoDeclaredAmount]
+        ArReceiptItem_originDoneDeclaredAmount[ArReceiptItem.originDoneDeclaredAmount]
+        ArReceiptItem_originReceiptReservedAmount[ArReceiptItem.originReceiptReservedAmount]
+        ArReceiptItem_originNoticeReceiptReservedAmount[ArReceiptItem.originNoticeReceiptReservedAmount]
+        ArReceiptItem_originRedAmount[ArReceiptItem.originRedAmount]
+        ArReceiptItem_originReceiptAmount[ArReceiptItem.originReceiptAmount]
+    end
+    subgraph ArReceipt
+        ArReceipt_originRedAmount[ArReceipt.originRedAmount]
+        ArReceipt_originRedEffAmount[ArReceipt.originRedEffAmount]
+        ArReceipt_originReceivableAmountForEffective[ArReceipt.originReceivableAmountForEffective]
+        ArReceipt_originAmount[ArReceipt.originAmount]
+        ArReceipt_originRealDoDeclaredAmount[ArReceipt.originRealDoDeclaredAmount]
+        ArReceipt_receiptStatusId[ArReceipt.receiptStatusId]
+        ArReceipt_originNotRedAmount[ArReceipt.originNotRedAmount]
+        ArReceipt_originShouldArAmount[ArReceipt.originShouldArAmount]
+        ArReceipt_originDoDeclaredAmount[ArReceipt.originDoDeclaredAmount]
+        ArReceipt_originDoneDeclaredAmount[ArReceipt.originDoneDeclaredAmount]
+        ArReceipt_originReceivableAmount[ArReceipt.originReceivableAmount]
+    end
+    ArReceiptItem_originAmount -- intra --> ArReceiptItem_originShouldArAmount
+    ArReceiptItem_originAmount -- intra --> ArReceiptItem_originNotRedAmount
+    ArReceiptItem_originAmount -- intra --> ArReceiptItem_originRealDoDeclaredAmount
+    ArReceiptItem_originAmount -- intra --> ArReceiptItem_receiptStatusId
+    ArReceiptItem_originAmount -- intra --> ArReceiptItem_originDoDeclaredAmount
+    ArReceiptItem_originAmount -- writeBack --> ArReceipt_originRedAmount
+    ArReceiptItem_originAmount -- writeBack --> ArReceipt_originRedEffAmount
+    ArReceiptItem_originAmount -- writeBack --> ArReceipt_originReceivableAmountForEffective
+    ArReceiptItem_originAmount -- writeBack --> ArReceipt_originAmount
+    ArReceiptItem_originDoneDeclaredAmount -- intra --> ArReceiptItem_originShouldArAmount
+    ArReceiptItem_originReceiptReservedAmount -- intra --> ArReceiptItem_originShouldArAmount
+    ArReceiptItem_originNoticeReceiptReservedAmount -- intra --> ArReceiptItem_originShouldArAmount
+    ArReceiptItem_originRedAmount -- intra --> ArReceiptItem_originNotRedAmount
+    ArReceiptItem_originRealDoDeclaredAmount -- writeBack --> ArReceipt_originRealDoDeclaredAmount
+    ArReceiptItem_originDoneDeclaredAmount -- intra --> ArReceiptItem_originRealDoDeclaredAmount
+    ArReceiptItem_originReceiptReservedAmount -- intra --> ArReceiptItem_originRealDoDeclaredAmount
+    ArReceiptItem_originNoticeReceiptReservedAmount -- intra --> ArReceiptItem_originRealDoDeclaredAmount
+    ArReceiptItem_receiptStatusId -- writeBack --> ArReceipt_receiptStatusId
+    ArReceiptItem_originReceiptReservedAmount -- intra --> ArReceiptItem_receiptStatusId
+    ArReceiptItem_originDoneDeclaredAmount -- intra --> ArReceiptItem_receiptStatusId
+    ArReceiptItem_originNoticeReceiptReservedAmount -- intra --> ArReceiptItem_receiptStatusId
+    ArReceiptItem_originDoneDeclaredAmount -- intra --> ArReceiptItem_originDoDeclaredAmount
+    ArReceipt_originRedAmount -- intra --> ArReceipt_originNotRedAmount
+    ArReceipt_originAmount -- intra --> ArReceipt_originShouldArAmount
+    ArReceipt_originAmount -- intra --> ArReceipt_originDoDeclaredAmount
+    ArReceipt_originAmount -- intra --> ArReceipt_originNotRedAmount
+    ArReceiptItem_originDoneDeclaredAmount -- intra --> ArReceiptItem_originReceiptAmount
+    ArReceiptItem_originDoneDeclaredAmount -- writeBack --> ArReceipt_originDoneDeclaredAmount
+    ArReceiptItem_originReceiptReservedAmount -- intra --> ArReceiptItem_originReceiptAmount
+    ArReceiptItem_originNoticeReceiptReservedAmount -- intra --> ArReceiptItem_originReceiptAmount
+    ArReceipt_originDoneDeclaredAmount -- intra --> ArReceipt_originShouldArAmount
+    ArReceipt_originReceivableAmount -- intra --> ArReceipt_originShouldArAmount
+    ArReceipt_originDoneDeclaredAmount -- intra --> ArReceipt_originDoDeclaredAmount
