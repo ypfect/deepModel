@@ -25,6 +25,16 @@ public class ImpactController {
         return "ok";
     }
 
+    @GetMapping("/api/impact/meta/objects")
+    public Set<String> getObjects() {
+        return analyzerService.getAllObjectTypes();
+    }
+
+    @GetMapping("/api/impact/meta/fields")
+    public List<String> getFields(@RequestParam("objectType") String objectType) {
+        return analyzerService.getFieldsForObject(objectType);
+    }
+
     // 新增：字段详情
     @GetMapping("/api/impact/fieldInfo")
     public BaseappObjectField fieldInfo(@RequestParam("objectType") String objectType,
@@ -146,6 +156,12 @@ public class ImpactController {
                                                     @RequestParam("targetObject") String targetObject,
                                                     @RequestParam("type") String type){
         return analyzerService.objectEdgeDetails(objectType, field, depth, relType, sourceObject, targetObject, type);
+    }
+
+    // ===== 调试接口：查看视图依赖关系 =====
+    @GetMapping("/api/debug/viewDeps")
+    public Map<String, Object> debugViewDeps() {
+        return analyzerService.getViewDependenciesDebugInfo();
     }
 
     // ===== 解释接口 =====

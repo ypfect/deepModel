@@ -8,7 +8,12 @@ import java.util.List;
 public interface BaseappObjectFieldMapper {
     List<BaseappObjectField> selectByObjectType(@Param("objectType") String objectType);
 
-    List<BaseappObjectField> selectWriteBackCandidates(@Param("objectType") String objectType);
+    List<BaseappObjectField> selectWriteBackCandidates();
 
     List<BaseappObjectField> selectAll();
+    
+    /**
+     * 查询所有视图定义（name 包含 "View" 的对象）
+     */
+    List<String> selectViewDefinitions();
 }

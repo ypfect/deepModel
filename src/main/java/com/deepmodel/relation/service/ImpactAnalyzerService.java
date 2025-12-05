@@ -17,6 +17,8 @@ import org.springframework.stereotype.Service;
 import javax.annotation.PostConstruct;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,6 +38,9 @@ public class ImpactAnalyzerService {
     // 缓存
     private volatile List<BaseappObjectField> allRows = Collections.emptyList();
     private final Map<String, List<BaseappObjectField>> rowsByObject = new ConcurrentHashMap<String, List<BaseappObjectField>>();
+    
+    // 视图依赖反向索引: SourceObject.field -> Set<ViewName.field>
+    private final Map<String, Set<String>> viewReverseDeps = new ConcurrentHashMap<>();
 
     public ImpactAnalyzerService(BaseappObjectFieldMapper mapper) {
         this.mapper = mapper;
@@ -44,6 +49,7 @@ public class ImpactAnalyzerService {
     @PostConstruct
     public void loadCache() {
         reload();
+        loadViews();
     }
 
     public synchronized void reload() {
@@ -52,7 +58,194 @@ public class ImpactAnalyzerService {
         rowsByObject.clear();
         rowsByObject.putAll(byObj);
         allRows = rows;
-        log.info("缓存加载完成: 对象数={}, 记录数={}", rowsByObject.size(), allRows.size());
+        
+        // 重新加载视图字段（因为 allRows 覆盖了）
+        loadViews();
+        
+        log.info("缓存加载完成: 对象数={}, 记录数={}, 视图={}", rowsByObject.size(), allRows.size(), viewReverseDeps.size());
+    }
+    
+    // 表名映射简单实现
+    private String tableToObject(String table) {
+        if (table == null) return null;
+        String t = table.toLowerCase();
+        // 命名规范: appName_tableName，截取第一个下划线后的部分作为对象名
+        int firstUnderscore = t.indexOf('_');
+        if (firstUnderscore > 0 && firstUnderscore < t.length() - 1) {
+            t = t.substring(firstUnderscore + 1);
+        }
+        String camelCase = ExprUtils.snakeToCamel(t); // 转为 camelCase
+        if (camelCase == null || camelCase.isEmpty()) return camelCase;
+        // 首字母大写转换为 PascalCase
+        return Character.toUpperCase(camelCase.charAt(0)) + camelCase.substring(1);
+    }
+
+    private void loadViews() {
+        viewReverseDeps.clear();
+        try {
+            // 从数据库查询所有视图定义
+            List<String> viewJsonList = mapper.selectViewDefinitions();
+            log.info("[视图加载] 从数据库查询到 {} 个视图定义", viewJsonList.size());
+            
+            if (viewJsonList.isEmpty()) {
+                log.warn("[视图加载] 数据库中没有视图定义");
+                return;
+            }
+            
+            int totalViewsLoaded = 0;
+            int totalSqlsParsed = 0;
+            
+            for (String viewJson : viewJsonList) {
+                try {
+                    JsonNode root = objectMapper.readTree(viewJson);
+                    String viewName = root.path("name").asText();
+                    if (viewName == null || viewName.isEmpty()) {
+                        log.warn("[视图加载] 视图名称为空，跳过");
+                        continue;
+                    }
+                    
+                    log.info("[视图加载] 开始加载视图: {}", viewName);
+                    
+                    List<BaseappObjectField> viewFields = new ArrayList<>();
+                    JsonNode fields = root.path("fields");
+                    if (fields.isArray()) {
+                        for (JsonNode f : fields) {
+                            BaseappObjectField bf = new BaseappObjectField();
+                            bf.setObjectType(viewName);
+                            bf.setName(f.path("name").asText());
+                            bf.setType(f.path("type").asText());
+                            bf.setTitle(f.path("title").asText());
+                            viewFields.add(bf);
+                        }
+                    }
+                    log.info("[视图加载] 视图字段数量={}", viewFields.size());
+                    
+                    // 注入到 Graph 数据源
+                    rowsByObject.put(viewName, viewFields);
+                    totalViewsLoaded++;
+                    
+                    JsonNode viewDefs = root.path("viewDef");
+                    if (viewDefs.isArray()) {
+                        log.info("[视图加载] viewDef SQL数量={}", viewDefs.size());
+                        for (JsonNode def : viewDefs) {
+                            String objectName = def.path("objectName").asText();
+                            String sqlText = def.path("sql").asText();
+                            log.info("[视图加载] 解析SQL: objectName={}, SQL长度={}", objectName, sqlText.length());
+                            parseSqlDependencies(viewName, sqlText);
+                            totalSqlsParsed++;
+                        }
+                    } else {
+                        log.warn("[视图加载] viewDef 不是数组");
+                    }
+                } catch (Exception e) {
+                    log.error("[视图加载] 解析视图定义失败，跳过此视图", e);
+                }
+            }
+            
+            log.info("[视图加载] 完成，加载视图数={}, 解析SQL数={}, viewReverseDeps总条目数={}", 
+                totalViewsLoaded, totalSqlsParsed, viewReverseDeps.size());
+            
+            // 输出前5条依赖关系示例
+            int count = 0;
+            for (Map.Entry<String, Set<String>> entry : viewReverseDeps.entrySet()) {
+                if (count++ < 5) {
+                    log.info("[视图加载] 依赖示例: {} -> {}", entry.getKey(), entry.getValue());
+                }
+            }
+        } catch (Exception e) {
+            log.error("加载视图定义失败", e);
+        }
+    }
+    
+    private void parseSqlDependencies(String viewName, String sql) {
+        if (sql == null || sql.isEmpty()) return;
+        // 简单清理
+        String cleanSql = sql.replace("${SystemFields}", " ");
+        
+        // 1. 提取 FROM 和 JOIN 的别名映射 Map<Alias, TableName>
+        Map<String, String> aliasMap = new HashMap<>();
+        // 支持 "FROM table alias" 和 "FROM table AS alias" 以及 "FROM table"
+        Pattern tablePat = Pattern.compile("\\b(FROM|JOIN)\\s+([a-zA-Z0-9_]+)(?:\\s+(?:AS\\s+)?([a-zA-Z0-9_]+))?", Pattern.CASE_INSENSITIVE);
+        Matcher mTable = tablePat.matcher(cleanSql);
+        while (mTable.find()) {
+            String tableName = mTable.group(2);
+            String alias = mTable.group(3);
+            if (alias == null) alias = tableName; // 若无别名，使用表名本身作为别名
+            aliasMap.put(alias, tableName);
+        }
+        
+        log.info("[视图解析] 视图={}, 别名映射数量={}", viewName, aliasMap.size());
+        if (aliasMap.size() <= 3) {
+            log.info("[视图解析] 别名映射明细: {}", aliasMap);
+        }
+        
+        // 2. 提取 SELECT ... FROM 之间的内容
+        Pattern selectPat = Pattern.compile("SELECT\\s+(.+?)\\s+FROM", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        Matcher mSel = selectPat.matcher(cleanSql);
+        if (!mSel.find()) {
+            log.warn("[视图解析] 无法匹配 SELECT...FROM 语句");
+            return;
+        }
+        
+        String selectClause = mSel.group(1);
+        
+        // 3. 简单的逗号分割（忽略括号内的逗号）
+        List<String> columns = splitColumns(selectClause);
+        log.info("[视图解析] SELECT 子句列数={}", columns.size());
+        
+        int parsedCount = 0;
+        for (String colDef : columns) {
+            // 查找 AS alias (支持不带 AS 的列别名，但这比较困难，这里假设规范 SQL 都有 AS)
+            Pattern asPat = Pattern.compile("(.+?)\\s+AS\\s+([a-zA-Z0-9_]+)$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+            Matcher mAs = asPat.matcher(colDef.trim());
+            if (mAs.find()) {
+                String expr = mAs.group(1).trim();
+                String targetSnake = mAs.group(2).trim();
+                String targetCamel = ExprUtils.snakeToCamel(targetSnake);
+                
+                // 查找 expr 中的 alias.column
+                // 简单匹配: 单词.单词
+                Pattern refPat = Pattern.compile("\\b([a-zA-Z0-9_]+)\\.([a-zA-Z0-9_]+)\\b");
+                Matcher mRef = refPat.matcher(expr);
+                while (mRef.find()) {
+                    String alias = mRef.group(1);
+                    String col = mRef.group(2);
+                    String tableName = aliasMap.get(alias);
+                    if (tableName != null) {
+                        String srcObj = tableToObject(tableName);
+                        String srcField = ExprUtils.snakeToCamel(col);
+                        if (srcObj != null && srcField != null) {
+                            // 记录依赖: srcObj.srcField -> viewName.targetCamel
+                            String srcKey = srcObj + "." + srcField;
+                            String tgtKey = viewName + "." + targetCamel;
+                            viewReverseDeps.computeIfAbsent(srcKey, k -> new HashSet<>()).add(tgtKey);
+                            parsedCount++;
+                            if (parsedCount <= 5) {
+                                log.info("[视图解析] 依赖: {} -> {}", srcKey, tgtKey);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        log.info("[视图解析] 视图={}, 解析出依赖关系总数={}", viewName, parsedCount);
+    }
+    
+    private List<String> splitColumns(String text) {
+        List<String> list = new ArrayList<>();
+        int balance = 0;
+        int start = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '(') balance++;
+            else if (c == ')') balance--;
+            else if (c == ',' && balance == 0) {
+                list.add(text.substring(start, i));
+                start = i + 1;
+            }
+        }
+        list.add(text.substring(start));
+        return list;
     }
 
     private String canonicalFieldName(BaseappObjectField r){
@@ -71,6 +264,21 @@ public class ImpactAnalyzerService {
             }
         }
         return null;
+    }
+    
+    // Meta APIs for Frontend
+    public Set<String> getAllObjectTypes() {
+        return new TreeSet<>(rowsByObject.keySet());
+    }
+
+    public List<String> getFieldsForObject(String objectType) {
+        List<BaseappObjectField> rows = rowsByObject.get(objectType);
+        if (rows == null) return Collections.emptyList();
+        return rows.stream()
+                .map(this::canonicalFieldName)
+                .filter(Objects::nonNull)
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     private void fillNodeMeta(GraphModels.Node node){
@@ -230,8 +438,9 @@ public class ImpactAnalyzerService {
     public GraphModels.Graph analyze(String objectType, String fieldCamel, int depth, int relType, boolean includeUpstream){
         boolean includeWriteBack = (relType == 0 || relType == 1);
         boolean includeIntra = (relType == 0 || relType == 2);
+        boolean includeView = (relType == 0 || relType == 3);
 
-        log.info("analyze start object={}, field={}, depth={}, includeWB={}, includeIntra={}", objectType, fieldCamel, depth, includeWriteBack, includeIntra);
+        log.info("analyze start object={}, field={}, depth={}, includeWB={}, includeIntra={}, includeView={}", objectType, fieldCamel, depth, includeWriteBack, includeIntra, includeView);
         GraphModels.Graph g = new GraphModels.Graph();
         Set<String> nodeSet = new HashSet<String>();
         List<GraphModels.Edge> edges = g.edges;
@@ -281,6 +490,26 @@ public class ImpactAnalyzerService {
                     }
                 }
             }
+            if(includeView){
+                // 查找受当前字段影响的视图字段
+                Set<String> views = viewReverseDeps.get(cur);
+                log.info("[视图查询] 当前节点={}, 查询到视图依赖数={}", cur, views != null ? views.size() : 0);
+                if(views != null){
+                    for(String viewId : views){
+                        log.info("[视图查询] 添加视图边: {} -> {}", cur, viewId);
+                        addEdgeIfAbsent(edges, edgeSet, cur, viewId, "view");
+                        if(!nodeSet.contains(viewId)){
+                            nodeSet.add(viewId);
+                            int dotV = viewId.indexOf('.');
+                            GraphModels.Node n = new GraphModels.Node(viewId.substring(0, dotV), viewId.substring(dotV+1));
+                            fillNodeMeta(n);
+                            g.nodes.add(n);
+                            q.offer(viewId); level.put(viewId, d+1);
+                        }
+                    }
+                }
+            }
+            
             if(includeUpstream){
                 List<String> upstream = buildIntraUpstreamDependencies(obj, fld);
                 if(includeIntra){
@@ -365,6 +594,8 @@ public class ImpactAnalyzerService {
                     String expr = info!=null? (info.getTriggerExpr()!=null? info.getTriggerExpr(): (info.getExpression()!=null? info.getExpression(): info.getVirtualExpr())) : null;
                     String srcField = src.substring(src.indexOf('.')+1);
                     reason = expr!=null? ("由表达式计算，包含 " + srcField) : ("依赖 " + srcField);
+                }else if("view".equals(e.type)){
+                    reason = "视图映射: " + src + " -> " + dst;
                 }else{
                     // writeBack：根据写回表达式（避免与目标字段重复展示）
                     int dot = dst.indexOf('.'); String obj = dst.substring(0,dot); String fld = dst.substring(dot+1);
@@ -434,5 +665,29 @@ public class ImpactAnalyzerService {
             }
         }
         return out;
+    }
+    
+    /**
+     * 调试接口：返回视图依赖关系的详细信息
+     */
+    public Map<String, Object> getViewDependenciesDebugInfo() {
+        Map<String, Object> result = new HashMap<>();
+        result.put("totalEntries", viewReverseDeps.size());
+        
+        // 转换为易读格式
+        Map<String, List<String>> readableFormat = new HashMap<>();
+        for (Map.Entry<String, Set<String>> entry : viewReverseDeps.entrySet()) {
+            readableFormat.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+        }
+        result.put("dependencies", readableFormat);
+        
+        // 统计信息
+        int totalMappings = 0;
+        for (Set<String> targets : viewReverseDeps.values()) {
+            totalMappings += targets.size();
+        }
+        result.put("totalMappings", totalMappings);
+        
+        return result;
     }
 }

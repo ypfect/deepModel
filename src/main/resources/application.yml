@@ -3,7 +3,7 @@ server:
 spring:
   datasource:
 #    url: jdbc:postgresql://localhost:5432/testapp
-    url: jdbc:postgresql://postgres.hotfix-aws-1.e7link.com:5432/tenant-public
+    url: jdbc:postgresql://postgres.nx-temp12-k8s.e7link.com:5432/tenant-public
     username: postgres
 #    password: 123
     password: stet44{czars

@@ -37,4 +37,11 @@
     from baseapp_object_field
   </select>
 
+  <select id="selectViewDefinitions" resultType="string">
+    select content::text
+    from baseapp_system_metadata
+    where name like '%View%'
+      and is_deleted = false
+  </select>
+
 </mapper>

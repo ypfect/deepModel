@@ -54,21 +54,41 @@ public class ExprUtils {
             String id = (dot>=0 && dot<tok.length()-1) ? tok.substring(dot+1) : tok;
             String low = id.toLowerCase();
             if(SQL_STOPWORDS.contains(low)) continue;
-            // 下划线字段
-            if(id.matches("[a-z_][a-z0-9_]*")){
+            
+            // 修复：检查是否为有效字段标识符
+            if(id.matches("[a-zA-Z_][a-zA-Z0-9_]*")){
+                // 下划线字段转驼峰
                 if(id.indexOf('_')>=0){
                     String camel = snakeToCamel(id);
                     if(!camel.isEmpty()) out.add(camel);
-                } else {
-                    // 全小写无下划线，通常不是字段（可能别名/函数），忽略
+                } 
+                // camelCase 字段：首字母小写且包含大写
+                else if(id.length()>1 && Character.isLowerCase(id.charAt(0)) && containsUppercase(id)){
+                    out.add(id);
+                }
+                // 纯小写字段（如 amount, id 等）- 这是修复的关键
+                else if(id.matches("[a-z][a-z0-9]*") && id.length() >= 2){
+                    // 排除明显的 SQL 关键字和常见函数名
+                    if(!isCommonSqlFunction(id)) {
+                        out.add(id);
+                    }
                 }
                 continue;
             }
-            // camelCase 字段：首字母小写且包含大写
-            if(id.length()>1 && Character.isLowerCase(id.charAt(0)) && containsUppercase(id)){
-                out.add(id);
-            }
         }
         return out;
+    }
+    
+    /**
+     * 判断是否为常见的 SQL 函数名或关键字
+     */
+    private static boolean isCommonSqlFunction(String id) {
+        Set<String> commonFunctions = new HashSet<String>(Arrays.asList(
+            "select", "from", "where", "insert", "update", "delete", "create", "drop", "alter",
+            "limit", "offset", "desc", "asc", "into", "values", "set", "table", "index",
+            "char", "varchar", "text", "int", "bigint", "decimal", "date", "time", "timestamp",
+            "year", "month", "day", "hour", "minute", "second"
+        ));
+        return commonFunctions.contains(id.toLowerCase());
     }
 }
