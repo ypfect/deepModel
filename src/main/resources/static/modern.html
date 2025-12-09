@@ -258,10 +258,13 @@
                             <h2>{{ explainData.rootObject }}.{{ explainData.rootField }}</h2>
                             <div style="color:#64748b">归因分析路径</div>
                         </div>
-                        <div v-for="group in explainData.groups" :key="group.object" class="explain-card">
+                        <div v-for="group in filteredExplainData" :key="group.object" class="explain-card">
                             <div style="padding: 12px 24px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; font-weight: 600;">
                                 <el-icon style="vertical-align: middle; margin-right: 6px;"><Box /></el-icon>
-                                {{ group.object }}
+                                <span :style="{ color: group.object.endsWith('View') ? '#8b5cf6' : '#2563eb' }">
+                                    {{ group.object }}
+                                    <span v-if="group.object.endsWith('View')" style="font-size: 11px; font-weight: normal;">(视图)</span>
+                                </span>
                             </div>
                             <div v-for="field in group.fields" :key="field.field" style="border-bottom: 1px solid #f1f5f9;">
                                 <div style="padding: 12px 24px;">
@@ -269,9 +272,9 @@
                                     <div v-for="(step, idx) in field.steps" :key="idx" class="step-item" :class="getStepClass(step.type)">
                                         <div style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
                                             <span class="badge" :class="getBadgeClass(step.type)">{{ step.type }}</span>
-                                            <span>{{ step.source }}</span>
+                                            <span :style="getObjectStyle(step.source)">{{ step.source }}</span>
                                             <el-icon color="#94a3b8"><Right /></el-icon>
-                                            <span>{{ step.target }}</span>
+                                            <span :style="getObjectStyle(step.target)">{{ step.target }}</span>
                                         </div>
                                         <div v-if="step.reason" style="margin-top: 6px; font-size: 12px; color: #64748b; background: #f8fafc; padding: 4px 8px; border-radius: 4px;">
                                             {{ step.reason }}
@@ -296,7 +299,7 @@
             console.error('Global Error:', msg, url, line);
         };
 
-        const { createApp, ref, reactive, onMounted, watch, nextTick } = Vue;
+        const { createApp, ref, reactive, onMounted, watch, nextTick, computed } = Vue;
         const { ElMessage } = ElementPlus;
 
         // 注册 Cytoscape 插件
@@ -575,10 +578,53 @@
                             }
                         });
                     });
+                    
+                    // 简单适配：不重新布局，只调整视角
+                    nextTick(() => {
+                        const visibleNodes = cy.nodes().not('.hidden-obj');
+                        console.log('可见节点数:', visibleNodes.length);
+                        
+                        if(visibleNodes.length > 0) {
+                            // 计算可见节点的边界框
+                            const bb = visibleNodes.boundingBox();
+                            console.log('可见区域:', bb);
+                            
+                            // 使用更大的 padding 和动画
+                            cy.animate({
+                                fit: {
+                                    eles: visibleNodes,
+                                    padding: 80
+                                },
+                                duration: 300,
+                                easing: 'ease-out'
+                            });
+                            
+                            ElMessage.success(`已聚焦 ${visibleSet.size} 个对象`);
+                        } else {
+                            ElMessage.info('没有可见的对象');
+                        }
+                    });
                 };
 
                 const getStepClass = (t) => ({ 'step-intra': t==='intra', 'step-wb': t==='writeBack', 'step-view': t==='view' });
                 const getBadgeClass = (t) => ({ 'badge-blue': t==='intra', 'badge-green': t==='writeBack', 'badge-purple': t==='view' });
+                
+                // 计算过滤后的归因数据
+                const filteredExplainData = computed(() => {
+                    if(!explainData.value || visibleObjects.value.length === 0) return [];
+                    const visibleSet = new Set(visibleObjects.value);
+                    return explainData.value.groups.filter(group => visibleSet.has(group.object));
+                });
+                
+                // 获取对象样式（区分视图和普通对象）
+                const getObjectStyle = (fieldPath) => {
+                    const objName = fieldPath.split('.')[0];
+                    if(objName.endsWith('View')) {
+                        return { color: '#8b5cf6', fontWeight: '600' };
+                    } else {
+                        return { color: '#2563eb', fontWeight: '600' };
+                    }
+                };
 
                 onMounted(() => {
                     loadObjects();
@@ -592,10 +638,10 @@
                 return {
                     viewMode, isSidebarCollapsed, analyzing, metaLoading, fieldLoading,
                     objectOptions, fieldOptions, params, selectedNode, explainData,
-                    allObjects, visibleObjects,
+                    allObjects, visibleObjects, filteredExplainData,
                     handleObjectChange, runAnalysis, fitGraph, layoutGraph, focusOnNode,
                     selectAllObjects, deselectAllObjects, applyObjectFilter,
-                    getStepClass, getBadgeClass
+                    getStepClass, getBadgeClass, getObjectStyle
                 };
             }
         });
