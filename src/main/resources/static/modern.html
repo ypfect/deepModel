@@ -68,8 +68,25 @@
         /* 其他组件样式 */
         .floating-toolbar { position: absolute; top: 16px; right: 16px; background: rgba(255,255,255,0.9); padding: 8px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: flex; gap: 8px; z-index: 10; }
         
+        /* 统计面板 */
+        .stats-panel { position: absolute; top: 16px; left: 16px; background: rgba(255,255,255,0.95); padding: 16px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 10; min-width: 200px; }
+        .stats-item { margin-bottom: 12px; }
+        .stats-label { font-size: 12px; color: #64748b; margin-bottom: 4px; }
+        .stats-value { font-size: 18px; font-weight: 700; color: #0f172a; }
+        .stats-sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+        
+        /* 搜索框 */
+        .search-box { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.95); padding: 8px 16px; border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 10; display: flex; align-items: center; gap: 8px; min-width: 300px; }
+        .search-box input { border: none; outline: none; flex: 1; font-size: 14px; }
+        
+        /* 高亮样式 */
+        .node-highlighted { border-width: 3px !important; border-color: #f59e0b !important; background-color: #fef3c7 !important; }
+        .edge-highlighted { width: 4px !important; line-color: #f59e0b !important; target-arrow-color: #f59e0b !important; }
+        .path-highlighted { border-width: 3px !important; border-color: #10b981 !important; background-color: #d1fae5 !important; }
+        
         .explain-container { padding: 32px; overflow-y: auto; height: 100%; max-width: 1000px; margin: 0 auto; box-sizing: border-box; }
-        .explain-card { background: #fff; border-radius: 12px; margin-bottom: 24px; border: 1px solid #e2e8f0; overflow: hidden; }
+        .explain-card { border-radius: 12px; margin-bottom: 24px; border: 1px solid #e2e8f0; overflow: hidden; }
+        .explain-group-header { padding: 12px 24px; border-bottom: 1px solid #e2e8f0; font-weight: 600; }
         .step-item { padding: 16px 24px; border-left: 3px solid transparent; transition: background 0.2s; }
         .step-item:hover { background: #f8fafc; }
         .step-intra { border-left-color: #3b82f6; }
@@ -134,18 +151,29 @@
                         </div>
                         
                         <div class="config-item">
-                            <div class="config-label">关注字段</div>
+                            <div class="config-label">
+                                关注字段
+                                <el-tooltip content="支持多选字段进行批量分析" placement="top">
+                                    <el-icon style="margin-left: 4px; cursor: help;"><QuestionFilled /></el-icon>
+                                </el-tooltip>
+                            </div>
                             <el-select 
-                                v-model="params.field" 
+                                v-model="params.fields" 
                                 filterable 
                                 allow-create
                                 default-first-option
-                                placeholder="请选择字段..." 
+                                multiple
+                                collapse-tags
+                                collapse-tags-tooltip
+                                placeholder="请选择字段（可多选）..." 
                                 style="width: 100%"
                                 :disabled="!params.objectType"
                                 :loading="fieldLoading">
                                 <el-option v-for="item in fieldOptions" :key="item" :label="item" :value="item"></el-option>
                             </el-select>
+                            <div v-if="params.fields && params.fields.length > 0" style="margin-top: 8px; font-size: 12px; color: #64748b;">
+                                已选择 {{ params.fields.length }} 个字段
+                            </div>
                         </div>
                         
                         <el-divider border-style="dashed"></el-divider>
@@ -219,9 +247,59 @@
                 <!-- Graph View -->
                 <div v-show="viewMode === 'graph'" style="height: 100%; width: 100%; position: relative;">
                     <div id="cy-container"></div>
+                    
+                    <!-- 统计面板 -->
+                    <div v-if="graphStats" class="stats-panel">
+                        <div class="stats-item">
+                            <div class="stats-label">影响对象数</div>
+                            <div class="stats-value">{{ graphStats.objectCount }}</div>
+                        </div>
+                        <div class="stats-item">
+                            <div class="stats-label">影响字段数</div>
+                            <div class="stats-value">{{ graphStats.fieldCount }}</div>
+                        </div>
+                        <div class="stats-item">
+                            <div class="stats-label">关系边数</div>
+                            <div class="stats-value">{{ graphStats.edgeCount }}</div>
+                            <div class="stats-sub">
+                                Intra: {{ graphStats.edgeByType.intra || 0 }} | 
+                                WriteBack: {{ graphStats.edgeByType.writeBack || 0 }} | 
+                                View: {{ graphStats.edgeByType.view || 0 }}
+                            </div>
+                        </div>
+                        <div class="stats-item">
+                            <div class="stats-label">最大深度</div>
+                            <div class="stats-value">{{ graphStats.maxDepth }}</div>
+                        </div>
+                        <div v-if="graphStats.pathCount > 0" class="stats-item">
+                            <div class="stats-label">路径数</div>
+                            <div class="stats-value">{{ graphStats.pathCount }}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 搜索框 -->
+                    <div class="search-box">
+                        <el-icon><Search /></el-icon>
+                        <input 
+                            v-model="searchQuery" 
+                            @input="handleSearchInput"
+                            @keyup.enter="handleSearch"
+                            placeholder="搜索对象或字段（输入后按Enter或等待自动搜索）..." 
+                            type="text" />
+                        <el-button 
+                            v-if="searchQuery" 
+                            link 
+                            size="small" 
+                            @click="clearSearch">
+                            <el-icon><Close /></el-icon>
+                        </el-button>
+                    </div>
+                    
                     <div class="floating-toolbar">
                         <el-button circle @click="fitGraph" title="适应屏幕">📐</el-button>
                         <el-button circle @click="layoutGraph" title="重新布局">🔄</el-button>
+                        <el-button v-if="selectedNode" circle @click="fitToRelatedNodes" title="聚焦关联节点">🎯</el-button>
+                        <el-button v-if="searchQuery" circle @click="highlightPath" title="高亮路径">🔍</el-button>
                     </div>
                     <!-- Detail Drawer -->
                     <div class="detail-drawer" :class="{ visible: selectedNode }">
@@ -245,7 +323,8 @@
                                 <div class="code-box">{{ selectedNode.meta.expression }}</div>
                             </div>
 
-                            <el-button size="small" type="primary" plain style="width: 100%" @click="focusOnNode(selectedNode)">以此为起点分析</el-button>
+                            <el-button size="small" type="primary" plain style="width: 100%; margin-bottom: 8px;" @click="focusOnNode(selectedNode)">以此为起点分析</el-button>
+                            <el-button size="small" type="info" plain style="width: 100%" @click="fitToRelatedNodes">聚焦关联节点</el-button>
                         </div>
                     </div>
                 </div>
@@ -253,22 +332,30 @@
                 <!-- Explain View -->
                 <div v-show="viewMode === 'explain'" class="explain-container">
                     <el-empty v-if="!explainData" description="请先执行分析" :image-size="100"></el-empty>
-                    <div v-else>
+                        <div v-else>
                         <div style="text-align:center; margin-bottom: 24px;">
                             <h2>{{ explainData.rootObject }}.{{ explainData.rootField }}</h2>
                             <div style="color:#64748b">归因分析路径</div>
                         </div>
-                        <div v-for="group in filteredExplainData" :key="group.object" class="explain-card">
-                            <div style="padding: 12px 24px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; font-weight: 600;">
-                                <el-icon style="vertical-align: middle; margin-right: 6px;"><Box /></el-icon>
-                                <span :style="{ color: group.object.endsWith('View') ? '#8b5cf6' : '#2563eb' }">
-                                    {{ group.object }}
-                                    <span v-if="group.object.endsWith('View')" style="font-size: 11px; font-weight: normal;">(视图)</span>
-                                </span>
+                        <div v-for="group in filteredExplainData" :key="group.object" class="explain-card" :style="getGroupCardStyle(group.object)">
+                            <div class="explain-group-header">
+                                <div style="display:flex;align-items:center;justify-content:space-between;">
+                                    <div>
+                                        <el-icon style="vertical-align: middle; margin-right: 6px;"><Box /></el-icon>
+                                        <span :style="{ color: getObjectColor(group.object) }">
+                                            {{ group.object }}
+                                            <span v-if="group.object.endsWith('View')" style="font-size: 11px; font-weight: normal;">(视图)</span>
+                                        </span>
+                                    </div>
+                                    <el-button size="small" text type="primary" @click="copyGroupExplain(group)">复制整个对象</el-button>
+                                </div>
                             </div>
                             <div v-for="field in group.fields" :key="field.field" style="border-bottom: 1px solid #f1f5f9;">
                                 <div style="padding: 12px 24px;">
-                                    <div style="font-weight: 600; color: #334155; margin-bottom: 8px;">{{ field.field }}</div>
+                                    <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <div style="font-weight: 600; color: #334155;">{{ field.field }}</div>
+                                        <el-button size="small" text type="primary" @click="copyFieldExplain(group.object, field)">复制</el-button>
+                                    </div>
                                     <div v-for="(step, idx) in field.steps" :key="idx" class="step-item" :class="getStepClass(step.type)">
                                         <div style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
                                             <span class="badge" :class="getBadgeClass(step.type)">{{ step.type }}</span>
@@ -324,10 +411,20 @@
                 // 对象过滤
                 const allObjects = ref([]);
                 const visibleObjects = ref([]);
+                
+                // 搜索和高亮
+                const searchQuery = ref('');
+                const highlightedNodes = ref(new Set());
+                const highlightedEdges = ref(new Set());
+                const pathNodes = ref(new Set());
+                let searchDebounceTimer = null; // 防抖定时器
+                
+                // 统计信息
+                const graphStats = ref(null);
 
                 const params = reactive({
                     objectType: '',
-                    field: '',
+                    fields: [], // 改为数组支持多选
                     depth: 3,
                     direction: 'downstream',
                     relTypes: ['intra', 'writeBack', 'view']
@@ -337,19 +434,55 @@
                     metaLoading.value = true;
                     try {
                         const res = await fetch('/api/impact/meta/objects');
-                        if(res.ok) objectOptions.value = await res.json();
+                        if(res.ok) {
+                            const data = await res.json();
+                            // bill 类型对象优先，其余按名称排序
+                            const score = (name) => {
+                                const n = String(name || '').toLowerCase();
+                                // 名称中包含 bill 的排在前面
+                                return n.includes('bill') ? 0 : 1;
+                            };
+                            objectOptions.value = data.sort((a, b) => {
+                                const sa = score(a);
+                                const sb = score(b);
+                                if (sa !== sb) return sa - sb;
+                                return String(a).localeCompare(String(b));
+                            });
+                        }
                     } catch(e) { ElMessage.error('加载对象列表失败'); } 
                     finally { metaLoading.value = false; }
                 };
 
                 const handleObjectChange = async (val) => {
-                    params.field = '';
+                    params.fields = []; // 清空字段选择
                     fieldOptions.value = [];
                     if(!val) return;
                     fieldLoading.value = true;
                     try {
                         const res = await fetch(`/api/impact/meta/fields?objectType=${encodeURIComponent(val)}`);
-                        if(res.ok) fieldOptions.value = await res.json();
+                        if(res.ok) {
+                            const list = await res.json();
+                            // 根据真实字段类型排序：BigDecimal 优先，其余按名称
+                            const enriched = await Promise.all(list.map(async (name) => {
+                                try {
+                                    const infoRes = await fetch(`/api/impact/fieldInfo?objectType=${encodeURIComponent(val)}&field=${encodeURIComponent(name)}`);
+                                    if (infoRes.ok) {
+                                        const info = await infoRes.json();
+                                        return { name, type: info && info.type ? info.type : null };
+                                    }
+                                } catch (e) {
+                                    console.warn('load fieldInfo failed', e);
+                                }
+                                return { name, type: null };
+                            }));
+                            enriched.sort((a, b) => {
+                                const sa = a.type === 'BigDecimal' ? 0 : 1;
+                                const sb = b.type === 'BigDecimal' ? 0 : 1;
+                                if (sa !== sb) return sa - sb;
+                                return String(a.name).localeCompare(String(b.name));
+                            });
+                            fieldOptions.value = enriched.map(e => e.name);
+                        }
                     } catch(e) { ElMessage.error('加载字段列表失败'); }
                     finally { fieldLoading.value = false; }
                 };
@@ -397,7 +530,18 @@
                             { selector: 'edge[type="intra"]', style: { 'line-color': '#3b82f6', 'target-arrow-color': '#3b82f6' } },
                             { selector: 'edge[type="writeBack"]', style: { 'line-color': '#10b981', 'target-arrow-color': '#10b981', 'line-style': 'dashed' } },
                             { selector: 'edge[type="view"]', style: { 'line-color': '#8b5cf6', 'target-arrow-color': '#8b5cf6' } },
-                            { selector: '.hidden-obj', style: { 'display': 'none' } }
+                            { selector: '.hidden-obj', style: { 'display': 'none' } },
+                            { selector: '.node-highlighted', style: { 'border-width': 3, 'border-color': '#f59e0b', 'background-color': '#fef3c7' } },
+                            { selector: '.edge-highlighted', style: { 'width': 4, 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b' } },
+                            { selector: '.path-highlighted', style: { 'border-width': 3, 'border-color': '#10b981', 'background-color': '#d1fae5' } },
+                            { selector: '.node-selected', style: { 'border-width': 3, 'border-color': '#3b82f6', 'background-color': '#dbeafe', 'z-index': 10 } },
+                            { selector: '.node-related', style: { 'border-width': 2, 'border-color': '#f59e0b', 'background-color': '#fef3c7', 'z-index': 5 } },
+                            // 关联边的样式，使用橙色以区别于视图映射的紫色
+                            { selector: '.edge-related', style: { 'width': 4, 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b', 'z-index': 5, 'opacity': 1 } },
+                            // 确保所有类型的边都能被高亮（更具体的选择器优先级更高）
+                            { selector: 'edge.edge-related[type="writeBack"]', style: { 'width': 4, 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b', 'line-style': 'solid' } },
+                            { selector: 'edge.edge-related[type="intra"]', style: { 'width': 4, 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b' } },
+                            { selector: 'edge.edge-related[type="view"]', style: { 'width': 4, 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b' } }
                         ],
                         wheelSensitivity: 0.3
                     });
@@ -409,43 +553,169 @@
                             parentLabel: n.parent().data('label'),
                             meta: n.data('meta')
                         };
+                        // 高亮选中的节点及其关联节点和边
+                        highlightRelatedNodes(n);
                     });
                     cyInstance.value.on('tap', evt => {
-                        if(evt.target === cyInstance.value) selectedNode.value = null;
+                        if(evt.target === cyInstance.value) {
+                            selectedNode.value = null;
+                            // 清除关联高亮
+                            clearRelatedHighlight();
+                        }
                     });
                 };
 
                 const runAnalysis = async () => {
-                    if(!params.objectType || !params.field) return ElMessage.warning('请选择对象和字段');
+                    if(!params.objectType || !params.fields || params.fields.length === 0) {
+                        return ElMessage.warning('请选择对象和至少一个字段');
+                    }
                     analyzing.value = true;
                     try {
+                        const includeViewUI = params.relTypes.includes('view');
                         // Map checkboxes to relType int
                         let r = 0; // Default all
-                        // Logic: if not all selected, send combination? Backend only supports single int currently:
-                        // 0=All, 1=WB, 2=Intra, 3=View.
-                        // If multiple selected, we might need backend update or just send 0 (All) if >1 selected.
-                        // For now, if single selected, send specific. If multiple or none, send 0.
                         if(params.relTypes.length === 1) {
                             if(params.relTypes.includes('writeBack')) r = 1;
                             else if(params.relTypes.includes('intra')) r = 2;
                             else if(params.relTypes.includes('view')) r = 3;
                         }
                         
-                        const [gRes, eRes] = await Promise.all([
-                            fetch(`/api/impact?objectType=${encodeURIComponent(params.objectType)}&field=${encodeURIComponent(params.field)}&depth=${params.depth}&relType=${r}&direction=${params.direction}`),
-                            fetch(`/api/impact/explain?objectType=${encodeURIComponent(params.objectType)}&field=${encodeURIComponent(params.field)}&depth=${params.depth}&relType=${r}`)
-                        ]);
+                        // 批量分析：如果选择了多个字段，使用批量接口
+                        let gRes;
+                        if(params.fields.length === 1) {
+                            // 单个字段，使用原有接口
+                            gRes = await fetch(`/api/impact?objectType=${encodeURIComponent(params.objectType)}&field=${encodeURIComponent(params.fields[0])}&depth=${params.depth}&relType=${r}&direction=${params.direction}`);
+                        } else {
+                            // 多个字段，使用批量接口
+                            const fieldsStr = params.fields.join(',');
+                            gRes = await fetch(`/api/impact/batch?objectType=${encodeURIComponent(params.objectType)}&fields=${encodeURIComponent(fieldsStr)}&depth=${params.depth}&relType=${r}&direction=${params.direction}`);
+                        }
                         
-                        const gData = await gRes.json();
-                        explainData.value = await eRes.json();
+                        // 解释接口暂时只支持单个字段，使用第一个字段
+                        const eRes = params.fields.length > 0 ? 
+                            await fetch(`/api/impact/explain?objectType=${encodeURIComponent(params.objectType)}&field=${encodeURIComponent(params.fields[0])}&depth=${params.depth}&relType=${r}`) :
+                            Promise.resolve({ ok: false });
+                        
+                        const gRaw = await gRes.json();
+                        let gData = gRaw;
+                        // 如果 UI 上未勾选“视图映射”，在前端过滤掉 view 类型的边和纯视图节点
+                        if (!includeViewUI && gRaw && Array.isArray(gRaw.edges) && Array.isArray(gRaw.nodes)) {
+                            const filteredEdges = gRaw.edges.filter(e => e.type !== 'view');
+                            const usedNodeIds = new Set();
+                            filteredEdges.forEach(e => {
+                                if (e.source) usedNodeIds.add(e.source);
+                                if (e.target) usedNodeIds.add(e.target);
+                            });
+                            const filteredNodes = gRaw.nodes.filter(n => {
+                                const id = n.id || (n.object && n.field ? `${n.object}.${n.field}` : null);
+                                if (!id) return false;
+                                if (!usedNodeIds.has(id)) return false;
+                                // 视图对象本身也隐藏
+                                return !n.object || !n.object.endsWith('View');
+                            });
+                            gData = Object.assign({}, gRaw, { nodes: filteredNodes, edges: filteredEdges });
+                        }
+
+                        let eData = await eRes.json();
+                        // 解释结果中也去掉 view 类型的步骤和只剩视图的分组
+                        if (!includeViewUI && eData && Array.isArray(eData.groups)) {
+                            const newGroups = eData.groups.map(g => {
+                                const newFields = (g.fields || []).map(f => {
+                                    const steps = (f.steps || []).filter(s => s.type !== 'view');
+                                    return Object.assign({}, f, { steps });
+                                }).filter(f => f.steps && f.steps.length > 0);
+                                return Object.assign({}, g, { fields: newFields });
+                            }).filter(g => g.fields && g.fields.length > 0);
+                            eData = Object.assign({}, eData, { groups: newGroups });
+                        }
+                        explainData.value = eData;
                         
                         renderGraph(gData);
+                        calculateStats(gData);
+                        
                         if(gData.nodes.length === 0) ElMessage.info('未找到相关路径');
-                        else ElMessage.success(`分析完成: ${gData.nodes.length} 节点`);
+                        else {
+                            const fieldCount = params.fields.length;
+                            ElMessage.success(`分析完成: ${gData.nodes.length} 节点, ${gData.edges.length} 边${fieldCount > 1 ? ` (${fieldCount}个字段)` : ''}`);
+                        }
                     } catch(e) {
                         console.error(e);
                         ElMessage.error('分析请求失败');
                     } finally { analyzing.value = false; }
+                };
+                
+                // 计算统计信息
+                const calculateStats = (data) => {
+                    if (!data || !data.nodes || !data.edges) {
+                        graphStats.value = null;
+                        return;
+                    }
+                    
+                    const objectSet = new Set();
+                    const fieldSet = new Set();
+                    const edgeByType = { intra: 0, writeBack: 0, view: 0 };
+                    const depthMap = new Map(); // nodeId -> depth
+                    
+                    // 构建图结构用于计算深度
+                    const graph = {};
+                    const inDegree = {};
+                    
+                    data.nodes.forEach(n => {
+                        objectSet.add(n.object);
+                        fieldSet.add(n.id);
+                        graph[n.id] = [];
+                        inDegree[n.id] = 0;
+                    });
+                    
+                    data.edges.forEach(e => {
+                        edgeByType[e.type] = (edgeByType[e.type] || 0) + 1;
+                        if (!graph[e.source]) graph[e.source] = [];
+                        graph[e.source].push(e.target);
+                        inDegree[e.target] = (inDegree[e.target] || 0) + 1;
+                    });
+                    
+                    // 找到起点节点（入度为0的节点）
+                    const roots = [];
+                    data.nodes.forEach(n => {
+                        if ((inDegree[n.id] || 0) === 0) {
+                            roots.push(n.id);
+                        }
+                    });
+                    
+                    // BFS计算深度
+                    const queue = [...roots];
+                    roots.forEach(r => depthMap.set(r, 0));
+                    
+                    while (queue.length > 0) {
+                        const current = queue.shift();
+                        const currentDepth = depthMap.get(current) || 0;
+                        
+                        (graph[current] || []).forEach(next => {
+                            if (!depthMap.has(next) || depthMap.get(next) > currentDepth + 1) {
+                                depthMap.set(next, currentDepth + 1);
+                                queue.push(next);
+                            }
+                        });
+                    }
+                    
+                    const maxDepth = Math.max(...Array.from(depthMap.values()), 0);
+                    
+                    // 计算路径数（简单估算：从根节点到所有叶子节点的路径）
+                    let pathCount = 0;
+                    const leafNodes = data.nodes.filter(n => {
+                        const outEdges = data.edges.filter(e => e.source === n.id);
+                        return outEdges.length === 0;
+                    });
+                    pathCount = leafNodes.length;
+                    
+                    graphStats.value = {
+                        objectCount: objectSet.size,
+                        fieldCount: fieldSet.size,
+                        edgeCount: data.edges.length,
+                        edgeByType,
+                        maxDepth,
+                        pathCount
+                    };
                 };
 
                 const renderGraph = (data) => {
@@ -527,14 +797,20 @@
                 };
                 const fitGraph = () => cyInstance.value.fit(null, 50);
                 
+                // 以选中节点为起点，在「新标签页」中打开分析视图
                 const focusOnNode = (n) => {
-                    // Extract object from parent id 'grp_X'
-                    const obj = n.parentLabel; 
-                    if(obj) {
-                        params.objectType = obj;
-                        params.field = n.label;
-                        runAnalysis();
-                    }
+                    const obj = n.parentLabel;
+                    if (!obj) return;
+                    
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('objectType', obj);
+                    url.searchParams.set('field', n.label);
+                    url.searchParams.set('direction', params.direction);
+                    url.searchParams.set('depth', String(params.depth));
+                    url.searchParams.set('relTypes', params.relTypes.join(','));
+                    
+                    // 新标签页打开
+                    window.open(url.toString(), '_blank');
                 };
                 
                 // 对象过滤方法
@@ -616,19 +892,448 @@
                     return explainData.value.groups.filter(group => visibleSet.has(group.object));
                 });
                 
-                // 获取对象样式（区分视图和普通对象）
+                // 仅使用 3 组柔和配色，对象按哈希轮询到 3 组里，整体不那么花
+                const COLOR_PRESETS = [
+                    { text: '#1d4ed8', bg: '#dbeafe' }, // 蓝
+                    { text: '#15803d', bg: '#dcfce7' }, // 绿
+                    { text: '#9a3412', bg: '#ffedd5' }  // 橙
+                ];
+
+                const pickColorPreset = (objName) => {
+                    let hash = 0;
+                    for (let i = 0; i < objName.length; i++) {
+                        hash = (hash * 31 + objName.charCodeAt(i)) >>> 0;
+                    }
+                    // 视图可以固定用第 1 组（比如蓝色），避免再引入新颜色
+                    if (objName.endsWith('View')) {
+                        return COLOR_PRESETS[0];
+                    }
+                    return COLOR_PRESETS[hash % COLOR_PRESETS.length];
+                };
+
+                // 对象文字颜色
+                const getObjectColor = (objName) => {
+                    return pickColorPreset(objName).text;
+                };
+
+                // 整个对象分组卡片的背景样式
+                const getGroupCardStyle = (objName) => {
+                    const preset = pickColorPreset(objName);
+                    return {
+                        backgroundColor: preset.bg,
+                        borderLeft: `4px solid ${preset.text}`
+                    };
+                };
+
+                // 获取对象样式（用于步骤里的 source/target）
                 const getObjectStyle = (fieldPath) => {
                     const objName = fieldPath.split('.')[0];
-                    if(objName.endsWith('View')) {
-                        return { color: '#8b5cf6', fontWeight: '600' };
+                    return { color: getObjectColor(objName), fontWeight: '600' };
+                };
+
+                const buildFieldExplainText = (objectName, field) => {
+                    const lines = [];
+                    // Header: object.field
+                    lines.push(`Field: ${objectName}.${field.field}`);
+                    // Steps: only type + from/to, no Chinese descriptions
+                    if (field.steps && field.steps.length > 0) {
+                        field.steps.forEach((s, idx) => {
+                            lines.push(`  ${idx + 1}. [${s.type}] ${s.source} -> ${s.target}`);
+                        });
+                    }
+                    return lines.join('\n');
+                };
+
+                const writeToClipboard = async (text) => {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(text);
                     } else {
-                        return { color: '#2563eb', fontWeight: '600' };
+                        const ta = document.createElement('textarea');
+                        ta.value = text;
+                        ta.style.position = 'fixed';
+                        ta.style.opacity = '0';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(ta);
                     }
                 };
 
-                onMounted(() => {
-                    loadObjects();
+                // 复制单个字段的归因信息
+                const copyFieldExplain = async (objectName, field) => {
+                    try {
+                        const text = buildFieldExplainText(objectName, field);
+                        await writeToClipboard(text);
+                        ElMessage.success('Copied');
+                    } catch (e) {
+                        console.error('复制失败', e);
+                        ElMessage.error('复制失败，请稍后重试');
+                    }
+                };
+
+                // 复制整个对象（所有字段）的归因信息
+                const copyGroupExplain = async (group) => {
+                    try {
+                        const blocks = [];
+                        blocks.push(`Object: ${group.object}`);
+                        if (group.fields && group.fields.length > 0) {
+                            group.fields.forEach((f, idx) => {
+                                blocks.push('');
+                                blocks.push(`==== Field ${idx + 1}: ${group.object}.${f.field} ====`);
+                                blocks.push(buildFieldExplainText(group.object, f));
+                            });
+                        }
+                        const text = blocks.join('\n');
+                        await writeToClipboard(text);
+                        ElMessage.success(`Copied object ${group.object}`);
+                    } catch (e) {
+                        console.error('复制整个对象失败', e);
+                        ElMessage.error('复制失败，请稍后重试');
+                    }
+                };
+                
+                // 搜索输入处理（防抖）
+                const handleSearchInput = () => {
+                    // 清除之前的定时器
+                    if (searchDebounceTimer) {
+                        clearTimeout(searchDebounceTimer);
+                    }
+                    
+                    // 如果输入框为空，立即清除搜索
+                    if (!searchQuery.value || !searchQuery.value.trim()) {
+                        clearSearch();
+                        return;
+                    }
+                    
+                    // 设置防抖：等待用户停止输入 500ms 后再搜索
+                    searchDebounceTimer = setTimeout(() => {
+                        handleSearch();
+                    }, 500);
+                };
+                
+                // 搜索功能
+                const handleSearch = () => {
+                    if (!cyInstance.value || !searchQuery.value) {
+                        clearSearch();
+                        return;
+                    }
+                    
+                    const query = searchQuery.value.toLowerCase().trim();
+                    if (!query) {
+                        clearSearch();
+                        return;
+                    }
+                    
+                    const cy = cyInstance.value;
+                    let matchedNodes;
+                    cy.batch(() => {
+                        // 清除之前的高亮
+                        cy.nodes().removeClass('node-highlighted');
+                        cy.edges().removeClass('edge-highlighted');
+                        
+                        // 搜索匹配的节点
+                        matchedNodes = cy.nodes().filter(node => {
+                            const label = node.data('label') || '';
+                            const parent = node.parent();
+                            const parentLabel = parent.length > 0 ? parent.data('label') || '' : '';
+                            const fullPath = `${parentLabel}.${label}`.toLowerCase();
+                            return fullPath.includes(query) || label.toLowerCase().includes(query) || parentLabel.toLowerCase().includes(query);
+                        });
+                        
+                        matchedNodes.forEach(node => {
+                            node.addClass('node-highlighted');
+                        });
+                        
+                        // 高亮连接到匹配节点的边
+                        matchedNodes.forEach(node => {
+                            node.connectedEdges().forEach(edge => {
+                                edge.addClass('edge-highlighted');
+                            });
+                        });
+                    });
+                    
+                    if (matchedNodes.length > 0) {
+                        // 聚焦到匹配的节点
+                        cy.animate({
+                            fit: {
+                                eles: matchedNodes,
+                                padding: 100
+                            },
+                            duration: 300
+                        });
+                        ElMessage.info(`找到 ${matchedNodes.length} 个匹配项`);
+                    } else {
+                        ElMessage.warning('未找到匹配项');
+                    }
+                };
+                
+                // 清除搜索高亮
+                const clearSearch = () => {
+                    // 清除防抖定时器
+                    if (searchDebounceTimer) {
+                        clearTimeout(searchDebounceTimer);
+                        searchDebounceTimer = null;
+                    }
+                    
+                    searchQuery.value = '';
+                    if (!cyInstance.value) return;
+                    const cy = cyInstance.value;
+                    cy.batch(() => {
+                        cy.nodes().removeClass('node-highlighted path-highlighted');
+                        cy.edges().removeClass('edge-highlighted');
+                    });
+                };
+                
+                // 高亮关联节点和边（只显示下游）
+                const highlightRelatedNodes = (selectedNode) => {
+                    if (!cyInstance.value) return;
+                    const cy = cyInstance.value;
+                    
+                    cy.batch(() => {
+                        // 清除之前的高亮
+                        clearRelatedHighlight();
+                        
+                        // 高亮选中的节点
+                        selectedNode.addClass('node-selected');
+                        
+                        const nodeId = selectedNode.id();
+                        
+                        // 手动查找所有以当前节点为source的边（下游边）
+                        // 包括所有类型的边：intra, writeBack, view
+                        const allEdges = cy.edges();
+                        const downstreamEdges = allEdges.filter(edge => {
+                            const sourceId = edge.data('source');
+                            return sourceId === nodeId;
+                        });
+                        
+                        console.log(`节点 ${nodeId} 的下游边数: ${downstreamEdges.length}`);
+                        downstreamEdges.forEach(edge => {
+                            console.log(`  边: ${edge.data('source')} -> ${edge.data('target')}, 类型: ${edge.data('type')}`);
+                        });
+                        
+                        // 高亮下游的边（包括回写边）
+                        downstreamEdges.forEach(edge => {
+                            edge.addClass('edge-related');
+                            
+                            // 找到边的目标节点并高亮
+                            const targetId = edge.data('target');
+                            const targetNode = cy.getElementById(targetId);
+                            if (targetNode.length > 0) {
+                                targetNode.addClass('node-related');
+                            }
+                        });
+                    });
+                };
+                
+                // 清除关联高亮
+                const clearRelatedHighlight = () => {
+                    if (!cyInstance.value) return;
+                    const cy = cyInstance.value;
+                    cy.batch(() => {
+                        cy.nodes().removeClass('node-selected node-related');
+                        cy.edges().removeClass('edge-related');
+                    });
+                };
+                
+                // 聚焦到关联节点（只显示下游）
+                const fitToRelatedNodes = () => {
+                    if (!cyInstance.value || !selectedNode.value) return;
+                    const cy = cyInstance.value;
+                    const node = cy.getElementById(selectedNode.value.id);
+                    if (node.length === 0) return;
+                    
+                    const nodeId = node.id();
+                    
+                    // 手动查找所有下游节点
+                    const allEdges = cy.edges();
+                    const downstreamNodeIds = new Set();
+                    allEdges.forEach(edge => {
+                        if (edge.data('source') === nodeId) {
+                            downstreamNodeIds.add(edge.data('target'));
+                        }
+                    });
+                    
+                    // 获取所有下游节点
+                    const downstreamNodes = cy.collection();
+                    downstreamNodeIds.forEach(id => {
+                        const targetNode = cy.getElementById(id);
+                        if (targetNode.length > 0) {
+                            downstreamNodes.merge(targetNode);
+                        }
+                    });
+                    
+                    // 合并选中节点和下游节点
+                    const relatedNodes = node.union(downstreamNodes);
+                    
+                    if (downstreamNodes.length > 0) {
+                        cy.animate({
+                            fit: {
+                                eles: relatedNodes,
+                                padding: 100
+                            },
+                            duration: 300
+                        });
+                        ElMessage.success(`已聚焦到 ${downstreamNodes.length} 个下游节点`);
+                    } else {
+                        ElMessage.info('该节点没有下游关联节点');
+                    }
+                };
+                
+                // 高亮路径（从起点到搜索到的节点）
+                const highlightPath = () => {
+                    if (!cyInstance.value || !searchQuery.value) return;
+                    
+                    const cy = cyInstance.value;
+                    const query = searchQuery.value.toLowerCase().trim();
+                    
+                    // 找到匹配的节点
+                    const targetNodes = cy.nodes().filter(node => {
+                        const label = node.data('label') || '';
+                        const parent = node.parent();
+                        const parentLabel = parent.length > 0 ? parent.data('label') || '' : '';
+                        const fullPath = `${parentLabel}.${label}`.toLowerCase();
+                        return fullPath.includes(query) || label.toLowerCase().includes(query) || parentLabel.toLowerCase().includes(query);
+                    });
+                    
+                    if (targetNodes.length === 0) {
+                        ElMessage.warning('未找到目标节点');
+                        return;
+                    }
+                    
+                    // 找到起点节点（通常是第一个字段节点）
+                    const rootNodes = cy.nodes('[type="field"]').filter(node => {
+                        const parent = node.parent();
+                        return parent.length > 0 && parent.data('label') === params.objectType;
+                    });
+                    
+                    if (rootNodes.length === 0) {
+                        ElMessage.warning('未找到起点节点');
+                        return;
+                    }
+                    
+                    cy.batch(() => {
+                        // 清除之前的高亮
+                        cy.nodes().removeClass('node-highlighted path-highlighted');
+                        cy.edges().removeClass('edge-highlighted');
+                        
+                        // 对每个目标节点，找到从起点到它的路径
+                        targetNodes.forEach(target => {
+                            const paths = [];
+                            rootNodes.forEach(root => {
+                                const path = findShortestPath(cy, root, target);
+                                if (path && path.length > 0) {
+                                    paths.push(path);
+                                }
+                            });
+                            
+                            // 高亮最短路径
+                            if (paths.length > 0) {
+                                const shortestPath = paths.reduce((min, p) => p.length < min.length ? p : min, paths[0]);
+                                shortestPath.forEach(node => {
+                                    node.addClass('path-highlighted');
+                                });
+                                shortestPath.forEach((node, idx) => {
+                                    if (idx < shortestPath.length - 1) {
+                                        const next = shortestPath[idx + 1];
+                                        const edge = node.edgesTo(next);
+                                        if (edge.length > 0) {
+                                            edge.addClass('edge-highlighted');
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    });
+                    
+                    // 聚焦到路径
+                    const pathNodes = targetNodes.union(
+                        cy.nodes('.path-highlighted')
+                    );
+                    if (pathNodes.length > 0) {
+                        cy.animate({
+                            fit: {
+                                eles: pathNodes,
+                                padding: 100
+                            },
+                            duration: 300
+                        });
+                    }
+                };
+                
+                // BFS查找最短路径
+                const findShortestPath = (cy, source, target) => {
+                    if (source.id() === target.id()) {
+                        return [source];
+                    }
+                    
+                    const queue = [[source]];
+                    const visited = new Set([source.id()]);
+                    
+                    while (queue.length > 0) {
+                        const path = queue.shift();
+                        const current = path[path.length - 1];
+                        
+                        const neighbors = current.outgoers('node');
+                        for (let i = 0; i < neighbors.length; i++) {
+                            const neighbor = neighbors[i];
+                            if (neighbor.id() === target.id()) {
+                                return [...path, neighbor];
+                            }
+                            if (!visited.has(neighbor.id())) {
+                                visited.add(neighbor.id());
+                                queue.push([...path, neighbor]);
+                            }
+                        }
+                    }
+                    
+                    return null;
+                };
+                
+                // 从 URL 参数初始化（用于"以此为起点分析"新标签页）
+                const initFromUrl = async () => {
+                    try {
+                        const sp = new URLSearchParams(window.location.search);
+                        const obj = sp.get('objectType');
+                        const field = sp.get('field');
+                        if (!obj || !field) return;
+
+                        // 方向、深度、关系类型
+                        const dir = sp.get('direction');
+                        if (dir === 'downstream' || dir === 'upstream') {
+                            params.direction = dir;
+                        }
+                        const depthStr = sp.get('depth');
+                        const depth = depthStr ? parseInt(depthStr, 10) : NaN;
+                        if (!Number.isNaN(depth) && depth >= 1 && depth <= 10) {
+                            params.depth = depth;
+                        }
+                        const relStr = sp.get('relTypes');
+                        if (relStr) {
+                            const arr = relStr.split(',').map(s => s.trim()).filter(Boolean);
+                            // 只保留合法值
+                            const valid = ['intra', 'writeBack', 'view'];
+                            const filtered = arr.filter(v => valid.includes(v));
+                            if (filtered.length > 0) {
+                                params.relTypes = filtered;
+                            }
+                        }
+
+                        // 设置对象 & 字段
+                        params.objectType = obj;
+                        await handleObjectChange(obj); // 加载字段列表
+                        params.fields = [field]; // 改为数组
+
+                        await nextTick();
+                        runAnalysis();
+                    } catch (e) {
+                        console.warn('initFromUrl 失败:', e);
+                    }
+                };
+                
+                onMounted(async () => {
+                    await loadObjects();
                     initCy();
+                    await initFromUrl();
                 });
                 
                 watch(viewMode, () => {
@@ -639,9 +1344,13 @@
                     viewMode, isSidebarCollapsed, analyzing, metaLoading, fieldLoading,
                     objectOptions, fieldOptions, params, selectedNode, explainData,
                     allObjects, visibleObjects, filteredExplainData,
+                    searchQuery, graphStats,
                     handleObjectChange, runAnalysis, fitGraph, layoutGraph, focusOnNode,
                     selectAllObjects, deselectAllObjects, applyObjectFilter,
-                    getStepClass, getBadgeClass, getObjectStyle
+                    handleSearchInput, handleSearch, clearSearch, highlightPath,
+                    highlightRelatedNodes, clearRelatedHighlight, fitToRelatedNodes,
+                    highlightRelatedNodes, clearRelatedHighlight, fitToRelatedNodes,
+                    getStepClass, getBadgeClass, getObjectStyle, getObjectColor, getGroupCardStyle, copyFieldExplain, copyGroupExplain
                 };
             }
         });

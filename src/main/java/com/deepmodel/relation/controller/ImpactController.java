@@ -52,6 +52,39 @@ public class ImpactController {
         return analyzerService.analyze(objectType, field, depth, relType, includeUpstream);
     }
 
+    /**
+     * 批量影响分析接口
+     * @param objectType 对象类型
+     * @param fields 字段列表，多个字段用逗号分隔
+     * @param depth 深度
+     * @param relType 关系类型
+     * @param direction 方向
+     * @return 合并后的分析结果
+     */
+    @GetMapping("/api/impact/batch")
+    public GraphModels.Graph impactBatch(@RequestParam("objectType") String objectType,
+                                         @RequestParam("fields") String fields,
+                                         @RequestParam(value = "depth", defaultValue = "3") int depth,
+                                         @RequestParam(value = "relType", defaultValue = "0") int relType,
+                                         @RequestParam(value = "direction", defaultValue = "downstream") String direction){
+        boolean includeUpstream = !"downstream".equalsIgnoreCase(direction);
+        // 解析字段列表
+        List<String> fieldList = new ArrayList<>();
+        if (fields != null && !fields.trim().isEmpty()) {
+            String[] parts = fields.split(",");
+            for (String part : parts) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) {
+                    fieldList.add(trimmed);
+                }
+            }
+        }
+        if (fieldList.isEmpty()) {
+            return new GraphModels.Graph();
+        }
+        return analyzerService.analyzeBatch(objectType, fieldList, depth, relType, includeUpstream);
+    }
+
     private static String safeId(String id){
         if(id == null) return "";
         return id.replaceAll("[^A-Za-z0-9_]", "_");

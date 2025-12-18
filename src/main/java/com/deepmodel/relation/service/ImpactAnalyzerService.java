@@ -17,9 +17,12 @@ import org.springframework.stereotype.Service;
 import javax.annotation.PostConstruct;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 
 @Service
 public class ImpactAnalyzerService {
@@ -41,6 +44,16 @@ public class ImpactAnalyzerService {
     
     // 视图依赖反向索引: SourceObject.field -> Set<ViewName.field>
     private final Map<String, Set<String>> viewReverseDeps = new ConcurrentHashMap<>();
+    
+    // 分析结果缓存（使用Guava Cache）
+    private final Cache<String, GraphModels.Graph> graphCache = CacheBuilder.newBuilder()
+            .maximumSize(1000) // 最多缓存1000个结果
+            .build();
+    
+    // 解释结果缓存
+    private final Cache<String, GraphModels.ExplainResponse> explainCache = CacheBuilder.newBuilder()
+            .maximumSize(1000) // 最多缓存1000个结果
+            .build();
 
     public ImpactAnalyzerService(BaseappObjectFieldMapper mapper) {
         this.mapper = mapper;
@@ -62,7 +75,38 @@ public class ImpactAnalyzerService {
         // 重新加载视图字段（因为 allRows 覆盖了）
         loadViews();
         
+        // 清除分析结果缓存（因为数据源已更新）
+        clearAnalysisCache();
+        
         log.info("缓存加载完成: 对象数={}, 记录数={}, 视图={}", rowsByObject.size(), allRows.size(), viewReverseDeps.size());
+    }
+    
+    /**
+     * 清除分析结果缓存
+     */
+    public void clearAnalysisCache() {
+        graphCache.invalidateAll();
+        explainCache.invalidateAll();
+        log.info("已清除分析结果缓存");
+    }
+    
+    /**
+     * 获取缓存统计信息
+     */
+    public Map<String, Object> getCacheStats() {
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("graphCacheSize", graphCache.size());
+        stats.put("explainCacheSize", explainCache.size());
+        stats.put("graphCacheStats", graphCache.stats().toString());
+        stats.put("explainCacheStats", explainCache.stats().toString());
+        return stats;
+    }
+    
+    /**
+     * 生成缓存key
+     */
+    private String cacheKey(String objectType, String field, int depth, int relType, boolean includeUpstream) {
+        return String.format("%s.%s.d%d.r%d.u%s", objectType, field, depth, relType, includeUpstream);
     }
     
     // 表名映射简单实现
@@ -436,6 +480,24 @@ public class ImpactAnalyzerService {
      *                        当为 false 时，只走从根出发的下游影响链，统计口径会与 explain 页面一致。
      */
     public GraphModels.Graph analyze(String objectType, String fieldCamel, int depth, int relType, boolean includeUpstream){
+        // 先检查缓存
+        String cacheKey = cacheKey(objectType, fieldCamel, depth, relType, includeUpstream);
+        try {
+            GraphModels.Graph cached = graphCache.get(cacheKey, () -> {
+                return analyzeInternal(objectType, fieldCamel, depth, relType, includeUpstream);
+            });
+            log.info("从缓存获取分析结果: {}", cacheKey);
+            return cached;
+        } catch (ExecutionException e) {
+            log.error("缓存获取失败，直接执行分析", e);
+            return analyzeInternal(objectType, fieldCamel, depth, relType, includeUpstream);
+        }
+    }
+    
+    /**
+     * 内部分析方法（实际执行分析逻辑）
+     */
+    private GraphModels.Graph analyzeInternal(String objectType, String fieldCamel, int depth, int relType, boolean includeUpstream){
         boolean includeWriteBack = (relType == 0 || relType == 1);
         boolean includeIntra = (relType == 0 || relType == 2);
         boolean includeView = (relType == 0 || relType == 3);
@@ -544,7 +606,25 @@ public class ImpactAnalyzerService {
 
     // ===== 解释：按对象分组列出受影响字段及推导路径 =====
     public GraphModels.ExplainResponse explain(String objectType, String fieldCamel, int depth, int relType){
-        GraphModels.Graph g = analyze(objectType, fieldCamel, depth, relType);
+        // 检查解释结果缓存（explain不使用includeUpstream，固定为false）
+        String cacheKey = cacheKey(objectType, fieldCamel, depth, relType, false) + ".explain";
+        try {
+            GraphModels.ExplainResponse cached = explainCache.get(cacheKey, () -> {
+                return explainInternal(objectType, fieldCamel, depth, relType);
+            });
+            log.info("从缓存获取解释结果: {}", cacheKey);
+            return cached;
+        } catch (ExecutionException e) {
+            log.error("缓存获取失败，直接执行解释", e);
+            return explainInternal(objectType, fieldCamel, depth, relType);
+        }
+    }
+    
+    /**
+     * 内部解释方法
+     */
+    private GraphModels.ExplainResponse explainInternal(String objectType, String fieldCamel, int depth, int relType){
+        GraphModels.Graph g = analyzeInternal(objectType, fieldCamel, depth, relType, false);
         // 建立邻接与反向索引
         Map<String, List<GraphModels.Edge>> outEdges = new LinkedHashMap<String, List<GraphModels.Edge>>();
         Map<String, List<GraphModels.Edge>> inEdges  = new LinkedHashMap<String, List<GraphModels.Edge>>();
@@ -619,6 +699,68 @@ public class ImpactAnalyzerService {
         GraphModels.ExplainResponse resp = new GraphModels.ExplainResponse();
         resp.rootObject = objectType; resp.rootField = fieldCamel; resp.groups = new ArrayList<GraphModels.ExplainGroup>(groups.values());
         return resp;
+    }
+    
+    /**
+     * 批量分析多个字段的影响范围，合并结果（带缓存）
+     */
+    public GraphModels.Graph analyzeBatch(String objectType, List<String> fields, int depth, int relType, boolean includeUpstream) {
+        if (fields == null || fields.isEmpty()) {
+            return new GraphModels.Graph();
+        }
+        
+        // 批量分析的缓存key
+        String fieldsStr = String.join(",", fields);
+        String cacheKey = cacheKey(objectType, fieldsStr, depth, relType, includeUpstream);
+        
+        try {
+            GraphModels.Graph cached = graphCache.get(cacheKey, () -> {
+                return analyzeBatchInternal(objectType, fields, depth, relType, includeUpstream);
+            });
+            log.info("从缓存获取批量分析结果: {}", cacheKey);
+            return cached;
+        } catch (ExecutionException e) {
+            log.error("缓存获取失败，直接执行批量分析", e);
+            return analyzeBatchInternal(objectType, fields, depth, relType, includeUpstream);
+        }
+    }
+    
+    /**
+     * 内部批量分析方法
+     */
+    private GraphModels.Graph analyzeBatchInternal(String objectType, List<String> fields, int depth, int relType, boolean includeUpstream) {
+        log.info("批量分析开始: object={}, fields={}, count={}", objectType, fields, fields.size());
+        
+        // 合并多个分析结果
+        GraphModels.Graph merged = new GraphModels.Graph();
+        Set<String> edgeSet = new HashSet<>();
+        Map<String, GraphModels.Node> nodeMap = new HashMap<>();
+        
+        for (String field : fields) {
+            // 使用analyzeInternal方法，避免重复缓存
+            GraphModels.Graph g = analyzeInternal(objectType, field, depth, relType, includeUpstream);
+            
+            // 合并节点（去重）
+            for (GraphModels.Node n : g.nodes) {
+                String nodeId = n.id;
+                if (!nodeMap.containsKey(nodeId)) {
+                    nodeMap.put(nodeId, n);
+                    merged.nodes.add(n);
+                }
+            }
+            
+            // 合并边（去重）
+            for (GraphModels.Edge e : g.edges) {
+                String edgeKey = e.source + "|" + e.type + "|" + e.target;
+                if (!edgeSet.contains(edgeKey)) {
+                    edgeSet.add(edgeKey);
+                    merged.edges.add(e);
+                }
+            }
+        }
+        
+        log.info("批量分析完成: 合并后节点数={}, 边数={}", merged.nodes.size(), merged.edges.size());
+        return merged;
     }
 
     public GraphModels.ObjectGraph analyzeObjects(String objectType, String fieldCamel, int depth, int relType){
