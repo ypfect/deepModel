@@ -148,7 +148,7 @@ public class ImpactAnalyzerService {
                         continue;
                     }
                     
-                    log.info("[视图加载] 开始加载视图: {}", viewName);
+//                    log.info("[视图加载] 开始加载视图: {}", viewName);
                     
                     List<BaseappObjectField> viewFields = new ArrayList<>();
                     JsonNode fields = root.path("fields");
@@ -162,7 +162,7 @@ public class ImpactAnalyzerService {
                             viewFields.add(bf);
                         }
                     }
-                    log.info("[视图加载] 视图字段数量={}", viewFields.size());
+//                    log.info("[视图加载] 视图字段数量={}", viewFields.size());
                     
                     // 注入到 Graph 数据源
                     rowsByObject.put(viewName, viewFields);
@@ -170,11 +170,11 @@ public class ImpactAnalyzerService {
                     
                     JsonNode viewDefs = root.path("viewDef");
                     if (viewDefs.isArray()) {
-                        log.info("[视图加载] viewDef SQL数量={}", viewDefs.size());
+//                        log.info("[视图加载] viewDef SQL数量={}", viewDefs.size());
                         for (JsonNode def : viewDefs) {
                             String objectName = def.path("objectName").asText();
                             String sqlText = def.path("sql").asText();
-                            log.info("[视图加载] 解析SQL: objectName={}, SQL长度={}", objectName, sqlText.length());
+//                            log.info("[视图加载] 解析SQL: objectName={}, SQL长度={}", objectName, sqlText.length());
                             parseSqlDependencies(viewName, sqlText);
                             totalSqlsParsed++;
                         }
@@ -186,14 +186,14 @@ public class ImpactAnalyzerService {
                 }
             }
             
-            log.info("[视图加载] 完成，加载视图数={}, 解析SQL数={}, viewReverseDeps总条目数={}", 
-                totalViewsLoaded, totalSqlsParsed, viewReverseDeps.size());
+//            log.info("[视图加载] 完成，加载视图数={}, 解析SQL数={}, viewReverseDeps总条目数={}",
+//                totalViewsLoaded, totalSqlsParsed, viewReverseDeps.size());
             
             // 输出前5条依赖关系示例
             int count = 0;
             for (Map.Entry<String, Set<String>> entry : viewReverseDeps.entrySet()) {
                 if (count++ < 5) {
-                    log.info("[视图加载] 依赖示例: {} -> {}", entry.getKey(), entry.getValue());
+//                    log.info("[视图加载] 依赖示例: {} -> {}", entry.getKey(), entry.getValue());
                 }
             }
         } catch (Exception e) {
@@ -218,9 +218,9 @@ public class ImpactAnalyzerService {
             aliasMap.put(alias, tableName);
         }
         
-        log.info("[视图解析] 视图={}, 别名映射数量={}", viewName, aliasMap.size());
+//        log.info("[视图解析] 视图={}, 别名映射数量={}", viewName, aliasMap.size());
         if (aliasMap.size() <= 3) {
-            log.info("[视图解析] 别名映射明细: {}", aliasMap);
+//            log.info("[视图解析] 别名映射明细: {}", aliasMap);
         }
         
         // 2. 提取 SELECT ... FROM 之间的内容
@@ -235,7 +235,7 @@ public class ImpactAnalyzerService {
         
         // 3. 简单的逗号分割（忽略括号内的逗号）
         List<String> columns = splitColumns(selectClause);
-        log.info("[视图解析] SELECT 子句列数={}", columns.size());
+//        log.info("[视图解析] SELECT 子句列数={}", columns.size());
         
         int parsedCount = 0;
         for (String colDef : columns) {
@@ -265,14 +265,14 @@ public class ImpactAnalyzerService {
                             viewReverseDeps.computeIfAbsent(srcKey, k -> new HashSet<>()).add(tgtKey);
                             parsedCount++;
                             if (parsedCount <= 5) {
-                                log.info("[视图解析] 依赖: {} -> {}", srcKey, tgtKey);
+//                                log.info("[视图解析] 依赖: {} -> {}", srcKey, tgtKey);
                             }
                         }
                     }
                 }
             }
         }
-        log.info("[视图解析] 视图={}, 解析出依赖关系总数={}", viewName, parsedCount);
+//        log.info("[视图解析] 视图={}, 解析出依赖关系总数={}", viewName, parsedCount);
     }
     
     private List<String> splitColumns(String text) {
@@ -417,7 +417,7 @@ public class ImpactAnalyzerService {
                 out.add(new AbstractMap.SimpleEntry<String,String>(objectType, targetCamel));
             }
         }
-        log.info("intra: {}.{} -> {} 条", objectType, sourceFieldCamel, out.size());
+//        log.info("intra: {}.{} -> {} 条", objectType, sourceFieldCamel, out.size());
         return out;
     }
 
@@ -433,11 +433,11 @@ public class ImpactAnalyzerService {
                 if(r.getVirtualExpr()!=null)  refs.addAll(ExprUtils.extractCamelFieldsFromSql(r.getVirtualExpr()));
                 refs.remove(targetFieldCamel);
                 List<String> list = new ArrayList<String>(refs);
-                log.info("upstream: {}.{} <- {} 条", objectType, targetFieldCamel, list.size());
+//                log.info("upstream: {}.{} <- {} 条", objectType, targetFieldCamel, list.size());
                 return list;
             }
         }
-        log.info("upstream: {}.{} <- 0 条", objectType, targetFieldCamel);
+//        log.info("upstream: {}.{} <- 0 条", objectType, targetFieldCamel);
         return Collections.<String>emptyList();
     }
 
@@ -457,7 +457,7 @@ public class ImpactAnalyzerService {
                 if(dstFld!=null) out.add(new AbstractMap.SimpleEntry<String,String>(dstObj, dstFld));
             }
         }
-        log.info("writeBack: candidates(scanned)={}, hitEdges={}", scanned, out.size());
+//        log.info("writeBack: candidates(scanned)={}, hitEdges={}", scanned, out.size());
         return out;
     }
 
@@ -502,7 +502,7 @@ public class ImpactAnalyzerService {
         boolean includeIntra = (relType == 0 || relType == 2);
         boolean includeView = (relType == 0 || relType == 3);
 
-        log.info("analyze start object={}, field={}, depth={}, includeWB={}, includeIntra={}, includeView={}", objectType, fieldCamel, depth, includeWriteBack, includeIntra, includeView);
+//        log.info("analyze start object={}, field={}, depth={}, includeWB={}, includeIntra={}, includeView={}", objectType, fieldCamel, depth, includeWriteBack, includeIntra, includeView);
         GraphModels.Graph g = new GraphModels.Graph();
         Set<String> nodeSet = new HashSet<String>();
         List<GraphModels.Edge> edges = g.edges;
@@ -555,10 +555,10 @@ public class ImpactAnalyzerService {
             if(includeView){
                 // 查找受当前字段影响的视图字段
                 Set<String> views = viewReverseDeps.get(cur);
-                log.info("[视图查询] 当前节点={}, 查询到视图依赖数={}", cur, views != null ? views.size() : 0);
+//                log.info("[视图查询] 当前节点={}, 查询到视图依赖数={}", cur, views != null ? views.size() : 0);
                 if(views != null){
                     for(String viewId : views){
-                        log.info("[视图查询] 添加视图边: {} -> {}", cur, viewId);
+//                        log.info("[视图查询] 添加视图边: {} -> {}", cur, viewId);
                         addEdgeIfAbsent(edges, edgeSet, cur, viewId, "view");
                         if(!nodeSet.contains(viewId)){
                             nodeSet.add(viewId);
@@ -600,7 +600,7 @@ public class ImpactAnalyzerService {
                 }
             }
         }
-        log.info("analyze finish nodes={}, edges={}", g.nodes.size(), g.edges.size());
+//        log.info("analyze finish nodes={}, edges={}", g.nodes.size(), g.edges.size());
         return g;
     }
 
@@ -612,7 +612,7 @@ public class ImpactAnalyzerService {
             GraphModels.ExplainResponse cached = explainCache.get(cacheKey, () -> {
                 return explainInternal(objectType, fieldCamel, depth, relType);
             });
-            log.info("从缓存获取解释结果: {}", cacheKey);
+//            log.info("从缓存获取解释结果: {}", cacheKey);
             return cached;
         } catch (ExecutionException e) {
             log.error("缓存获取失败，直接执行解释", e);
@@ -717,7 +717,7 @@ public class ImpactAnalyzerService {
             GraphModels.Graph cached = graphCache.get(cacheKey, () -> {
                 return analyzeBatchInternal(objectType, fields, depth, relType, includeUpstream);
             });
-            log.info("从缓存获取批量分析结果: {}", cacheKey);
+//            log.info("从缓存获取批量分析结果: {}", cacheKey);
             return cached;
         } catch (ExecutionException e) {
             log.error("缓存获取失败，直接执行批量分析", e);
@@ -729,7 +729,7 @@ public class ImpactAnalyzerService {
      * 内部批量分析方法
      */
     private GraphModels.Graph analyzeBatchInternal(String objectType, List<String> fields, int depth, int relType, boolean includeUpstream) {
-        log.info("批量分析开始: object={}, fields={}, count={}", objectType, fields, fields.size());
+//        log.info("批量分析开始: object={}, fields={}, count={}", objectType, fields, fields.size());
         
         // 合并多个分析结果
         GraphModels.Graph merged = new GraphModels.Graph();
@@ -759,7 +759,7 @@ public class ImpactAnalyzerService {
             }
         }
         
-        log.info("批量分析完成: 合并后节点数={}, 边数={}", merged.nodes.size(), merged.edges.size());
+//        log.info("批量分析完成: 合并后节点数={}, 边数={}", merged.nodes.size(), merged.edges.size());
         return merged;
     }
 

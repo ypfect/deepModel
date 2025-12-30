@@ -421,6 +421,9 @@
                 
                 // 统计信息
                 const graphStats = ref(null);
+                
+                // 保存被移除的元素，用于恢复
+                let removedElements = null;
 
                 const params = reactive({
                     objectType: '',
@@ -717,6 +720,97 @@
                         pathCount
                     };
                 };
+                
+                // 基于当前可见节点更新统计信息
+                const updateGraphStats = () => {
+                    const cy = cyInstance.value;
+                    if (!cy) {
+                        graphStats.value = null;
+                        return;
+                    }
+                    
+                    const visibleNodes = cy.nodes().not('.hidden-obj');
+                    const visibleEdges = cy.edges().not('.hidden-obj');
+                    
+                    if (visibleNodes.length === 0) {
+                        graphStats.value = null;
+                        return;
+                    }
+                    
+                    const objectSet = new Set();
+                    const fieldSet = new Set();
+                    const edgeByType = { intra: 0, writeBack: 0, view: 0 };
+                    const depthMap = new Map();
+                    const graph = {};
+                    const inDegree = {};
+                    
+                    // 统计可见节点
+                    visibleNodes.forEach(node => {
+                        const nodeData = node.data();
+                        if (nodeData.group === 'field') {
+                            objectSet.add(nodeData.object);
+                            fieldSet.add(nodeData.id);
+                            graph[nodeData.id] = [];
+                            inDegree[nodeData.id] = 0;
+                        }
+                    });
+                    
+                    // 统计可见边
+                    visibleEdges.forEach(edge => {
+                        const edgeData = edge.data();
+                        edgeByType[edgeData.type] = (edgeByType[edgeData.type] || 0) + 1;
+                        if (!graph[edgeData.source]) graph[edgeData.source] = [];
+                        graph[edgeData.source].push(edgeData.target);
+                        inDegree[edgeData.target] = (inDegree[edgeData.target] || 0) + 1;
+                    });
+                    
+                    // 找到起点节点（入度为0的节点）
+                    const roots = [];
+                    Object.keys(inDegree).forEach(nodeId => {
+                        if ((inDegree[nodeId] || 0) === 0) {
+                            roots.push(nodeId);
+                        }
+                    });
+                    
+                    // BFS计算深度
+                    const queue = [...roots];
+                    roots.forEach(r => depthMap.set(r, 0));
+                    
+                    while (queue.length > 0) {
+                        const current = queue.shift();
+                        const currentDepth = depthMap.get(current) || 0;
+                        
+                        (graph[current] || []).forEach(next => {
+                            if (!depthMap.has(next) || depthMap.get(next) > currentDepth + 1) {
+                                depthMap.set(next, currentDepth + 1);
+                                queue.push(next);
+                            }
+                        });
+                    }
+                    
+                    const maxDepth = depthMap.size > 0 ? Math.max(...Array.from(depthMap.values()), 0) : 0;
+                    
+                    // 计算路径数（叶子节点数）
+                    let pathCount = 0;
+                    visibleNodes.forEach(node => {
+                        const nodeData = node.data();
+                        if (nodeData.group === 'field') {
+                            const outEdges = visibleEdges.filter(e => e.data('source') === nodeData.id);
+                            if (outEdges.length === 0) {
+                                pathCount++;
+                            }
+                        }
+                    });
+                    
+                    graphStats.value = {
+                        objectCount: objectSet.size,
+                        fieldCount: fieldSet.size,
+                        edgeCount: visibleEdges.length,
+                        edgeByType,
+                        maxDepth,
+                        pathCount
+                    };
+                };
 
                 const renderGraph = (data) => {
                     const cy = cyInstance.value;
@@ -828,54 +922,83 @@
                     const cy = cyInstance.value;
                     if(!cy) return;
                     
+                    // 第一步：恢复之前移除的元素（如果有）
+                    if (removedElements && removedElements.length > 0) {
+                        cy.add(removedElements);
+                        removedElements = null;
+                    }
+                    
                     const visibleSet = new Set(visibleObjects.value);
-                    cy.batch(() => {
-                        cy.nodes('[group="object"]').forEach(node => {
-                            const objName = node.data('label');
-                            if(visibleSet.has(objName)) {
-                                node.removeClass('hidden-obj');
-                            } else {
-                                node.addClass('hidden-obj');
-                            }
-                        });
-                        
-                        // 隐藏连接到不可见对象的边
-                        cy.edges().forEach(edge => {
-                            const src = edge.source();
-                            const tgt = edge.target();
-                            const srcParent = src.parent();
-                            const tgtParent = tgt.parent();
-                            
-                            if(srcParent.length && srcParent.hasClass('hidden-obj') || 
-                               tgtParent.length && tgtParent.hasClass('hidden-obj')) {
-                                edge.addClass('hidden-obj');
-                            } else {
-                                edge.removeClass('hidden-obj');
-                            }
-                        });
+                    
+                    // 第二步：找出需要移除的对象节点
+                    const nodesToRemove = [];
+                    cy.nodes('[group="object"]').forEach(node => {
+                        const objName = node.data('label');
+                        if(!visibleSet.has(objName)) {
+                            // 收集该对象及其所有子节点
+                            nodesToRemove.push(node);
+                            node.children().forEach(child => {
+                                nodesToRemove.push(child);
+                            });
+                        }
                     });
                     
-                    // 简单适配：不重新布局，只调整视角
-                    nextTick(() => {
-                        const visibleNodes = cy.nodes().not('.hidden-obj');
-                        console.log('可见节点数:', visibleNodes.length);
+                    // 第三步：找出连接到被移除节点的边
+                    const edgesToRemove = [];
+                    const nodeIdsToRemove = new Set(nodesToRemove.map(n => n.id()));
+                    
+                    cy.edges().forEach(edge => {
+                        const src = edge.source();
+                        const tgt = edge.target();
                         
-                        if(visibleNodes.length > 0) {
-                            // 计算可见节点的边界框
-                            const bb = visibleNodes.boundingBox();
-                            console.log('可见区域:', bb);
-                            
-                            // 使用更大的 padding 和动画
-                            cy.animate({
-                                fit: {
-                                    eles: visibleNodes,
-                                    padding: 80
-                                },
-                                duration: 300,
-                                easing: 'ease-out'
+                        // 如果边的源或目标节点要被移除，或者它们的父节点要被移除
+                        if(nodeIdsToRemove.has(src.id()) || nodeIdsToRemove.has(tgt.id()) ||
+                           (src.parent().length && nodeIdsToRemove.has(src.parent().id())) ||
+                           (tgt.parent().length && nodeIdsToRemove.has(tgt.parent().id()))) {
+                            edgesToRemove.push(edge);
+                        }
+                    });
+                    
+                    console.log(`准备移除 ${nodesToRemove.length} 个节点和 ${edgesToRemove.length} 条边`);
+                    
+                    // 第四步：保存被移除的元素（用于后续恢复）
+                    const allToRemove = cy.collection([...nodesToRemove, ...edgesToRemove]);
+                    if(allToRemove.length > 0) {
+                        // 保存元素的 JSON 数据
+                        removedElements = allToRemove.jsons();
+                        // 从图中移除
+                        cy.remove(allToRemove);
+                    }
+                    
+                    // 第五步：对剩余的节点重新布局
+                    nextTick(() => {
+                        const remainingNodes = cy.nodes();
+                        const remainingEdges = cy.edges();
+                        
+                        console.log(`剩余节点数: ${remainingNodes.length}, 剩余边数: ${remainingEdges.length}`);
+                        
+                        if(remainingNodes.length > 0) {
+                            // 对剩余元素重新布局
+                            const layout = cy.layout({
+                                name: 'breadthfirst',
+                                directed: true,
+                                spacingFactor: 1.5,
+                                padding: 30,
+                                animate: true,
+                                animationDuration: 500,
+                                animationEasing: 'ease-out',
+                                fit: true,
+                                avoidOverlap: true
                             });
                             
-                            ElMessage.success(`已聚焦 ${visibleSet.size} 个对象`);
+                            layout.run();
+                            
+                            // 布局完成后提示并更新统计
+                            layout.on('layoutstop', () => {
+                                cy.fit(remainingNodes, 60);
+                                updateGraphStats();
+                                ElMessage.success(`已重新布局 ${visibleSet.size} 个对象`);
+                            });
                         } else {
                             ElMessage.info('没有可见的对象');
                         }
