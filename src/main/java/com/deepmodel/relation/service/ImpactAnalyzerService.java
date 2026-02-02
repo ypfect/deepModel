@@ -309,6 +309,82 @@ public class ImpactAnalyzerService {
         }
         return null;
     }
+
+    /**
+     * 查询：某个字段作为“触发源”时，在当前对象内被它影响到的字段集合。
+     * 换句话说：在同一对象中，哪些字段的 trigger/expression/virtualExpr 里引用了 targetFieldCamel。
+     * 仅限当前对象，不跨对象。
+     */
+    public List<BaseappObjectField> getTriggerFieldsForTarget(String objectType, String targetFieldCamel) {
+        if (objectType == null || targetFieldCamel == null) {
+            log.warn("[getTriggerFieldsForTarget] 参数为空: objectType={}, targetFieldCamel={}", objectType, targetFieldCamel);
+            return Collections.emptyList();
+        }
+
+        // 使用已有的 intra 依赖分析：它的含义正好是
+        //   给定 sourceFieldCamel，找出“内部触发”到的字段列表（同一对象内）
+        List<Map.Entry<String,String>> deps = buildIntraDependencies(objectType, targetFieldCamel);
+        log.info("[getTriggerFieldsForTarget] intra 依赖: objectType={}, sourceField={}, 命中条数={}",
+                objectType, targetFieldCamel, deps.size());
+
+        if (deps.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 为当前对象构建一个 camelCase -> 字段行 的索引
+        List<BaseappObjectField> rows = rowsByObject.getOrDefault(objectType, Collections.<BaseappObjectField>emptyList());
+        Map<String, BaseappObjectField> byCamel = new HashMap<String, BaseappObjectField>();
+        for (BaseappObjectField r : rows) {
+            String camel = canonicalFieldName(r);
+            if (camel != null && !camel.isEmpty()) {
+                byCamel.put(camel, r);
+            }
+        }
+
+        List<BaseappObjectField> result = new ArrayList<BaseappObjectField>();
+        for (Map.Entry<String,String> e : deps) {
+            String obj = e.getKey();
+            String fldCamel = e.getValue();
+            if (!objectType.equals(obj)) {
+                // 按需求：仅限当前对象，忽略跨对象
+                continue;
+            }
+            BaseappObjectField r = byCamel.get(fldCamel);
+            if (r != null) {
+                result.add(r);
+                log.debug("[getTriggerFieldsForTarget] 命中字段: objectType={}, fieldCamel={}, name={}, title={}",
+                        obj, fldCamel, r.getName(), r.getTitle());
+            } else {
+                log.debug("[getTriggerFieldsForTarget] 找不到字段行: objectType={}, fieldCamel={}", obj, fldCamel);
+            }
+        }
+
+        log.info("[getTriggerFieldsForTarget] 最终返回 {} 个字段（仅当前对象）", result.size());
+        return result;
+    }
+
+    /**
+     * 查询：某个「目标对象」中，哪些字段是由指定「来源对象」写回/聚合而来。
+     * 典型场景：在 ArContractSubjectMatterItem 中，找出由 RevenueConfirmationItem 写回的字段。
+     */
+    public List<BaseappObjectField> getFieldsImpactedBySourceObject(String targetObjectType, String sourceObjectType) {
+        if (targetObjectType == null || sourceObjectType == null) {
+            return Collections.emptyList();
+        }
+        List<BaseappObjectField> rows = rowsByObject.getOrDefault(targetObjectType, Collections.emptyList());
+        if (rows.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<BaseappObjectField> result = new ArrayList<BaseappObjectField>();
+        for (BaseappObjectField r : rows) {
+            WriteBackExpr wb = parseWriteBack(r.getWriteBackExpr());
+            if (wb == null) continue;
+            if (sourceObjectType.equals(wb.getSrcObjectType())) {
+                result.add(r);
+            }
+        }
+        return result;
+    }
     
     // Meta APIs for Frontend
     public Set<String> getAllObjectTypes() {
@@ -424,20 +500,33 @@ public class ImpactAnalyzerService {
     private List<String> buildIntraUpstreamDependencies(String objectType, String targetFieldCamel){
         List<BaseappObjectField> rows = rowsByObject.getOrDefault(objectType, Collections.<BaseappObjectField>emptyList());
         for(BaseappObjectField r : rows){
-            String camel = canonicalFieldName(r);
-            if(camel == null) continue;
-            if(camel.equals(targetFieldCamel)){
+            // 尝试多种匹配方式：apiName (camelCase) 或 name (snake_case 转 camelCase)
+            String apiName = r.getApiName();
+            String name = r.getName();
+            boolean matched = false;
+            
+            if (apiName != null && !apiName.trim().isEmpty() && apiName.trim().equals(targetFieldCamel)) {
+                matched = true;
+            } else if (name != null && !name.trim().isEmpty()) {
+                // name 可能是 snake_case，转成 camelCase 再比较
+                String nameCamel = ExprUtils.snakeToCamel(name.trim());
+                if (nameCamel != null && nameCamel.equals(targetFieldCamel)) {
+                    matched = true;
+                }
+            }
+            
+            if (matched) {
                 Set<String> refs = new HashSet<String>();
                 if(r.getTriggerExpr()!=null) refs.addAll(ExprUtils.extractCamelFieldsFromSql(r.getTriggerExpr()));
                 if(r.getExpression()!=null)   refs.addAll(ExprUtils.extractCamelFieldsFromSql(r.getExpression()));
                 if(r.getVirtualExpr()!=null)  refs.addAll(ExprUtils.extractCamelFieldsFromSql(r.getVirtualExpr()));
                 refs.remove(targetFieldCamel);
                 List<String> list = new ArrayList<String>(refs);
-//                log.info("upstream: {}.{} <- {} 条", objectType, targetFieldCamel, list.size());
+                log.info("upstream: {}.{} <- {} 条, 字段: {}", objectType, targetFieldCamel, list.size(), list);
                 return list;
             }
         }
-//        log.info("upstream: {}.{} <- 0 条", objectType, targetFieldCamel);
+        log.warn("upstream: {}.{} <- 0 条 (未找到该字段)", objectType, targetFieldCamel);
         return Collections.<String>emptyList();
     }
 

@@ -93,6 +93,7 @@
         .step-wb { border-left-color: #10b981; }
         .step-view { border-left-color: #8b5cf6; }
         .code-box { font-family: monospace; font-size: 12px; background: #f1f5f9; padding: 8px 12px; border-radius: 6px; color: #475569; margin-top: 8px; white-space: pre-wrap; word-break: break-all; }
+        .code-box-inline { font-family: monospace; font-size: 12px; background: #f1f5f9; padding: 6px 8px; border-radius: 6px; color: #475569; white-space: pre; overflow-x: auto; overflow-y: hidden; }
         .badge { display: inline-flex; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
         .badge-blue { background: #dbeafe; color: #1e40af; }
         .badge-green { background: #d1fae5; color: #065f46; }
@@ -127,8 +128,18 @@
             </div>
             <div style="flex: 1"></div>
             <el-radio-group v-model="viewMode" size="small">
-                <el-radio-button label="graph"><el-icon><Connection /></el-icon> 图谱</el-radio-button>
-                <el-radio-button label="explain"><el-icon><List /></el-icon> 归因</el-radio-button>
+                <el-radio-button label="graph">
+                    <el-icon style="vertical-align: middle; margin-right: 4px;"><Connection /></el-icon>
+                    <span>图谱</span>
+                </el-radio-button>
+                <el-radio-button label="explain">
+                    <el-icon style="vertical-align: middle; margin-right: 4px;"><List /></el-icon>
+                    <span>归因</span>
+                </el-radio-button>
+                <el-radio-button label="source">
+                    <el-icon style="vertical-align: middle; margin-right: 4px;"><ArrowRight /></el-icon>
+                    <span>来源对象</span>
+                </el-radio-button>
             </el-radio-group>
         </header>
 
@@ -372,6 +383,153 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Source Object Impact View -->
+                <div v-show="viewMode === 'source'" class="explain-container">
+                    <div style="margin-bottom: 16px; display:flex; align-items:center; gap: 12px; flex-wrap: wrap;">
+                        <div>当前对象：<b>{{ params.objectType || '未选择' }}</b></div>
+                        <el-select 
+                            v-model="sourceObject" 
+                            filterable 
+                            placeholder="请选择来源对象..." 
+                            style="width: 260px;"
+                            :disabled="!params.objectType">
+                            <el-option v-for="item in objectOptions" :key="item" :label="item" :value="item"></el-option>
+                        </el-select>
+                        <el-button 
+                            type="primary" 
+                            @click="loadSourceImpact" 
+                            :disabled="!params.objectType || !sourceObject" 
+                            :loading="sourceImpactLoading">
+                            查询
+                        </el-button>
+                        <div style="font-size: 12px; color: #64748b;">
+                            示例：在 <b>ArContractSubjectMatterItem</b> 中找出由 <b>RevenueConfirmationItem</b> 写回/聚合的字段
+                        </div>
+                    </div>
+                    <el-empty 
+                        v-if="!sourceImpactFields || sourceImpactFields.length === 0" 
+                        description="暂无数据，请选择来源对象并点击查询" 
+                        :image-size="80">
+                    </el-empty>
+                    <div v-else>
+                        <div style="margin-bottom: 8px; font-size: 13px; color: #64748b;">
+                            共找到 <b>{{ sourceImpactFields.length }}</b> 个字段，它们在 <b>{{ sourceObject }}</b> 的回写/聚合影响下产生。
+                        </div>
+                        <el-row :gutter="12">
+                            <el-col :span="12" v-for="field in sourceImpactFields" :key="field.id || field.name">
+                                <el-card shadow="hover" style="margin-bottom: 12px; cursor: pointer;" @click="selectSourceField(field)">
+                                    <template #header>
+                                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                                            <div>
+                                                <div style="font-weight:600; color:#0f172a;">
+                                                    {{ field.apiName || field.name }}
+                                                </div>
+                                                <div style="font-size:12px; color:#64748b;">
+                                                    {{ field.title || '-' }}
+                                                </div>
+                                            </div>
+                                            <div style="text-align:right;">
+                                                <el-tag size="small" type="info" style="margin-bottom:4px;">
+                                                    {{ field.type || '未知类型' }}
+                                                </el-tag>
+                                                <div style="font-size:11px; color:#94a3b8;">
+                                                    {{ field.bizType || '无业务类型' }}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <div v-if="field.triggerFields && field.triggerFields.length" style="margin-bottom: 6px;">
+                                        <div style="font-size:12px; color:#64748b; margin-bottom:4px;">依赖字段 (仅当前对象)</div>
+                                        <div>
+                                            <div 
+                                                v-for="tf in field.triggerFields" 
+                                                :key="tf.id || tf.name" 
+                                                style="padding:4px 6px; margin-bottom:4px; border-radius:4px; background:#f8fafc;">
+                                                <div style="font-size:12px; font-weight:600; color:#0f172a;">
+                                                    {{ tf.apiName || tf.name }}
+                                                </div>
+                                                <div style="font-size:11px; color:#94a3b8; margin-bottom:2px;">
+                                                    {{ tf.title || '-' }}
+                                                </div>
+                                                <div v-if="tf.triggerExpr || tf.expression || tf.virtualExpr" class="code-box-inline" style="margin-top:2px;">
+                                                    {{ formatJsonOneLine(tf.triggerExpr || tf.expression || tf.virtualExpr) }}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-if="field.triggerExpr" style="margin-bottom: 6px;">
+                                        <div style="font-size:12px; color:#64748b; margin-bottom:4px;">触发公式</div>
+                                        <div class="code-box-inline">{{ formatJsonOneLine(field.triggerExpr) }}</div>
+                                    </div>
+                                    <div v-if="field.writeBackExpr">
+                                        <div style="font-size:12px; color:#64748b; margin-bottom:4px;">回写 / 聚合</div>
+                                        <div class="code-box-inline">{{ formatJsonOneLine(field.writeBackExpr) }}</div>
+                                    </div>
+                                    <div style="margin-top: 8px; text-align: right;">
+                                        <el-button 
+                                            size="small" 
+                                            type="primary" 
+                                            plain 
+                                            @click.stop="openSourceFieldInGraph(field)">
+                                            在图谱中查看
+                                        </el-button>
+                                    </div>
+                                </el-card>
+                            </el-col>
+                        </el-row>
+                    </div>
+
+                    <!-- 右侧详情面板：展示选中字段及其 trigger 字段（仅当前对象） -->
+                    <div class="detail-drawer" :class="{ visible: selectedSourceField }">
+                        <div style="padding: 16px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
+                            <div style="font-weight: bold; font-size: 16px;">来源字段详情</div>
+                            <el-button link @click="selectedSourceField = null"><el-icon><Close /></el-icon></el-button>
+                        </div>
+                        <div v-if="selectedSourceField" style="padding: 16px; flex: 1; overflow-y: auto;">
+                            <div style="font-size: 14px; font-weight: 600; margin-bottom: 4px;">
+                                {{ params.objectType }}.{{ selectedSourceField.apiName || selectedSourceField.name }}
+                            </div>
+                            <div style="font-size: 12px; color: #64748b; margin-bottom: 12px;">
+                                {{ selectedSourceField.title || '-' }}
+                            </div>
+                            <div style="font-size: 13px; line-height: 1.8; color: #334155; margin-bottom: 16px;">
+                                <div>类型: {{ selectedSourceField.type || '-' }}</div>
+                                <div>业务类型: {{ selectedSourceField.bizType || '-' }}</div>
+                            </div>
+
+                            <div v-if="selectedSourceField.triggerFields && selectedSourceField.triggerFields.length">
+                                <div class="config-label">依赖的 trigger 字段（仅当前对象）</div>
+                                <div style="margin-top: 8px;">
+                                    <div 
+                                        v-for="tf in selectedSourceField.triggerFields" 
+                                        :key="tf.id || tf.name" 
+                                        style="padding:6px 8px; margin-bottom:6px; border-radius:6px; background:#f8fafc;">
+                                        <div style="font-size:13px; font-weight:600; color:#0f172a;">
+                                            {{ tf.apiName || tf.name }}
+                                        </div>
+                                        <div style="font-size:12px; color:#64748b; margin-bottom:2px;">
+                                            {{ tf.title || '-' }}
+                                        </div>
+                                        <div style="font-size:11px; color:#94a3b8; margin-bottom:2px;">
+                                            {{ tf.type || '-' }} · {{ tf.bizType || '-' }}
+                                        </div>
+                                        <div 
+                                            v-if="tf.triggerExpr || tf.expression || tf.virtualExpr" 
+                                            class="code-box-inline" 
+                                            style="margin-top:4px;">
+                                            {{ formatJsonOneLine(tf.triggerExpr || tf.expression || tf.virtualExpr) }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div v-else style="font-size: 12px; color:#94a3b8;">
+                                该字段在当前对象中没有解析到上游 trigger 字段。
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </main>
         </div>
     </div>
@@ -421,6 +579,12 @@
                 
                 // 统计信息
                 const graphStats = ref(null);
+
+                // 来源对象影响分析
+                const sourceObject = ref('');
+                const sourceImpactLoading = ref(false);
+                const sourceImpactFields = ref([]);
+                const selectedSourceField = ref(null);
                 
                 // 保存被移除的元素，用于恢复
                 let removedElements = null;
@@ -490,6 +654,104 @@
                     finally { fieldLoading.value = false; }
                 };
 
+                // 加载：指定来源对象对当前对象的写回/聚合影响字段
+                const loadSourceImpact = async () => {
+                    if (!params.objectType || !sourceObject.value) {
+                        return ElMessage.warning('请先选择当前对象和来源对象');
+                    }
+                    sourceImpactLoading.value = true;
+                    try {
+                        const url = `/api/impact/bySourceObject?targetObject=${encodeURIComponent(params.objectType)}&sourceObject=${encodeURIComponent(sourceObject.value)}`;
+                        const res = await fetch(url);
+                        if (!res.ok) {
+                            ElMessage.error('查询失败');
+                            sourceImpactFields.value = [];
+                            return;
+                        }
+                        const data = await res.json();
+                        const baseList = Array.isArray(data) ? data : [];
+
+                        // 为每个目标字段加载其 trigger 上游字段列表
+                        const enriched = await Promise.all(baseList.map(async (f) => {
+                            const fieldName = f.apiName || f.name;
+                            if (!fieldName) {
+                                console.log(`[triggerFields] 字段 ${f.id || f.name} 没有可用字段名，跳过`);
+                                return Object.assign({}, f, { triggerFields: [] });
+                            }
+                            try {
+                                const tfUrl = `/api/impact/triggerFields?objectType=${encodeURIComponent(params.objectType)}&field=${encodeURIComponent(fieldName)}`;
+                                console.log(`[triggerFields] 请求: ${tfUrl}`);
+                                const tfRes = await fetch(tfUrl);
+                                if (!tfRes.ok) {
+                                    console.warn(`[triggerFields] 请求失败: ${tfUrl}, status=${tfRes.status}`);
+                                    return Object.assign({}, f, { triggerFields: [] });
+                                }
+                                const tfData = await tfRes.json();
+                                const list = Array.isArray(tfData) ? tfData : [];
+                                console.log(`[triggerFields] 字段 ${fieldName} 找到 ${list.length} 个 trigger 字段:`, list.map(tf => tf.apiName || tf.name));
+                                return Object.assign({}, f, { triggerFields: list });
+                            } catch (e) {
+                                console.error(`[triggerFields] 加载失败: ${fieldName}`, e);
+                                return Object.assign({}, f, { triggerFields: [] });
+                            }
+                        }));
+
+                        sourceImpactFields.value = enriched;
+                        selectedSourceField.value = null;
+                        if (sourceImpactFields.value.length === 0) {
+                            ElMessage.info('未找到受该来源对象影响的字段');
+                        } else {
+                            ElMessage.success(`共找到 ${sourceImpactFields.value.length} 个字段`);
+                        }
+                    } catch (e) {
+                        console.error('loadSourceImpact error', e);
+                        ElMessage.error('查询失败，请稍后重试');
+                        sourceImpactFields.value = [];
+                    } finally {
+                        sourceImpactLoading.value = false;
+                    }
+                };
+
+                const selectSourceField = (field) => {
+                    selectedSourceField.value = field;
+                };
+
+                // JSON 文本格式化为多行缩进展示（不自动换行，只横向滚动）
+                const formatJsonOneLine = (raw) => {
+                    if (!raw) return '';
+                    try {
+                        let text = String(raw).trim();
+                        let obj;
+                        try {
+                            obj = JSON.parse(text);
+                        } catch (e) {
+                            // 兼容单引号 JSON
+                            obj = JSON.parse(text.replace(/'/g, '"'));
+                        }
+                        // 使用 2 个空格缩进，格式化为多行 JSON
+                        return JSON.stringify(obj, null, 2);
+                    } catch (e) {
+                        return String(raw);
+                    }
+                };
+
+                // 从来源对象页签，直接跳到图谱中查看某个字段的完整影响路径
+                const openSourceFieldInGraph = (field) => {
+                    if (!params.objectType) {
+                        return;
+                    }
+                    const fieldName = field.apiName || field.name;
+                    if (!fieldName) {
+                        ElMessage.warning('该字段缺少可用的字段名');
+                        return;
+                    }
+                    params.fields = [fieldName];
+                    viewMode.value = 'graph';
+                    nextTick(() => {
+                        runAnalysis();
+                    });
+                };
+
                 const initCy = () => {
                     cyInstance.value = cytoscape({
                         container: document.getElementById('cy-container'),
@@ -507,15 +769,17 @@
                             {
                                 selector: 'node[group="object"]',
                                 style: {
-                                    'label': 'data(label)', 'text-valign': 'top', 'text-halign': 'center',
-                                    'background-color': '#f1f5f9', 'border-width': 1, 'border-color': '#e2e8f0',
-                                    'font-size': 14, 'font-weight': 'bold', 'color': '#64748b', 'padding': 12
-                                }
-                            },
-                            {
-                                selector: 'node[group="object"][isView="true"]',
-                                style: {
-                                    'background-color': '#f5f3ff', 'border-color': '#ddd6fe', 'color': '#7c3aed'
+                                    'label': 'data(label)', 
+                                    'text-valign': 'top', 
+                                    'text-halign': 'center',
+                                    'background-color': ele => getObjectBgColor(ele.data('label')),
+                                    'border-width': 2, 
+                                    'border-color': ele => getObjectBorderColor(ele.data('label')),
+                                    'font-size': 14, 
+                                    'font-weight': 'bold', 
+                                    'color': ele => getObjectTextColor(ele.data('label')),
+                                    'padding': 14,
+                                    'background-opacity': 0.4
                                 }
                             },
                             {
@@ -1033,6 +1297,25 @@
                     }
                     return COLOR_PRESETS[hash % COLOR_PRESETS.length];
                 };
+                
+                // 对象框框的配色方案（用于图谱）
+                const getObjectBgColor = (objName) => {
+                    if (!objName) return '#f1f5f9';
+                    const preset = pickColorPreset(objName);
+                    return preset.bg;
+                };
+                
+                const getObjectBorderColor = (objName) => {
+                    if (!objName) return '#e2e8f0';
+                    const preset = pickColorPreset(objName);
+                    return preset.text;
+                };
+                
+                const getObjectTextColor = (objName) => {
+                    if (!objName) return '#64748b';
+                    const preset = pickColorPreset(objName);
+                    return preset.text;
+                };
 
                 // 对象文字颜色
                 const getObjectColor = (objName) => {
@@ -1053,6 +1336,7 @@
                     const objName = fieldPath.split('.')[0];
                     return { color: getObjectColor(objName), fontWeight: '600' };
                 };
+                
 
                 const buildFieldExplainText = (objectName, field) => {
                     const lines = [];
@@ -1468,12 +1752,14 @@
                     objectOptions, fieldOptions, params, selectedNode, explainData,
                     allObjects, visibleObjects, filteredExplainData,
                     searchQuery, graphStats,
+                    sourceObject, sourceImpactLoading, sourceImpactFields, selectedSourceField,
                     handleObjectChange, runAnalysis, fitGraph, layoutGraph, focusOnNode,
                     selectAllObjects, deselectAllObjects, applyObjectFilter,
                     handleSearchInput, handleSearch, clearSearch, highlightPath,
                     highlightRelatedNodes, clearRelatedHighlight, fitToRelatedNodes,
                     highlightRelatedNodes, clearRelatedHighlight, fitToRelatedNodes,
-                    getStepClass, getBadgeClass, getObjectStyle, getObjectColor, getGroupCardStyle, copyFieldExplain, copyGroupExplain
+                    getStepClass, getBadgeClass, getObjectStyle, getObjectColor, getGroupCardStyle, copyFieldExplain, copyGroupExplain,
+                    loadSourceImpact, openSourceFieldInGraph, formatJsonOneLine, selectSourceField
                 };
             }
         });

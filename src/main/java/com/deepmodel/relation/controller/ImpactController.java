@@ -197,6 +197,26 @@ public class ImpactController {
         return analyzerService.getViewDependenciesDebugInfo();
     }
 
+    /**
+     * 查询：在目标对象中，哪些字段是由指定来源对象写回/聚合而来。
+     * targetObject 示例：ArContractSubjectMatterItem
+     * sourceObject 示例：RevenueConfirmationItem
+     */
+    @GetMapping("/api/impact/bySourceObject")
+    public List<BaseappObjectField> fieldsBySourceObject(@RequestParam("targetObject") String targetObject,
+                                                         @RequestParam("sourceObject") String sourceObject) {
+        return analyzerService.getFieldsImpactedBySourceObject(targetObject, sourceObject);
+    }
+
+    /**
+     * 查询：某个目标字段依赖的 trigger 字段（同对象内的上游字段）。
+     */
+    @GetMapping("/api/impact/triggerFields")
+    public List<BaseappObjectField> triggerFields(@RequestParam("objectType") String objectType,
+                                                  @RequestParam("field") String field) {
+        return analyzerService.getTriggerFieldsForTarget(objectType, field);
+    }
+
     // ===== 解释接口 =====
     @GetMapping("/api/impact/explain")
     public GraphModels.ExplainResponse explain(@RequestParam("objectType") String objectType,

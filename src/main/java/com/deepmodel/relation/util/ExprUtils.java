@@ -32,6 +32,25 @@ public class ExprUtils {
         return sb.toString();
     }
 
+    /**
+     * 将 camelCase 转换为 snake_case
+     * 例如：invoiceMakeAppAmountWithoutTaxFrame -> invoice_make_app_amount_without_tax_frame
+     */
+    public static String camelToSnake(String s){
+        if(s==null || s.isEmpty()) return s;
+        StringBuilder sb = new StringBuilder();
+        for(int i=0; i<s.length(); i++){
+            char c = s.charAt(i);
+            if(Character.isUpperCase(c)){
+                if(i>0) sb.append('_');
+                sb.append(Character.toLowerCase(c));
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
     private static boolean containsUppercase(String s){
         for(int i=0;i<s.length();i++){
             if(Character.isUpperCase(s.charAt(i))) return true;
