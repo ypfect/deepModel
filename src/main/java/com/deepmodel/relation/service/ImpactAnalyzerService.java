@@ -436,7 +436,7 @@ public class ImpactAnalyzerService {
         return (v!=null && !v.isNull()) ? v.asText() : null;
     }
 
-    private WriteBackExpr parseWriteBack(String text){
+    public WriteBackExpr parseWriteBack(String text){
         if(text==null || text.trim().isEmpty()) return null;
         String raw = text.trim();
         try{

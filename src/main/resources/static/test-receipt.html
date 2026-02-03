@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Receipt 上游测试</title>
+    <style>
+        body { font-family: Arial; padding: 30px; max-width: 1200px; margin: 0 auto; }
+        button { padding: 10px 20px; margin: 10px 5px; cursor: pointer; background: #3b82f6; color: white; border: none; border-radius: 5px; }
+        .result { background: #f8f9fa; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #3b82f6; }
+        .node { display: inline-block; padding: 8px 16px; margin: 4px; background: #5b7ff5; color: white; border-radius: 6px; font-size: 13px; }
+        .edge { color: #666; margin: 0 8px; }
+        .stats { background: #ecfdf5; padding: 15px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #10b981; }
+        h2 { color: #333; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <h1>📋 Receipt 上游链路测试</h1>
+    
+    <div class="stats">
+        <strong>测试目的：</strong>验证 Receipt 作为下游，能否正确追溯所有上游对象的上游
+    </div>
+    
+    <button onclick="testUpstream(1)">深度1层</button>
+    <button onclick="testUpstream(2)">深度2层</button>
+    <button onclick="testUpstream(3)">深度3层</button>
+    <button onclick="testUpstream(5)">深度5层</button>
+    <button onclick="testUpstream(8)">深度8层</button>
+    
+    <div id="result"></div>
+    
+    <script>
+        async function testUpstream(depth) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '<p>正在追踪 Receipt 的上游链路（深度' + depth + '层）...</p>';
+            
+            try {
+                const url = `/api/projection/chain?objectType=Receipt&direction=upstream&depth=${depth}`;
+                console.log('请求URL:', url);
+                
+                const res = await fetch(url);
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+                
+                const data = await res.json();
+                console.log('响应数据:', data);
+                
+                // 统计
+                let html = '<div class="result">';
+                html += `<h2>追踪结果（深度${depth}层）</h2>`;
+                html += `<div class="stats">`;
+                html += `<strong>节点数:</strong> ${data.nodes.length}<br>`;
+                html += `<strong>映射关系数:</strong> ${data.edges.length}`;
+                html += `</div>`;
+                
+                // 显示所有节点
+                html += '<h3>发现的对象类型:</h3>';
+                html += '<div>';
+                data.nodes.forEach(node => {
+                    html += `<span class="node">${node.objectType}</span>`;
+                });
+                html += '</div>';
+                
+                // 显示映射关系
+                html += '<h3>映射关系:</h3>';
+                html += '<div style="line-height: 2;">';
+                data.edges.forEach(edge => {
+                    html += `${edge.source} <span class="edge">→</span> ${edge.target}<br>`;
+                });
+                html += '</div>';
+                
+                // 分组显示直接上游
+                html += '<h3>Receipt 的直接上游:</h3>';
+                const directUpstreams = data.edges
+                    .filter(e => e.target === 'Receipt')
+                    .map(e => e.source);
+                html += '<div>';
+                directUpstreams.forEach(obj => {
+                    html += `<span class="node" style="background:#10b981">${obj}</span>`;
+                });
+                html += `<p style="margin-top:10px;">共 <strong>${directUpstreams.length}</strong> 个直接上游</p>`;
+                html += '</div>';
+                
+                html += '</div>';
+                resultDiv.innerHTML = html;
+                
+            } catch (e) {
+                console.error('错误:', e);
+                resultDiv.innerHTML = `<div class="result" style="border-left-color:#ef4444;background:#fee;">❌ 测试失败: ${e.message}</div>`;
+            }
+        }
+        
+        // 页面加载时自动测试深度3
+        window.onload = () => {
+            testUpstream(3);
+        };
+    </script>
+</body>
+</html>

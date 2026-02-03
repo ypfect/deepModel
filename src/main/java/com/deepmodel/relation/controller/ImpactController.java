@@ -3,7 +3,11 @@ package com.deepmodel.relation.controller;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.GraphModels;
 import com.deepmodel.relation.service.ImpactAnalyzerService;
+import com.deepmodel.relation.service.UpgradeScriptService;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -14,9 +18,12 @@ import java.util.*;
 public class ImpactController {
 
     private final ImpactAnalyzerService analyzerService;
+    private final UpgradeScriptService upgradeScriptService;
 
-    public ImpactController(ImpactAnalyzerService analyzerService) {
+    public ImpactController(ImpactAnalyzerService analyzerService,
+                            UpgradeScriptService upgradeScriptService) {
         this.analyzerService = analyzerService;
+        this.upgradeScriptService = upgradeScriptService;
     }
 
     @GetMapping("/api/reload")
@@ -215,6 +222,31 @@ public class ImpactController {
     public List<BaseappObjectField> triggerFields(@RequestParam("objectType") String objectType,
                                                   @RequestParam("field") String field) {
         return analyzerService.getTriggerFieldsForTarget(objectType, field);
+    }
+
+    /**
+     * 生成字段升级 SQL 脚本（仅返回文本，不执行）。
+     *
+     * @param objectType 根对象类型
+     * @param field      根字段名
+     * @param depth      向下层级深度
+     * @param relTypes   关系类型列表，例如: intra,writeBack 或 intra,writeBack,view
+     */
+    @GetMapping(value = "/api/impact/upgradeScript", produces = MediaType.TEXT_PLAIN_VALUE)
+    public ResponseEntity<String> generateUpgradeScript(
+            @RequestParam("objectType") String objectType,
+            @RequestParam("field") String field,
+            @RequestParam(value = "depth", defaultValue = "3") int depth,
+            @RequestParam(value = "relTypes", defaultValue = "intra,writeBack") String relTypes) {
+
+        String sql = upgradeScriptService.generateUpgradeScript(objectType, field, depth, relTypes);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"" + objectType + "_" + field + "_upgrade.sql\"");
+        headers.setContentType(MediaType.TEXT_PLAIN);
+
+        return new ResponseEntity<String>(sql, headers, HttpStatus.OK);
     }
 
     // ===== 解释接口 =====

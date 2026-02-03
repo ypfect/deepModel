@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>单据映射系统测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; }
+        h2 { color: #666; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #2563eb; }
+        .result {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+            border-left: 4px solid #3b82f6;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success { border-left-color: #10b981; background: #ecfdf5; }
+        .error { border-left-color: #ef4444; background: #fef2f2; color: #dc2626; }
+        .warning { border-left-color: #f59e0b; background: #fffbeb; color: #d97706; }
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .status.ok { background: #d1fae5; color: #065f46; }
+        .status.error { background: #fee2e2; color: #991b1b; }
+    </style>
+</head>
+<body>
+    <h1>📋 单据映射可视化系统 - 诊断工具</h1>
+    
+    <div class="test-panel">
+        <h2>1. 系统健康检查</h2>
+        <button onclick="testHealth()">🏥 检查系统状态</button>
+        <div id="health-result"></div>
+    </div>
+    
+    <div class="test-panel">
+        <h2>2. 数据库连接测试</h2>
+        <button onclick="testDatabase()">🗄️ 检查数据库</button>
+        <div id="db-result"></div>
+    </div>
+    
+    <div class="test-panel">
+        <h2>3. 对象列表测试</h2>
+        <button onclick="testObjects()">📦 获取对象列表</button>
+        <div id="objects-result"></div>
+    </div>
+    
+    <div class="test-panel">
+        <h2>4. 映射关系测试</h2>
+        <button onclick="testGraph()">🔗 获取映射图谱</button>
+        <div id="graph-result"></div>
+    </div>
+    
+    <div class="test-panel">
+        <h2>5. 表统计信息</h2>
+        <button onclick="testTableStats()">📊 查看表统计</button>
+        <div id="stats-result"></div>
+    </div>
+
+    <script>
+        async function testHealth() {
+            const resultDiv = document.getElementById('health-result');
+            resultDiv.innerHTML = '正在检查...';
+            
+            try {
+                const res = await fetch('/api/projection/health');
+                const data = await res.json();
+                
+                let html = `<div class="result ${data.status === 'ok' ? 'success' : 'error'}">`;
+                html += `<strong>状态:</strong> <span class="status ${data.status}">${data.status.toUpperCase()}</span>\n`;
+                html += `<strong>消息:</strong> ${data.message}\n`;
+                if (data.objectCount !== undefined) {
+                    html += `<strong>对象数量:</strong> ${data.objectCount}\n`;
+                }
+                html += `\n<strong>完整响应:</strong>\n${JSON.stringify(data, null, 2)}`;
+                html += '</div>';
+                
+                resultDiv.innerHTML = html;
+            } catch (e) {
+                resultDiv.innerHTML = `<div class="result error">❌ 错误: ${e.message}</div>`;
+            }
+        }
+
+        async function testDatabase() {
+            const resultDiv = document.getElementById('db-result');
+            resultDiv.innerHTML = '正在检查数据库...';
+            
+            try {
+                const res = await fetch('/api/projection/debug/check');
+                const data = await res.json();
+                
+                let html = `<div class="result ${data.status === 'ok' ? 'success' : 'error'}">`;
+                html += `<strong>数据库检查结果:</strong>\n\n`;
+                html += `映射关系数量: ${data.projectionCount || 0}\n`;
+                html += `对象类型数量: ${data.objectTypeCount || 0}\n`;
+                
+                if (data.projectionCount > 0) {
+                    html += `\n<strong>示例映射:</strong>\n`;
+                    html += `- 字段映射数: ${data.sampleFieldMappingCount || 0}\n`;
+                    html += `- 子表数: ${data.sampleChildCount || 0}\n`;
+                }
+                
+                if (data.objectTypes && data.objectTypes.length > 0) {
+                    html += `\n<strong>对象类型列表:</strong>\n`;
+                    data.objectTypes.forEach(obj => {
+                        html += `  • ${obj}\n`;
+                    });
+                }
+                
+                if (data.projections && data.projections.length > 0) {
+                    html += `\n<strong>映射关系示例:</strong>\n`;
+                    data.projections.slice(0, 3).forEach(p => {
+                        html += `  ${p.objectType} → ${p.toObjectType}\n`;
+                    });
+                }
+                
+                html += `\n<strong>完整数据:</strong>\n${JSON.stringify(data, null, 2)}`;
+                html += '</div>';
+                
+                resultDiv.innerHTML = html;
+            } catch (e) {
+                resultDiv.innerHTML = `<div class="result error">❌ 错误: ${e.message}\n确保后端服务正在运行</div>`;
+            }
+        }
+
+        async function testObjects() {
+            const resultDiv = document.getElementById('objects-result');
+            resultDiv.innerHTML = '正在获取对象列表...';
+            
+            try {
+                const res = await fetch('/api/projection/objects');
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                }
+                
+                const data = await res.json();
+                
+                let html = `<div class="result ${data.length > 0 ? 'success' : 'warning'}">`;
+                html += `<strong>对象数量:</strong> ${data.length}\n\n`;
+                
+                if (data.length === 0) {
+                    html += `⚠️ 数据库中没有找到任何对象类型\n`;
+                    html += `可能的原因:\n`;
+                    html += `1. baseapp_projection 表是空的\n`;
+                    html += `2. 数据库连接有问题\n`;
+                    html += `3. SQL 查询有误\n`;
+                } else {
+                    html += `<strong>对象列表:</strong>\n`;
+                    data.forEach((obj, idx) => {
+                        html += `${idx + 1}. ${obj}\n`;
+                    });
+                }
+                
+                html += '</div>';
+                resultDiv.innerHTML = html;
+            } catch (e) {
+                resultDiv.innerHTML = `<div class="result error">❌ 错误: ${e.message}</div>`;
+            }
+        }
+
+        async function testGraph() {
+            const resultDiv = document.getElementById('graph-result');
+            resultDiv.innerHTML = '正在获取映射图谱...';
+            
+            try {
+                const res = await fetch('/api/projection/graph');
+                const data = await res.json();
+                
+                let html = `<div class="result ${data.nodes.length > 0 ? 'success' : 'warning'}">`;
+                html += `<strong>节点数:</strong> ${data.nodes.length}\n`;
+                html += `<strong>边数:</strong> ${data.edges.length}\n\n`;
+                
+                if (data.nodes.length > 0) {
+                    html += `<strong>节点示例:</strong>\n`;
+                    data.nodes.slice(0, 5).forEach(n => {
+                        html += `  • ${n.objectType}\n`;
+                    });
+                }
+                
+                if (data.edges.length > 0) {
+                    html += `\n<strong>映射关系示例:</strong>\n`;
+                    data.edges.slice(0, 5).forEach(e => {
+                        html += `  ${e.source} → ${e.target}\n`;
+                    });
+                }
+                
+                html += '</div>';
+                resultDiv.innerHTML = html;
+            } catch (e) {
+                resultDiv.innerHTML = `<div class="result error">❌ 错误: ${e.message}</div>`;
+            }
+        }
+
+        async function testTableStats() {
+            const resultDiv = document.getElementById('stats-result');
+            resultDiv.innerHTML = '正在获取表统计...';
+            
+            try {
+                const res = await fetch('/api/projection/debug/table-stats');
+                const data = await res.json();
+                
+                let html = `<div class="result ${data.status === 'ok' ? 'success' : 'error'}">`;
+                html += `<strong>表统计信息:</strong>\n\n`;
+                
+                if (data.status === 'ok') {
+                    html += `baseapp_projection 表记录数: ${data.baseapp_projection}\n`;
+                    html += `对象类型数: ${data.object_types}\n`;
+                } else {
+                    html += `错误: ${data.message}\n`;
+                }
+                
+                html += '</div>';
+                resultDiv.innerHTML = html;
+            } catch (e) {
+                resultDiv.innerHTML = `<div class="result error">❌ 错误: ${e.message}</div>`;
+            }
+        }
+
+        // 页面加载时自动运行健康检查
+        window.onload = () => {
+            testHealth();
+        };
+    </script>
+</body>
+</html>

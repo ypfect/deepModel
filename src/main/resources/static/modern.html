@@ -217,8 +217,22 @@
                         </div>
 
                         <div style="margin-top: 20px;">
-                            <el-button type="primary" size="large" style="width: 100%" @click="runAnalysis" :loading="analyzing" icon="Search">
+                            <el-button
+                                type="primary"
+                                size="large"
+                                style="width: 100%"
+                                @click="runAnalysis"
+                                :loading="analyzing"
+                                icon="Search">
                                 开始分析
+                            </el-button>
+                            <el-button
+                                type="success"
+                                size="small"
+                                style="width: 100%; margin-top: 8px;"
+                                :disabled="!params.objectType || !params.fields || params.fields.length === 0"
+                                @click="generateUpgradeScript">
+                                生成升级脚本
                             </el-button>
                         </div>
                         
@@ -762,7 +776,7 @@
                                     'label': 'data(label)',
                                     'width': 'label', 'height': 32, 'padding': 10,
                                     'shape': 'round-rectangle',
-                                    'background-color': '#fff', 'border-width': 1, 'border-color': '#cbd5e1',
+                                    'background-color': ele => getDepthColor(ele.data('depth')), 'border-width': 1, 'border-color': '#cbd5e1',
                                     'text-valign': 'center', 'text-halign': 'center', 'font-size': 12, 'color': '#334155'
                                 }
                             },
@@ -772,7 +786,11 @@
                                     'label': 'data(label)', 
                                     'text-valign': 'top', 
                                     'text-halign': 'center',
-                                    'background-color': ele => getObjectBgColor(ele.data('label')),
+                                    'background-color': ele => {
+                                        const d = ele.data('depth');
+                                        // 如果有层级信息，用分层色；否则回退到对象配色
+                                        return d !== undefined && d !== null ? getDepthColor(d) : getObjectBgColor(ele.data('label'));
+                                    },
                                     'border-width': 2, 
                                     'border-color': ele => getObjectBorderColor(ele.data('label')),
                                     'font-size': 14, 
@@ -802,19 +820,25 @@
                             { selector: '.edge-highlighted', style: { 'width': 4, 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b' } },
                             { selector: '.path-highlighted', style: { 'border-width': 3, 'border-color': '#10b981', 'background-color': '#d1fae5' } },
                             { selector: '.node-selected', style: { 'border-width': 3, 'border-color': '#3b82f6', 'background-color': '#dbeafe', 'z-index': 10 } },
-                            { selector: '.node-related', style: { 'border-width': 2, 'border-color': '#f59e0b', 'background-color': '#fef3c7', 'z-index': 5 } },
-                            // 关联边的样式，使用橙色以区别于视图映射的紫色
-                            { selector: '.edge-related', style: { 'width': 4, 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b', 'z-index': 5, 'opacity': 1 } },
+                            { selector: '.node-related', style: { 'border-width': 2, 'border-color': '#ef4444', 'background-color': '#fee2e2', 'z-index': 5 } },
+                            // 关联边的样式，使用红色以区别于其他高亮
+                            { selector: '.edge-related', style: { 'width': 4, 'line-color': '#ef4444', 'target-arrow-color': '#ef4444', 'z-index': 5, 'opacity': 1 } },
                             // 确保所有类型的边都能被高亮（更具体的选择器优先级更高）
-                            { selector: 'edge.edge-related[type="writeBack"]', style: { 'width': 4, 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b', 'line-style': 'solid' } },
-                            { selector: 'edge.edge-related[type="intra"]', style: { 'width': 4, 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b' } },
-                            { selector: 'edge.edge-related[type="view"]', style: { 'width': 4, 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b' } }
+                            { selector: 'edge.edge-related[type="writeBack"]', style: { 'width': 4, 'line-color': '#ef4444', 'target-arrow-color': '#ef4444', 'line-style': 'solid' } },
+                            { selector: 'edge.edge-related[type="intra"]', style: { 'width': 4, 'line-color': '#ef4444', 'target-arrow-color': '#ef4444' } },
+                            { selector: 'edge.edge-related[type="view"]', style: { 'width': 4, 'line-color': '#ef4444', 'target-arrow-color': '#ef4444' } }
                         ],
                         wheelSensitivity: 0.3
                     });
                     
                     cyInstance.value.on('tap', 'node[type="field"]', evt => {
                         const n = evt.target;
+                        // 如果再次点击同一个字段，则取消选中和高亮
+                        if (selectedNode.value && selectedNode.value.id === n.id()) {
+                            selectedNode.value = null;
+                            clearRelatedHighlight();
+                            return;
+                        }
                         selectedNode.value = {
                             id: n.id(), label: n.data('label'),
                             parentLabel: n.parent().data('label'),
@@ -909,6 +933,25 @@
                         console.error(e);
                         ElMessage.error('分析请求失败');
                     } finally { analyzing.value = false; }
+                };
+
+                // 基于当前选择生成升级 SQL 脚本（下载 .sql 文件）
+                const generateUpgradeScript = () => {
+                    if (!params.objectType || !params.fields || params.fields.length === 0) {
+                        ElMessage.warning('请先选择对象和字段');
+                        return;
+                    }
+                    const rootField = params.fields[0];
+                    const relTypes = (params.relTypes && params.relTypes.length > 0)
+                        ? params.relTypes.join(',')
+                        : 'intra,writeBack';
+                    const url =
+                        `/api/impact/upgradeScript`
+                        + `?objectType=${encodeURIComponent(params.objectType)}`
+                        + `&field=${encodeURIComponent(rootField)}`
+                        + `&depth=${encodeURIComponent(params.depth)}`
+                        + `&relTypes=${encodeURIComponent(relTypes)}`;
+                    window.open(url, '_blank');
                 };
                 
                 // 计算统计信息
@@ -1076,12 +1119,30 @@
                     };
                 };
 
+                const getDepthColor = (d) => {
+                    if (d === null || d === undefined) return '#ffffff';
+                    const depth = Math.max(0, Math.min(8, Number(d) || 0));
+                    const palette = [
+                        '#ffffff', // 0 - root / same层
+                        '#e0f2fe', // 1
+                        '#d1fae5', // 2
+                        '#fef3c7', // 3
+                        '#fee2e2', // 4
+                        '#ede9fe', // 5
+                        '#f5f3ff', // 6+
+                        '#e5e7eb',
+                        '#e2e8f0'
+                    ];
+                    return palette[Math.min(depth, palette.length - 1)];
+                };
+
                 const renderGraph = (data) => {
                     const cy = cyInstance.value;
                     cy.elements().remove();
                     const nodes = [], edges = [];
                     const objMap = new Set();
                     const nodeIds = new Set();
+                    const objectMinDepth = new Map();
                     
                     // Identify Views
                     const viewObjs = new Set();
@@ -1089,21 +1150,75 @@
                         if(n.object.endsWith('View')) viewObjs.add(n.object);
                     });
 
-                    // Parent Nodes
+                    // 计算字段的分层深度（以当前对象选中的字段为根，向下游 BFS）
+                    const depthMap = new Map();
+                    const adj = {};
+                    if (data && Array.isArray(data.nodes) && Array.isArray(data.edges)) {
+                        data.nodes.forEach(n => {
+                            const id = n.id || (n.object && n.field ? `${n.object}.${n.field}` : null);
+                            if (!id) return;
+                            adj[id] = [];
+                        });
+                        data.edges.forEach(e => {
+                            if (!adj[e.source]) adj[e.source] = [];
+                            adj[e.source].push(e.target);
+                        });
+                        const queue = [];
+                        const roots = data.nodes.filter(n => {
+                            if (n.object !== params.objectType) return false;
+                            if (params.fields && params.fields.length > 0) {
+                                return params.fields.includes(n.field);
+                            }
+                            return true;
+                        });
+                        roots.forEach(r => {
+                            const id = r.id || (r.object && r.field ? `${r.object}.${r.field}` : null);
+                            if (!id) return;
+                            depthMap.set(id, 0);
+                            queue.push(id);
+                        });
+                        while (queue.length > 0) {
+                            const cur = queue.shift();
+                            const curDepth = depthMap.get(cur) || 0;
+                            (adj[cur] || []).forEach(next => {
+                                if (!depthMap.has(next)) {
+                                    depthMap.set(next, curDepth + 1);
+                                    queue.push(next);
+                                }
+                            });
+                        }
+                    }
+
+                    // 先根据字段深度统计每个对象的最小层级，用于对象框分层着色
+                    data.nodes.forEach(n => {
+                        const nodeId = n.id || (n.object && n.field ? `${n.object}.${n.field}` : null);
+                        if (!nodeId) return;
+                        const d = depthMap.has(nodeId) ? depthMap.get(nodeId) : null;
+                        if (d == null) return;
+                        const prev = objectMinDepth.has(n.object) ? objectMinDepth.get(n.object) : null;
+                        if (prev == null || d < prev) {
+                            objectMinDepth.set(n.object, d);
+                        }
+                    });
+
+                    // Parent Nodes（对象框）
                     data.nodes.forEach(n => {
                         if(!objMap.has(n.object)) {
                             objMap.add(n.object);
+                            const objDepth = objectMinDepth.has(n.object) ? objectMinDepth.get(n.object) : null;
                             nodes.push({
                                 group: 'nodes',
-                                data: { id: `grp_${n.object}`, label: n.object, group: 'object', isView: viewObjs.has(n.object)?'true':'false' }
+                                data: { id: `grp_${n.object}`, label: n.object, group: 'object', isView: viewObjs.has(n.object)?'true':'false', depth: objDepth }
                             });
                         }
                         const nodeId = n.id || `${n.object}.${n.field}`;
+                        const depth = depthMap.has(nodeId) ? depthMap.get(nodeId) : null;
                         nodeIds.add(nodeId);
                         nodes.push({
                             group: 'nodes',
                             data: {
                                 id: nodeId, parent: `grp_${n.object}`, label: n.field, type: 'field',
+                                depth,
                                 meta: { title: n.title, type: n.type, bizType: n.bizType, expression: n.expression || n.triggerExpr || n.virtualExpr }
                             }
                         });
@@ -1138,17 +1253,98 @@
                 };
 
                 const layoutGraph = () => {
+                    const cy = cyInstance.value;
+                    if (!cy) return;
                     try {
-                        // 使用 breadthfirst 布局，对 compound nodes 更友好
-                        cyInstance.value.layout({ 
-                            name: 'breadthfirst', 
-                            directed: true, 
-                            padding: 50,
-                            spacingFactor: 1.5,
-                            avoidOverlap: true,
-                            animate: false
-                        }).run();
-                    } catch(e) {
+                        const layerGapX = 260;   // 层级之间的水平间距
+                        const fieldGapY = 32;    // 同对象字段之间的垂直间距
+                        const objMarginY = 40;   // 同层对象之间的间隔
+
+                        // 1. 统计每个对象下的字段数量，用于估算对象高度，避免上下重叠
+                        const objFieldCounts = new Map();
+                        cy.nodes('node[type="field"]').forEach(node => {
+                            const parent = node.parent();
+                            const objName = parent.length > 0 ? parent.data('label') : null;
+                            if (!objName) return;
+                            objFieldCounts.set(objName, (objFieldCounts.get(objName) || 0) + 1);
+                        });
+
+                        // 2. 对象节点按 depth 分层
+                        const depthToObjects = new Map();
+                        cy.nodes('[group="object"]').forEach(node => {
+                            let d = node.data('depth');
+                            if (d === undefined || d === null || isNaN(Number(d))) d = 0;
+                            const depth = Number(d);
+                            if (!depthToObjects.has(depth)) depthToObjects.set(depth, []);
+                            depthToObjects.get(depth).push(node);
+                        });
+
+                        // 3. 为每一层的对象分配 X/Y 坐标，按“高度 + 间隔”顺次向下排，避免重叠
+                        const objectPositions = new Map(); // objName -> {x,y}
+                        const allDepths = Array.from(depthToObjects.keys()).sort((a, b) => a - b);
+
+                        allDepths.forEach(depth => {
+                            const objs = depthToObjects.get(depth).sort((a, b) => {
+                                const la = a.data('label') || '';
+                                const lb = b.data('label') || '';
+                                return String(la).localeCompare(String(lb));
+                            });
+                            const x = depth * layerGapX;
+                            let cursorY = 0;
+                            objs.forEach((node, idx) => {
+                                const objName = node.data('label');
+                                const fieldCount = objFieldCounts.get(objName) || 1;
+                                const estimatedHeight = Math.max(fieldCount * fieldGapY + 40, 120);
+                                const yCenter = cursorY + estimatedHeight / 2;
+                                objectPositions.set(objName, { x, y: yCenter });
+                                cursorY += estimatedHeight + objMarginY;
+                            });
+                        });
+
+                        // 4. 为字段节点分配坐标：跟随所属对象，同一对象内部上下排布
+                        const fieldPositions = new Map(); // nodeId -> {x,y}
+                        const objToFields = new Map();
+
+                        cy.nodes('node[type="field"]').forEach(node => {
+                            const parent = node.parent();
+                            const objName = parent.length > 0 ? parent.data('label') : null;
+                            if (!objName) return;
+                            if (!objToFields.has(objName)) objToFields.set(objName, []);
+                            objToFields.get(objName).push(node);
+                        });
+
+                        objToFields.forEach((fields, objName) => {
+                            const basePos = objectPositions.get(objName);
+                            if (!basePos) return;
+                            const list = fields.sort((a, b) => {
+                                const la = a.data('label') || '';
+                                const lb = b.data('label') || '';
+                                return String(la).localeCompare(String(lb));
+                            });
+                            const n = list.length;
+                            const centerIndex = (n - 1) / 2;
+                            list.forEach((node, idx) => {
+                                const y = basePos.y + (idx - centerIndex) * fieldGapY;
+                                fieldPositions.set(node.id(), { x: basePos.x, y });
+                            });
+                        });
+
+                        // 5. 应用坐标（使用 preset 布局）
+                        cy.batch(() => {
+                            cy.nodes('[group=\"object\"]').positions(node => {
+                                const pos = objectPositions.get(node.data('label'));
+                                if (!pos) return { x: 0, y: 0 };
+                                return pos;
+                            });
+                            cy.nodes('node[type=\"field\"]').positions(node => {
+                                const pos = fieldPositions.get(node.id());
+                                if (!pos) return { x: 0, y: 0 };
+                                return pos;
+                            });
+                        });
+
+                        cy.fit(undefined, 80);
+                    } catch (e) {
                         console.error('布局失败:', e);
                         ElMessage.error('图布局失败，请尝试减少深度或筛选条件');
                     }
@@ -1759,7 +1955,8 @@
                     highlightRelatedNodes, clearRelatedHighlight, fitToRelatedNodes,
                     highlightRelatedNodes, clearRelatedHighlight, fitToRelatedNodes,
                     getStepClass, getBadgeClass, getObjectStyle, getObjectColor, getGroupCardStyle, copyFieldExplain, copyGroupExplain,
-                    loadSourceImpact, openSourceFieldInGraph, formatJsonOneLine, selectSourceField
+                    loadSourceImpact, openSourceFieldInGraph, formatJsonOneLine, selectSourceField,
+                    generateUpgradeScript
                 };
             }
         });

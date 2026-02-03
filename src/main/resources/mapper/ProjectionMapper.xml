@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.deepmodel.relation.dao.ProjectionMapper">
+
+    <!-- 查询所有映射关系 -->
+    <select id="findAllProjections" resultType="com.deepmodel.relation.model.ProjectionModels$Projection">
+        SELECT id, object_type as objectType, to_object_type as toObjectType, criteria_str as criteriaStr
+        FROM baseapp_projection
+        ORDER BY object_type, to_object_type
+    </select>
+
+    <!-- 根据ID查询映射关系 -->
+    <select id="findProjectionById" resultType="com.deepmodel.relation.model.ProjectionModels$Projection">
+        SELECT id, object_type as objectType, to_object_type as toObjectType, criteria_str as criteriaStr
+        FROM baseapp_projection
+        WHERE id = #{id}
+    </select>
+
+    <!-- 根据源对象查询下游映射 -->
+    <select id="findDownstreamProjections" resultType="com.deepmodel.relation.model.ProjectionModels$Projection">
+        SELECT id, object_type as objectType, to_object_type as toObjectType, criteria_str as criteriaStr
+        FROM baseapp_projection
+        WHERE object_type = #{objectType}
+        ORDER BY to_object_type
+    </select>
+
+    <!-- 根据目标对象查询上游映射 -->
+    <select id="findUpstreamProjections" resultType="com.deepmodel.relation.model.ProjectionModels$Projection">
+        SELECT id, object_type as objectType, to_object_type as toObjectType, criteria_str as criteriaStr
+        FROM baseapp_projection
+        WHERE to_object_type = #{toObjectType}
+        ORDER BY object_type
+    </select>
+
+    <!-- 查询所有涉及的对象类型 -->
+    <select id="findAllObjectTypes" resultType="java.lang.String">
+        SELECT DISTINCT object_type FROM baseapp_projection
+        UNION
+        SELECT DISTINCT to_object_type FROM baseapp_projection
+        ORDER BY 1
+    </select>
+
+    <!-- 查询映射的主表字段配置 -->
+    <select id="findFieldMappings" resultType="com.deepmodel.relation.model.ProjectionModels$FieldMapping">
+        SELECT pfm.id, 
+               pfm.object_field as objectField, 
+               pfm.to_object_field as toObjectField, 
+               pfm.expr, 
+               pfm.field_mapping_type_id as fieldMappingTypeId
+        FROM baseapp_projection_field_mapping pfm
+        WHERE pfm.id = #{projectionId}
+        ORDER BY pfm.to_object_field
+    </select>
+
+    <!-- 查询映射的子表配置 -->
+    <select id="findProjectionChildren" resultType="com.deepmodel.relation.model.ProjectionModels$ProjectionChild">
+        SELECT pc.id,
+               pc.object_type as objectType,
+               pc.to_object_type as toObjectType,
+               pc.criteria_str as criteriaStr,
+               (SELECT COUNT(*) 
+                FROM baseapp_projection_child_field_mapping pcfm 
+                WHERE pcfm.id = pc.id) as fieldCount
+        FROM baseapp_projection_child pc
+        ORDER BY pc.object_type
+    </select>
+
+    <!-- 查询子表的字段映射配置 -->
+    <select id="findChildFieldMappings" resultType="com.deepmodel.relation.model.ProjectionModels$ProjectionChildFieldMapping">
+        SELECT id,
+               object_field as objectField,
+               to_object_field as toObjectField,
+               expr,
+               field_mapping_type_id as fieldMappingTypeId
+        FROM baseapp_projection_child_field_mapping
+        WHERE id = #{childId}
+        ORDER BY to_object_field
+    </select>
+
+    <!-- 字段追踪 - 主表字段 -->
+    <select id="trackFieldInMain" resultType="com.deepmodel.relation.model.ProjectionModels$FieldTrackResult">
+        SELECT p.id as projectionId,
+               p.object_type as objectType,
+               p.to_object_type as toObjectType,
+               pfm.object_field as objectField,
+               pfm.to_object_field as toObjectField,
+               pfm.expr,
+               'main' as level
+        FROM baseapp_projection p
+        JOIN baseapp_projection_field_mapping pfm ON pfm.id = p.id
+        WHERE pfm.object_field LIKE CONCAT('%', #{field}, '%')
+           OR pfm.to_object_field LIKE CONCAT('%', #{field}, '%')
+           OR pfm.expr LIKE CONCAT('%', #{field}, '%')
+        ORDER BY p.object_type, p.to_object_type
+    </select>
+
+    <!-- 字段追踪 - 子表字段 -->
+    <select id="trackFieldInChild" resultType="com.deepmodel.relation.model.ProjectionModels$FieldTrackResult">
+        SELECT p.id as projectionId,
+               p.object_type as objectType,
+               p.to_object_type as toObjectType,
+               pc.object_type as childObjectType,
+               pc.to_object_type as childToObjectType,
+               pcfm.object_field as objectField,
+               pcfm.to_object_field as toObjectField,
+               pcfm.expr,
+               'child' as level
+        FROM baseapp_projection p
+        CROSS JOIN baseapp_projection_child pc
+        JOIN baseapp_projection_child_field_mapping pcfm ON pcfm.id = pc.id
+        WHERE (pcfm.object_field LIKE CONCAT('%', #{field}, '%')
+           OR pcfm.to_object_field LIKE CONCAT('%', #{field}, '%')
+           OR pcfm.expr LIKE CONCAT('%', #{field}, '%'))
+        ORDER BY p.object_type, p.to_object_type
+    </select>
+
+    <!-- 统计映射关系的字段数量 -->
+    <select id="countFieldMappings" resultType="int">
+        SELECT COUNT(*)
+        FROM baseapp_projection_field_mapping
+        WHERE id = #{projectionId}
+    </select>
+
+    <!-- 统计映射关系的子表数量 -->
+    <select id="countChildren" resultType="int">
+        SELECT COUNT(*)
+        FROM baseapp_projection_child
+    </select>
+
+</mapper>
