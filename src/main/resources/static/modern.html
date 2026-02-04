@@ -242,6 +242,15 @@
                                 icon="Document">
                                 生成升级脚本
                             </el-button>
+                            <el-button
+                                type="primary"
+                                size="large"
+                                class="action-btn"
+                                :disabled="!hasGraphData"
+                                @click="exportGraphQL"
+                                icon="DocumentCopy">
+                                导出 GraphQL
+                            </el-button>
                         </div>
                         
                         <!-- 对象过滤器 -->
@@ -554,6 +563,26 @@
                 </div>
             </main>
         </div>
+
+        <!-- GraphQL 导出弹窗 -->
+        <el-dialog
+            v-model="graphQLDialogVisible"
+            title="导出 GraphQL"
+            width="560px"
+            destroy-on-close
+            append-to-body>
+            <p style="color:#64748b; font-size: 13px; margin-bottom: 12px;">以下为当前图谱中可见对象与字段，criteriaStr 已用占位符 <code>&lt;criteriaStr&gt;</code>，可按需替换为实际条件（如 id='xxx'）。</p>
+            <div v-if="graphqlTenantId" style="margin-bottom: 12px; padding: 10px 12px; background: #eff6ff; border-radius: 8px; font-size: 13px;">
+                <span style="color:#64748b;">请求头 Tenant-Id：</span>
+                <code style="font-weight: 600;">{{ graphqlTenantId }}</code>
+                <el-button size="small" text type="primary" @click="copyTenantId" style="margin-left: 8px;">复制</el-button>
+            </div>
+            <pre style="background:#f1f5f9; padding: 16px; border-radius: 8px; overflow: auto; max-height: 400px; font-size: 13px; margin: 0;">{{ graphQLText }}</pre>
+            <template #footer>
+                <el-button @click="graphQLDialogVisible = false">关闭</el-button>
+                <el-button type="primary" @click="copyGraphQL" icon="DocumentCopy">复制查询</el-button>
+            </template>
+        </el-dialog>
     </div>
 
     <script>
@@ -601,6 +630,12 @@
                 
                 // 统计信息
                 const graphStats = ref(null);
+
+                // GraphQL 导出
+                const graphQLDialogVisible = ref(false);
+                const graphQLText = ref('');
+                const graphqlUrl = ref('https://graphql-test-tx-16.e7link.com/graphiql/index.html');
+                const graphqlTenantId = ref('711FNX50G6V0009');
 
                 // 来源对象影响分析
                 const sourceObject = ref('');
@@ -961,7 +996,81 @@
                         + `&relTypes=${encodeURIComponent(relTypes)}`;
                     window.open(url, '_blank');
                 };
-                
+
+                // 从当前图谱（可见节点）导出 GraphQL 查询，复制到剪贴板并打开配置的 GraphQL 地址
+                const exportGraphQL = async () => {
+                    const cy = cyInstance.value;
+                    if (!cy) {
+                        ElMessage.warning('请先进行分析');
+                        return;
+                    }
+                    const fieldNodes = cy.nodes('node[type="field"]').not('.hidden-obj');
+                    if (fieldNodes.length === 0) {
+                        ElMessage.warning('当前没有可见的字段节点，请先进行分析或调整对象过滤');
+                        return;
+                    }
+                    const objToFields = new Map(); // objectType -> Set(field names)
+                    fieldNodes.forEach(node => {
+                        const parentId = node.data('parent');
+                        const objectType = parentId && typeof parentId === 'string' ? parentId.replace(/^grp_/, '') : null;
+                        const fieldName = node.data('label');
+                        if (!objectType || !fieldName) return;
+                        if (!objToFields.has(objectType)) objToFields.set(objectType, new Set());
+                        objToFields.get(objectType).add(fieldName);
+                    });
+                    const lines = [];
+                    const criteriaPlaceholder = '"<criteriaStr>"';
+                    Array.from(objToFields.entries())
+                        .sort((a, b) => a[0].localeCompare(b[0]))
+                        .forEach(([obj, fields]) => {
+                            const fieldList = Array.from(fields).sort().join('\n    ');
+                            lines.push(`  ${obj}(criteriaStr: ${criteriaPlaceholder}) {\n    ${fieldList}\n  }`);
+                        });
+                    const query = '{\n' + lines.join('\n') + '\n}';
+                    graphQLText.value = query;
+
+                    try {
+                        await navigator.clipboard.writeText(query);
+                    } catch (e) {
+                        ElMessage.error('复制查询失败');
+                    }
+
+                    const url = (graphqlUrl.value || '').trim();
+                    if (url) {
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                        ElMessage.success({
+                            message: graphqlTenantId.value
+                                ? `已复制查询并打开 GraphQL 控制台，请在新页面粘贴 (Ctrl+V)。请求头 Tenant-Id 请设置为：${graphqlTenantId.value}`
+                                : '已复制查询并打开 GraphQL 控制台，请在新页面粘贴 (Ctrl+V)',
+                            duration: 5000
+                        });
+                    } else {
+                        ElMessage.warning('未配置 GraphQL 地址，仅已复制查询到剪贴板');
+                    }
+                    graphQLDialogVisible.value = true;
+                };
+
+                const copyGraphQL = async () => {
+                    try {
+                        await navigator.clipboard.writeText(graphQLText.value);
+                        ElMessage.success('已复制查询到剪贴板');
+                    } catch (e) {
+                        ElMessage.error('复制失败');
+                    }
+                };
+
+                const copyTenantId = async () => {
+                    if (!graphqlTenantId.value) return;
+                    try {
+                        await navigator.clipboard.writeText(graphqlTenantId.value);
+                        ElMessage.success('已复制 Tenant-Id');
+                    } catch (e) {
+                        ElMessage.error('复制失败');
+                    }
+                };
+
+                const hasGraphData = computed(() => graphStats.value && graphStats.value.fieldCount > 0);
+
                 // 计算统计信息
                 const calculateStats = (data) => {
                     if (!data || !data.nodes || !data.edges) {
@@ -1964,7 +2073,9 @@
                     highlightRelatedNodes, clearRelatedHighlight, fitToRelatedNodes,
                     getStepClass, getBadgeClass, getObjectStyle, getObjectColor, getGroupCardStyle, copyFieldExplain, copyGroupExplain,
                     loadSourceImpact, openSourceFieldInGraph, formatJsonOneLine, selectSourceField,
-                    generateUpgradeScript
+                    generateUpgradeScript,
+                    hasGraphData, exportGraphQL, graphQLDialogVisible, graphQLText, copyGraphQL,
+                    graphqlUrl, graphqlTenantId, copyTenantId
                 };
             }
         });
