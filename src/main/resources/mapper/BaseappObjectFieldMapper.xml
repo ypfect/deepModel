@@ -44,4 +44,11 @@
       and is_deleted = false
   </select>
 
+  <select id="selectAppNameByObjectType" resultType="string">
+    select app_name
+    from baseapp_object_type
+    where name = #{objectType}
+    limit 1
+  </select>
+
 </mapper>

@@ -1,5 +1,11 @@
 server:
   port: 18080
+
+# 回写 SQL 接口（调用外部 arap 服务）
+writeback-sql:
+  api-url: http://arap.test-tx-16.e7link.com/arap/gen/debug/writeBackField2sql
+  tenant-id: 711FNX50G6V0009
+
 spring:
   datasource:
 #    url: jdbc:postgresql://localhost:5432/testapp

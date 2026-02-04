@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DeepModel Insight</title>
+    <title>DeepModel Insight - 字段影响分析</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'><path d='M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.18l6.9 3.45L12 11.09 5.1 7.63 12 4.18zM4 8.82l7 3.5v7.36l-7-3.5V8.82zm9 10.86v-7.36l7-3.5v7.36l-7 3.5z'/></svg>">
     <!-- 引入样式 -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
     <style>
@@ -105,6 +106,12 @@
         
         /* Init Error */
         #init-error { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #fee2e2; color: #991b1b; padding: 12px 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 9999; display: none; font-weight: bold; border: 1px solid #ef4444; }
+        /* 顶部 tab 图标统一对齐 */
+        .tab-icon, .source-tab-icon { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; margin-right: 6px; font-size: 14px; width: 1em; }
+        .source-tab-icon { font-weight: bold; opacity: 0.9; }
+        /* 左侧「开始分析」「生成升级脚本」对齐 */
+        .action-buttons { margin-top: 20px; display: flex; flex-direction: column; gap: 8px; }
+        .action-buttons .action-btn { width: 100%; margin: 0 !important; min-height: 40px; box-sizing: border-box; }
     </style>
     <!-- Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.js"></script>
@@ -129,15 +136,15 @@
             <div style="flex: 1"></div>
             <el-radio-group v-model="viewMode" size="small">
                 <el-radio-button label="graph">
-                    <el-icon style="vertical-align: middle; margin-right: 4px;"><Connection /></el-icon>
+                    <span class="tab-icon"><el-icon><Connection /></el-icon></span>
                     <span>图谱</span>
                 </el-radio-button>
                 <el-radio-button label="explain">
-                    <el-icon style="vertical-align: middle; margin-right: 4px;"><List /></el-icon>
+                    <span class="tab-icon"><el-icon><List /></el-icon></span>
                     <span>归因</span>
                 </el-radio-button>
                 <el-radio-button label="source">
-                    <el-icon style="vertical-align: middle; margin-right: 4px;"><ArrowRight /></el-icon>
+                    <span class="source-tab-icon" aria-hidden="true">↗</span>
                     <span>来源对象</span>
                 </el-radio-button>
             </el-radio-group>
@@ -216,22 +223,23 @@
                             </div>
                         </div>
 
-                        <div style="margin-top: 20px;">
+                        <div class="action-buttons">
                             <el-button
                                 type="primary"
                                 size="large"
-                                style="width: 100%"
+                                class="action-btn"
                                 @click="runAnalysis"
                                 :loading="analyzing"
                                 icon="Search">
                                 开始分析
                             </el-button>
                             <el-button
-                                type="success"
-                                size="small"
-                                style="width: 100%; margin-top: 8px;"
+                                type="primary"
+                                size="large"
+                                class="action-btn"
                                 :disabled="!params.objectType || !params.fields || params.fields.length === 0"
-                                @click="generateUpgradeScript">
+                                @click="generateUpgradeScript"
+                                icon="Document">
                                 生成升级脚本
                             </el-button>
                         </div>
