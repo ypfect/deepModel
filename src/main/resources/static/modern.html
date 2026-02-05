@@ -1019,7 +1019,7 @@
                         objToFields.get(objectType).add(fieldName);
                     });
                     const lines = [];
-                    const criteriaPlaceholder = '"<criteriaStr>"';
+                    const criteriaPlaceholder = '"id=\'replaceId\'"';
                     Array.from(objToFields.entries())
                         .sort((a, b) => a[0].localeCompare(b[0]))
                         .forEach(([obj, fields]) => {
