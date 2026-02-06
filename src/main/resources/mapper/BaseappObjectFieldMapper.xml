@@ -40,8 +40,7 @@
   <select id="selectViewDefinitions" resultType="string">
     select content::text
     from baseapp_system_metadata
-    where name like '%View%'
-      and is_deleted = false
+    where is_deleted = false
   </select>
 
   <select id="selectAppNameByObjectType" resultType="string">
@@ -49,6 +48,11 @@
     from baseapp_object_type
     where name = #{objectType}
     limit 1
+  </select>
+
+  <select id="selectObjectTitles" resultMap="BaseappObjectFieldMap">
+    select name, title
+    from baseapp_object_type
   </select>
 
 </mapper>

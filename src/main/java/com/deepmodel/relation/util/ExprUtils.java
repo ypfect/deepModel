@@ -97,6 +97,50 @@ public class ExprUtils {
         }
         return out;
     }
+
+    /**
+     * 和 {@link #extractCamelFieldsFromSql(String)} 逻辑一致，但保留字段出现顺序，
+     * 用于判断一段表达式中是否存在某个字段序列的「连续子序列」。
+     */
+    public static List<String> extractCamelFieldSequence(String expr) {
+        List<String> out = new ArrayList<String>();
+        if(expr==null || expr.trim().isEmpty()) return out;
+        // 去掉单引号字符串
+        String noStr = SINGLE_QUOTE_STR.matcher(expr).replaceAll(" ");
+        // 用非标识符替换为空格，保留点号用于 alias.field 拆分
+        String norm = NON_ID.matcher(noStr).replaceAll(" ");
+        String[] tokens = norm.split("\\s+");
+        for(String tok : tokens){
+            if(tok==null || tok.isEmpty()) continue;
+            // 去别名
+            int dot = tok.lastIndexOf('.');
+            String id = (dot>=0 && dot<tok.length()-1) ? tok.substring(dot+1) : tok;
+            String low = id.toLowerCase();
+            if(SQL_STOPWORDS.contains(low)) continue;
+            
+            // 修复：检查是否为有效字段标识符
+            if(id.matches("[a-zA-Z_][a-zA-Z0-9_]*")){
+                // 下划线字段转驼峰
+                if(id.indexOf('_')>=0){
+                    String camel = snakeToCamel(id);
+                    if(!camel.isEmpty() && !out.contains(camel)) out.add(camel);
+                } 
+                // camelCase 字段：首字母小写且包含大写
+                else if(id.length()>1 && Character.isLowerCase(id.charAt(0)) && containsUppercase(id)){
+                    if(!out.contains(id)) out.add(id);
+                }
+                // 纯小写字段（如 amount, id 等）- 这是修复的关键
+                else if(id.matches("[a-z][a-z0-9]*") && id.length() >= 2){
+                    // 排除明显的 SQL 关键字和常见函数名
+                    if(!isCommonSqlFunction(id)) {
+                        if(!out.contains(id)) out.add(id);
+                    }
+                }
+                continue;
+            }
+        }
+        return out;
+    }
     
     /**
      * 判断是否为常见的 SQL 函数名或关键字

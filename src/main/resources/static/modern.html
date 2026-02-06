@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DeepModel Insight - 字段影响分析</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'><path d='M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.18l6.9 3.45L12 11.09 5.1 7.63 12 4.18zM4 8.82l7 3.5v7.36l-7-3.5V8.82zm9 10.86v-7.36l7-3.5v7.36l-7 3.5z'/></svg>">
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'><path d='M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.18l6.9 3.45L12 11.09 5.1 7.63 12 4.18zM4 8.82l7 3.5v7.36l-7-3.5V8.82zm9 10.86v-7.36l7-3.5v7.36l-7 3.5z'/></svg>">
     <!-- 引入样式 -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
     <style>
@@ -12,106 +14,418 @@
             --el-color-primary: #3b82f6;
             --sidebar-width: 320px;
         }
-        body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, sans-serif; background: #f8fafc; height: 100vh; overflow: hidden; }
-        #app { height: 100%; display: flex; flex-direction: column; }
-        
+
+        /* Fix multi-select input visibility */
+        .el-select .el-select__input {
+            color: #1f2937 !important;
+            opacity: 1 !important;
+            min-width: 100px !important;
+            width: auto !important;
+        }
+
+        .el-select .el-select__input::placeholder {
+            color: #9ca3af;
+        }
+
+        /* Fix tags container layout */
+        .el-select .el-select__tags {
+            position: relative !important;
+            top: auto !important;
+            transform: none !important;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: #f8fafc;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #app {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
         /* 顶部导航 */
-        .header { background: #fff; height: 56px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; padding: 0 24px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); z-index: 50; flex-shrink: 0; }
-        .logo { font-size: 18px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 8px; }
-        
+        .header {
+            background: #fff;
+            height: 56px;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+            z-index: 50;
+            flex-shrink: 0;
+        }
+
+        .logo {
+            font-size: 18px;
+            font-weight: 700;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
         /* 主布局 - 使用 Grid 布局更稳定 */
-        .main-container { flex: 1; display: grid; grid-template-columns: auto 1fr; overflow: hidden; position: relative; }
-        
+        .main-container {
+            flex: 1;
+            display: grid;
+            grid-template-columns: auto 1fr;
+            overflow: hidden;
+            position: relative;
+        }
+
         /* 左侧配置栏 */
-        .sidebar { 
-            width: var(--sidebar-width); 
-            background: #fff; 
-            border-right: 1px solid #e2e8f0; 
-            display: flex; 
-            flex-direction: column; 
-            z-index: 20; 
+        .sidebar {
+            width: var(--sidebar-width);
+            background: #fff;
+            border-right: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            z-index: 20;
             transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             overflow: hidden;
             position: relative;
         }
-        .sidebar.collapsed { width: 0; border-right: none; }
-        
+
+        .sidebar.collapsed {
+            width: 0;
+            border-right: none;
+        }
+
         /* 配置面板内容 */
-        .config-wrapper { width: var(--sidebar-width); height: 100%; display: flex; flex-direction: column; }
-        .config-panel { padding: 24px; flex: 1; overflow-y: auto; overflow-x: hidden; }
-        .config-item { margin-bottom: 24px; }
-        .config-label { font-size: 13px; color: #64748b; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; }
-        
+        .config-wrapper {
+            width: var(--sidebar-width);
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .config-panel {
+            padding: 24px;
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        .config-item {
+            margin-bottom: 24px;
+        }
+
+        .config-label {
+            font-size: 13px;
+            color: #64748b;
+            margin-bottom: 8px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
         /* 切换按钮 */
-        .toggle-btn-container { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 30; pointer-events: none; height: 0; width: 0; overflow: visible; }
-        .toggle-sidebar-btn { 
-            pointer-events: auto;
-            position: absolute; 
+        .toggle-btn-container {
+            position: absolute;
             left: 0;
-            background: #fff; 
-            border: 1px solid #e2e8f0; 
-            border-left: none; 
-            padding: 12px 4px; 
-            border-radius: 0 8px 8px 0; 
-            cursor: pointer; 
-            box-shadow: 4px 0 8px rgba(0,0,0,0.05); 
-            color: #64748b; 
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 30;
+            pointer-events: none;
+            height: 0;
+            width: 0;
+            overflow: visible;
+        }
+
+        .toggle-sidebar-btn {
+            pointer-events: auto;
+            position: absolute;
+            left: 0;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-left: none;
+            padding: 12px 4px;
+            border-radius: 0 8px 8px 0;
+            cursor: pointer;
+            box-shadow: 4px 0 8px rgba(0, 0, 0, 0.05);
+            color: #64748b;
             display: flex;
             align-items: center;
             transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        .sidebar:not(.collapsed) ~ .toggle-btn-container .toggle-sidebar-btn { left: var(--sidebar-width); }
-        
+
+        .sidebar:not(.collapsed)~.toggle-btn-container .toggle-sidebar-btn {
+            left: var(--sidebar-width);
+        }
+
         /* 内容区 */
-        .content { position: relative; background: #f1f5f9; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
-        #cy-container { width: 100%; height: 100%; }
-        
+        .content {
+            position: relative;
+            background: #f1f5f9;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-width: 0;
+        }
+
+        #cy-container {
+            width: 100%;
+            height: 100%;
+        }
+
         /* 其他组件样式 */
-        .floating-toolbar { position: absolute; top: 16px; right: 16px; background: rgba(255,255,255,0.9); padding: 8px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: flex; gap: 8px; z-index: 10; }
-        
+        .floating-toolbar {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            gap: 8px;
+            z-index: 10;
+        }
+
         /* 统计面板 */
-        .stats-panel { position: absolute; top: 16px; left: 16px; background: rgba(255,255,255,0.95); padding: 16px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 10; min-width: 200px; }
-        .stats-item { margin-bottom: 12px; }
-        .stats-label { font-size: 12px; color: #64748b; margin-bottom: 4px; }
-        .stats-value { font-size: 18px; font-weight: 700; color: #0f172a; }
-        .stats-sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
-        
+        .stats-panel {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 16px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            z-index: 10;
+            min-width: 200px;
+        }
+
+        .stats-item {
+            margin-bottom: 12px;
+        }
+
+        .stats-label {
+            font-size: 12px;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+
+        .stats-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .stats-sub {
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 2px;
+        }
+
         /* 搜索框 */
-        .search-box { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.95); padding: 8px 16px; border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 10; display: flex; align-items: center; gap: 8px; min-width: 300px; }
-        .search-box input { border: none; outline: none; flex: 1; font-size: 14px; }
-        
+        .search-box {
+            position: absolute;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 8px 16px;
+            border-radius: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 300px;
+        }
+
+        .search-box input {
+            border: none;
+            outline: none;
+            flex: 1;
+            font-size: 14px;
+        }
+
         /* 高亮样式 */
-        .node-highlighted { border-width: 3px !important; border-color: #f59e0b !important; background-color: #fef3c7 !important; }
-        .edge-highlighted { width: 4px !important; line-color: #f59e0b !important; target-arrow-color: #f59e0b !important; }
-        .path-highlighted { border-width: 3px !important; border-color: #10b981 !important; background-color: #d1fae5 !important; }
-        
-        .explain-container { padding: 32px; overflow-y: auto; height: 100%; max-width: 1000px; margin: 0 auto; box-sizing: border-box; }
-        .explain-card { border-radius: 12px; margin-bottom: 24px; border: 1px solid #e2e8f0; overflow: hidden; }
-        .explain-group-header { padding: 12px 24px; border-bottom: 1px solid #e2e8f0; font-weight: 600; }
-        .step-item { padding: 16px 24px; border-left: 3px solid transparent; transition: background 0.2s; }
-        .step-item:hover { background: #f8fafc; }
-        .step-intra { border-left-color: #3b82f6; }
-        .step-wb { border-left-color: #10b981; }
-        .step-view { border-left-color: #8b5cf6; }
-        .code-box { font-family: monospace; font-size: 12px; background: #f1f5f9; padding: 8px 12px; border-radius: 6px; color: #475569; margin-top: 8px; white-space: pre-wrap; word-break: break-all; }
-        .code-box-inline { font-family: monospace; font-size: 12px; background: #f1f5f9; padding: 6px 8px; border-radius: 6px; color: #475569; white-space: pre; overflow-x: auto; overflow-y: hidden; }
-        .badge { display: inline-flex; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
-        .badge-blue { background: #dbeafe; color: #1e40af; }
-        .badge-green { background: #d1fae5; color: #065f46; }
-        .badge-purple { background: #ede9fe; color: #5b21b6; }
-        
+        .node-highlighted {
+            border-width: 3px !important;
+            border-color: #f59e0b !important;
+            background-color: #fef3c7 !important;
+        }
+
+        .edge-highlighted {
+            width: 4px !important;
+            line-color: #f59e0b !important;
+            target-arrow-color: #f59e0b !important;
+        }
+
+        .path-highlighted {
+            border-width: 3px !important;
+            border-color: #10b981 !important;
+            background-color: #d1fae5 !important;
+        }
+
+        .explain-container {
+            padding: 32px;
+            overflow-y: auto;
+            height: 100%;
+            max-width: 1000px;
+            margin: 0 auto;
+            box-sizing: border-box;
+        }
+
+        .explain-card {
+            border-radius: 12px;
+            margin-bottom: 24px;
+            border: 1px solid #e2e8f0;
+            overflow: hidden;
+        }
+
+        .explain-group-header {
+            padding: 12px 24px;
+            border-bottom: 1px solid #e2e8f0;
+            font-weight: 600;
+        }
+
+        .step-item {
+            padding: 16px 24px;
+            border-left: 3px solid transparent;
+            transition: background 0.2s;
+        }
+
+        .step-item:hover {
+            background: #f8fafc;
+        }
+
+        .step-intra {
+            border-left-color: #3b82f6;
+        }
+
+        .step-wb {
+            border-left-color: #10b981;
+        }
+
+        .step-view {
+            border-left-color: #8b5cf6;
+        }
+
+        .code-box {
+            font-family: monospace;
+            font-size: 12px;
+            background: #f1f5f9;
+            padding: 8px 12px;
+            border-radius: 6px;
+            color: #475569;
+            margin-top: 8px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .code-box-inline {
+            font-family: monospace;
+            font-size: 12px;
+            background: #f1f5f9;
+            padding: 6px 8px;
+            border-radius: 6px;
+            color: #475569;
+            white-space: pre;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+
+        .badge {
+            display: inline-flex;
+            padding: 2px 8px;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge-blue {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .badge-green {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-purple {
+            background: #ede9fe;
+            color: #5b21b6;
+        }
+
         /* Detail Drawer */
-        .detail-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 340px; background: #fff; border-left: 1px solid #e2e8f0; transform: translateX(100%); transition: transform 0.3s; z-index: 40; display: flex; flex-direction: column; box-shadow: -4px 0 16px rgba(0,0,0,0.05); }
-        .detail-drawer.visible { transform: translateX(0); }
-        
+        .detail-drawer {
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 340px;
+            background: #fff;
+            border-left: 1px solid #e2e8f0;
+            transform: translateX(100%);
+            transition: transform 0.3s;
+            z-index: 40;
+            display: flex;
+            flex-direction: column;
+            box-shadow: -4px 0 16px rgba(0, 0, 0, 0.05);
+        }
+
+        .detail-drawer.visible {
+            transform: translateX(0);
+        }
+
         /* Init Error */
-        #init-error { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #fee2e2; color: #991b1b; padding: 12px 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 9999; display: none; font-weight: bold; border: 1px solid #ef4444; }
+        #init-error {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 12px 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            z-index: 9999;
+            display: none;
+            font-weight: bold;
+            border: 1px solid #ef4444;
+        }
+
         /* 顶部 tab 图标统一对齐 */
-        .tab-icon, .source-tab-icon { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; margin-right: 6px; font-size: 14px; width: 1em; }
-        .source-tab-icon { font-weight: bold; opacity: 0.9; }
+        .tab-icon,
+        .source-tab-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            vertical-align: middle;
+            margin-right: 6px;
+            font-size: 14px;
+            width: 1em;
+        }
+
+        .source-tab-icon {
+            font-weight: bold;
+            opacity: 0.9;
+        }
+
         /* 左侧「开始分析」「生成升级脚本」对齐 */
-        .action-buttons { margin-top: 20px; display: flex; flex-direction: column; gap: 8px; }
-        .action-buttons .action-btn { width: 100%; margin: 0 !important; min-height: 40px; box-sizing: border-box; }
+        .action-buttons {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .action-buttons .action-btn {
+            width: 100%;
+            margin: 0 !important;
+            min-height: 40px;
+            box-sizing: border-box;
+        }
     </style>
     <!-- Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.js"></script>
@@ -121,6 +435,7 @@
     <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
 </head>
+
 <body>
     <div id="init-error">
         页面初始化失败，请检查网络连接或控制台日志。
@@ -130,17 +445,24 @@
         <!-- Header -->
         <header class="header">
             <div class="logo">
-                <el-icon size="24" color="#3b82f6"><Share /></el-icon>
+                <el-icon size="24" color="#3b82f6">
+                    <Share />
+                </el-icon>
                 <span>DeepModel Insight</span>
             </div>
             <div style="flex: 1"></div>
+
             <el-radio-group v-model="viewMode" size="small">
                 <el-radio-button label="graph">
-                    <span class="tab-icon"><el-icon><Connection /></el-icon></span>
+                    <span class="tab-icon"><el-icon>
+                            <Connection />
+                        </el-icon></span>
                     <span>图谱</span>
                 </el-radio-button>
                 <el-radio-button label="explain">
-                    <span class="tab-icon"><el-icon><List /></el-icon></span>
+                    <span class="tab-icon"><el-icon>
+                            <List />
+                        </el-icon></span>
                     <span>归因</span>
                 </el-radio-button>
                 <el-radio-button label="source">
@@ -157,45 +479,51 @@
                     <div class="config-panel">
                         <div class="config-item">
                             <div class="config-label">核心对象</div>
-                            <el-select 
-                                v-model="params.objectType" 
-                                filterable 
-                                placeholder="请选择对象..." 
-                                style="width: 100%" 
-                                @change="handleObjectChange"
-                                :loading="metaLoading">
-                                <el-option v-for="item in objectOptions" :key="item" :label="item" :value="item"></el-option>
+                            <el-select v-model="params.objectType" filterable :filter-method="filterObjects"
+                                default-first-option placeholder="输入对象名或标题搜索..." style="width: 100%"
+                                @change="handleObjectChange" :loading="metaLoading">
+                                <el-option v-for="item in filteredObjectOptions" :key="item.value" :label="item.label"
+                                    :value="item.value">
+                                    <div
+                                        style="display:flex; flex-direction:column; justify-content:center; line-height:1.2; padding:4px 0">
+                                        <div style="font-weight:600; font-size:13px">{{ item.value }}</div>
+                                        <div style="color:#64748b; font-size:11px" v-if="item.title">{{ item.title }}
+                                        </div>
+                                    </div>
+                                </el-option>
                             </el-select>
                         </div>
-                        
                         <div class="config-item">
                             <div class="config-label">
                                 关注字段
                                 <el-tooltip content="支持多选字段进行批量分析" placement="top">
-                                    <el-icon style="margin-left: 4px; cursor: help;"><QuestionFilled /></el-icon>
+                                    <el-icon style="margin-left: 4px; cursor: help;">
+                                        <QuestionFilled />
+                                    </el-icon>
                                 </el-tooltip>
                             </div>
-                            <el-select 
-                                v-model="params.fields" 
-                                filterable 
-                                allow-create
-                                default-first-option
-                                multiple
-                                collapse-tags
-                                collapse-tags-tooltip
-                                placeholder="请选择字段（可多选）..." 
-                                style="width: 100%"
-                                :disabled="!params.objectType"
+                            <el-select v-model="params.fields" filterable :filter-method="filterFields"
+                                default-first-option multiple collapse-tags collapse-tags-tooltip
+                                placeholder="请输入字段名或标题搜索..." style="width: 100%" :disabled="!params.objectType"
                                 :loading="fieldLoading">
-                                <el-option v-for="item in fieldOptions" :key="item" :label="item" :value="item"></el-option>
+                                <el-option v-for="item in filteredFieldOptions" :key="item.value" :label="item.label"
+                                    :value="item.value">
+                                    <div
+                                        style="display:flex; flex-direction:column; justify-content:center; line-height:1.2; padding:4px 0">
+                                        <div style="font-weight:600; font-size:13px">{{ item.value }}</div>
+                                        <div style="color:#64748b; font-size:11px" v-if="item.title">{{ item.title }}
+                                        </div>
+                                    </div>
+                                </el-option>
                             </el-select>
-                            <div v-if="params.fields && params.fields.length > 0" style="margin-top: 8px; font-size: 12px; color: #64748b;">
+                            <div v-if="params.fields && params.fields.length > 0"
+                                style="margin-top: 8px; font-size: 12px; color: #64748b;">
                                 已选择 {{ params.fields.length }} 个字段
                             </div>
                         </div>
-                        
+
                         <el-divider border-style="dashed"></el-divider>
-                        
+
                         <div class="config-item">
                             <div class="config-label">分析方向</div>
                             <el-radio-group v-model="params.direction" style="width: 100%">
@@ -203,12 +531,13 @@
                                 <el-radio-button label="upstream" style="width: 50%">追溯上游</el-radio-button>
                             </el-radio-group>
                         </div>
-                        
+
                         <div class="config-item">
                             <div class="config-label">
                                 <div style="display:flex;justify-content:space-between">
                                     <span>探索深度</span>
-                                    <span style="font-weight:bold;color:var(--el-color-primary)">{{ params.depth }}层</span>
+                                    <span style="font-weight:bold;color:var(--el-color-primary)">{{ params.depth
+                                        }}层</span>
                                 </div>
                             </div>
                             <el-slider v-model="params.depth" :min="1" :max="6" show-stops></el-slider>
@@ -218,56 +547,48 @@
                             <div class="config-label">包含关系</div>
                             <div style="display:flex;flex-direction:column;gap:8px">
                                 <el-checkbox v-model="params.relTypes" label="intra" border>内部触发 (Intra)</el-checkbox>
-                                <el-checkbox v-model="params.relTypes" label="writeBack" border>回写汇总 (WriteBack)</el-checkbox>
+                                <el-checkbox v-model="params.relTypes" label="writeBack" border>回写汇总
+                                    (WriteBack)</el-checkbox>
                                 <el-checkbox v-model="params.relTypes" label="view" border>视图映射 (View)</el-checkbox>
                             </div>
                         </div>
 
                         <div class="action-buttons">
-                            <el-button
-                                type="primary"
-                                size="large"
-                                class="action-btn"
-                                @click="runAnalysis"
-                                :loading="analyzing"
-                                icon="Search">
+                            <el-button type="primary" size="large" class="action-btn" @click="runAnalysis"
+                                :loading="analyzing" icon="Search">
                                 开始分析
                             </el-button>
-                            <el-button
-                                type="primary"
-                                size="large"
-                                class="action-btn"
+                            <el-button type="primary" size="large" class="action-btn"
                                 :disabled="!params.objectType || !params.fields || params.fields.length === 0"
-                                @click="generateUpgradeScript"
-                                icon="Document">
+                                @click="generateUpgradeScript" icon="Document">
                                 生成升级脚本
                             </el-button>
-                            <el-button
-                                type="primary"
-                                size="large"
-                                class="action-btn"
-                                :disabled="!hasGraphData"
-                                @click="exportGraphQL"
-                                icon="DocumentCopy">
+                            <el-button type="primary" size="large" class="action-btn" :disabled="!hasGraphData"
+                                @click="exportGraphQL" icon="DocumentCopy">
                                 导出 GraphQL
                             </el-button>
                         </div>
-                        
+
                         <!-- 对象过滤器 -->
-                        <div v-if="allObjects.length > 0" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
-                            <div class="config-label" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                        <div v-if="allObjects.length > 0"
+                            style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+                            <div class="config-label"
+                                style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
                                 <span>对象过滤 ({{ visibleObjects.length }}/{{ allObjects.length }})</span>
                                 <div style="display: flex; gap: 4px;">
                                     <el-button size="small" text @click="selectAllObjects">全选</el-button>
                                     <el-button size="small" text @click="deselectAllObjects">全不选</el-button>
                                 </div>
                             </div>
-                            <div style="max-height: 300px; overflow-y: auto; background: #f8fafc; border-radius: 6px; padding: 8px;">
-                                <el-checkbox-group v-model="visibleObjects" @change="applyObjectFilter" style="display: flex; flex-direction: column; gap: 4px;">
+                            <div
+                                style="max-height: 300px; overflow-y: auto; background: #f8fafc; border-radius: 6px; padding: 8px;">
+                                <el-checkbox-group v-model="visibleObjects" @change="applyObjectFilter"
+                                    style="display: flex; flex-direction: column; gap: 4px;">
                                     <el-checkbox v-for="obj in allObjects" :key="obj" :label="obj" style="margin: 0;">
                                         <span :style="{ color: obj.endsWith('View') ? '#8b5cf6' : '#334155' }">
                                             {{ obj }}
-                                            <span v-if="obj.endsWith('View')" style="font-size: 11px; color: #8b5cf6;">(视图)</span>
+                                            <span v-if="obj.endsWith('View')"
+                                                style="font-size: 11px; color: #8b5cf6;">(视图)</span>
                                         </span>
                                     </el-checkbox>
                                 </el-checkbox-group>
@@ -280,7 +601,9 @@
             <!-- Toggle Button (Outside Sidebar) -->
             <div class="toggle-btn-container">
                 <div class="toggle-sidebar-btn" @click="isSidebarCollapsed = !isSidebarCollapsed" title="切换侧边栏">
-                    <el-icon><component :is="isSidebarCollapsed ? 'ArrowRight' : 'ArrowLeft'" /></el-icon>
+                    <el-icon>
+                        <component :is="isSidebarCollapsed ? 'ArrowRight' : 'ArrowLeft'" />
+                    </el-icon>
                 </div>
             </div>
 
@@ -289,7 +612,7 @@
                 <!-- Graph View -->
                 <div v-show="viewMode === 'graph'" style="height: 100%; width: 100%; position: relative;">
                     <div id="cy-container"></div>
-                    
+
                     <!-- 统计面板 -->
                     <div v-if="graphStats" class="stats-panel">
                         <div class="stats-item">
@@ -304,8 +627,8 @@
                             <div class="stats-label">关系边数</div>
                             <div class="stats-value">{{ graphStats.edgeCount }}</div>
                             <div class="stats-sub">
-                                Intra: {{ graphStats.edgeByType.intra || 0 }} | 
-                                WriteBack: {{ graphStats.edgeByType.writeBack || 0 }} | 
+                                Intra: {{ graphStats.edgeByType.intra || 0 }} |
+                                WriteBack: {{ graphStats.edgeByType.writeBack || 0 }} |
                                 View: {{ graphStats.edgeByType.view || 0 }}
                             </div>
                         </div>
@@ -318,41 +641,47 @@
                             <div class="stats-value">{{ graphStats.pathCount }}</div>
                         </div>
                     </div>
-                    
+
                     <!-- 搜索框 -->
                     <div class="search-box">
-                        <el-icon><Search /></el-icon>
-                        <input 
-                            v-model="searchQuery" 
-                            @input="handleSearchInput"
-                            @keyup.enter="handleSearch"
-                            placeholder="搜索对象或字段（输入后按Enter或等待自动搜索）..." 
-                            type="text" />
-                        <el-button 
-                            v-if="searchQuery" 
-                            link 
-                            size="small" 
-                            @click="clearSearch">
-                            <el-icon><Close /></el-icon>
+                        <el-icon>
+                            <Search />
+                        </el-icon>
+                        <input v-model="searchQuery" @input="handleSearchInput" @keyup.enter="handleSearch"
+                            placeholder="搜索对象或字段（输入后按Enter或等待自动搜索）..." type="text" />
+                        <el-button v-if="searchQuery" link size="small" @click="clearSearch">
+                            <el-icon>
+                                <Close />
+                            </el-icon>
                         </el-button>
                     </div>
-                    
+
                     <div class="floating-toolbar">
                         <el-button circle @click="fitGraph" title="适应屏幕">📐</el-button>
                         <el-button circle @click="layoutGraph" title="重新布局">🔄</el-button>
                         <el-button v-if="selectedNode" circle @click="fitToRelatedNodes" title="聚焦关联节点">🎯</el-button>
                         <el-button v-if="searchQuery" circle @click="highlightPath" title="高亮路径">🔍</el-button>
+                        <el-button v-if="hasGraphData" circle @click="downloadGraph" title="导出图片">
+                            <el-icon>
+                                <Camera />
+                            </el-icon>
+                        </el-button>
                     </div>
                     <!-- Detail Drawer -->
                     <div class="detail-drawer" :class="{ visible: selectedNode }">
-                        <div style="padding: 16px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
+                        <div
+                            style="padding: 16px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
                             <div style="font-weight: bold; font-size: 16px;">节点详情</div>
-                            <el-button link @click="selectedNode = null"><el-icon><Close /></el-icon></el-button>
+                            <el-button link @click="selectedNode = null"><el-icon>
+                                    <Close />
+                                </el-icon></el-button>
                         </div>
                         <div style="padding: 16px; flex: 1; overflow-y: auto;" v-if="selectedNode">
-                            <div style="font-size: 14px; font-weight: 600; margin-bottom: 4px;">{{ selectedNode.label }}</div>
-                            <div style="font-size: 12px; color: #64748b; margin-bottom: 16px;">{{ selectedNode.parentLabel }}</div>
-                            
+                            <div style="font-size: 14px; font-weight: 600; margin-bottom: 4px;">{{ selectedNode.label }}
+                            </div>
+                            <div style="font-size: 12px; color: #64748b; margin-bottom: 16px;">{{
+                                selectedNode.parentLabel }}</div>
+
                             <div class="config-label">属性</div>
                             <div style="font-size: 13px; line-height: 1.8; color: #334155; margin-bottom: 16px;">
                                 <div>标题: {{ selectedNode.meta?.title || '-' }}</div>
@@ -365,8 +694,10 @@
                                 <div class="code-box">{{ selectedNode.meta.expression }}</div>
                             </div>
 
-                            <el-button size="small" type="primary" plain style="width: 100%; margin-bottom: 8px;" @click="focusOnNode(selectedNode)">以此为起点分析</el-button>
-                            <el-button size="small" type="info" plain style="width: 100%" @click="fitToRelatedNodes">聚焦关联节点</el-button>
+                            <el-button size="small" type="primary" plain style="width: 100%; margin-bottom: 8px;"
+                                @click="focusOnNode(selectedNode)">以此为起点分析</el-button>
+                            <el-button size="small" type="info" plain style="width: 100%"
+                                @click="fitToRelatedNodes">聚焦关联节点</el-button>
                         </div>
                     </div>
                 </div>
@@ -374,38 +705,50 @@
                 <!-- Explain View -->
                 <div v-show="viewMode === 'explain'" class="explain-container">
                     <el-empty v-if="!explainData" description="请先执行分析" :image-size="100"></el-empty>
-                        <div v-else>
+                    <div v-else>
                         <div style="text-align:center; margin-bottom: 24px;">
                             <h2>{{ explainData.rootObject }}.{{ explainData.rootField }}</h2>
                             <div style="color:#64748b">归因分析路径</div>
                         </div>
-                        <div v-for="group in filteredExplainData" :key="group.object" class="explain-card" :style="getGroupCardStyle(group.object)">
+                        <div v-for="group in filteredExplainData" :key="group.object" class="explain-card"
+                            :style="getGroupCardStyle(group.object)">
                             <div class="explain-group-header">
                                 <div style="display:flex;align-items:center;justify-content:space-between;">
                                     <div>
-                                        <el-icon style="vertical-align: middle; margin-right: 6px;"><Box /></el-icon>
+                                        <el-icon style="vertical-align: middle; margin-right: 6px;">
+                                            <Box />
+                                        </el-icon>
                                         <span :style="{ color: getObjectColor(group.object) }">
                                             {{ group.object }}
-                                            <span v-if="group.object.endsWith('View')" style="font-size: 11px; font-weight: normal;">(视图)</span>
+                                            <span v-if="group.object.endsWith('View')"
+                                                style="font-size: 11px; font-weight: normal;">(视图)</span>
                                         </span>
                                     </div>
-                                    <el-button size="small" text type="primary" @click="copyGroupExplain(group)">复制整个对象</el-button>
+                                    <el-button size="small" text type="primary"
+                                        @click="copyGroupExplain(group)">复制整个对象</el-button>
                                 </div>
                             </div>
-                            <div v-for="field in group.fields" :key="field.field" style="border-bottom: 1px solid #f1f5f9;">
+                            <div v-for="field in group.fields" :key="field.field"
+                                style="border-bottom: 1px solid #f1f5f9;">
                                 <div style="padding: 12px 24px;">
-                                    <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <div
+                                        style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                                         <div style="font-weight: 600; color: #334155;">{{ field.field }}</div>
-                                        <el-button size="small" text type="primary" @click="copyFieldExplain(group.object, field)">复制</el-button>
+                                        <el-button size="small" text type="primary"
+                                            @click="copyFieldExplain(group.object, field)">复制</el-button>
                                     </div>
-                                    <div v-for="(step, idx) in field.steps" :key="idx" class="step-item" :class="getStepClass(step.type)">
+                                    <div v-for="(step, idx) in field.steps" :key="idx" class="step-item"
+                                        :class="getStepClass(step.type)">
                                         <div style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
                                             <span class="badge" :class="getBadgeClass(step.type)">{{ step.type }}</span>
                                             <span :style="getObjectStyle(step.source)">{{ step.source }}</span>
-                                            <el-icon color="#94a3b8"><Right /></el-icon>
+                                            <el-icon color="#94a3b8">
+                                                <Right />
+                                            </el-icon>
                                             <span :style="getObjectStyle(step.target)">{{ step.target }}</span>
                                         </div>
-                                        <div v-if="step.reason" style="margin-top: 6px; font-size: 12px; color: #64748b; background: #f8fafc; padding: 4px 8px; border-radius: 4px;">
+                                        <div v-if="step.reason"
+                                            style="margin-top: 6px; font-size: 12px; color: #64748b; background: #f8fafc; padding: 4px 8px; border-radius: 4px;">
                                             {{ step.reason }}
                                         </div>
                                     </div>
@@ -419,29 +762,21 @@
                 <div v-show="viewMode === 'source'" class="explain-container">
                     <div style="margin-bottom: 16px; display:flex; align-items:center; gap: 12px; flex-wrap: wrap;">
                         <div>当前对象：<b>{{ params.objectType || '未选择' }}</b></div>
-                        <el-select 
-                            v-model="sourceObject" 
-                            filterable 
-                            placeholder="请选择来源对象..." 
-                            style="width: 260px;"
+                        <el-select v-model="sourceObject" filterable placeholder="请选择来源对象..." style="width: 260px;"
                             :disabled="!params.objectType">
-                            <el-option v-for="item in objectOptions" :key="item" :label="item" :value="item"></el-option>
+                            <el-option v-for="item in objectOptions" :key="item.value" :label="item.label"
+                                :value="item.value"></el-option>
                         </el-select>
-                        <el-button 
-                            type="primary" 
-                            @click="loadSourceImpact" 
-                            :disabled="!params.objectType || !sourceObject" 
-                            :loading="sourceImpactLoading">
+                        <el-button type="primary" @click="loadSourceImpact"
+                            :disabled="!params.objectType || !sourceObject" :loading="sourceImpactLoading">
                             查询
                         </el-button>
                         <div style="font-size: 12px; color: #64748b;">
                             示例：在 <b>ArContractSubjectMatterItem</b> 中找出由 <b>RevenueConfirmationItem</b> 写回/聚合的字段
                         </div>
                     </div>
-                    <el-empty 
-                        v-if="!sourceImpactFields || sourceImpactFields.length === 0" 
-                        description="暂无数据，请选择来源对象并点击查询" 
-                        :image-size="80">
+                    <el-empty v-if="!sourceImpactFields || sourceImpactFields.length === 0"
+                        description="暂无数据，请选择来源对象并点击查询" :image-size="80">
                     </el-empty>
                     <div v-else>
                         <div style="margin-bottom: 8px; font-size: 13px; color: #64748b;">
@@ -449,7 +784,8 @@
                         </div>
                         <el-row :gutter="12">
                             <el-col :span="12" v-for="field in sourceImpactFields" :key="field.id || field.name">
-                                <el-card shadow="hover" style="margin-bottom: 12px; cursor: pointer;" @click="selectSourceField(field)">
+                                <el-card shadow="hover" style="margin-bottom: 12px; cursor: pointer;"
+                                    @click="selectSourceField(field)">
                                     <template #header>
                                         <div style="display:flex; justify-content:space-between; align-items:center;">
                                             <div>
@@ -470,12 +806,12 @@
                                             </div>
                                         </div>
                                     </template>
-                                    <div v-if="field.triggerFields && field.triggerFields.length" style="margin-bottom: 6px;">
-                                        <div style="font-size:12px; color:#64748b; margin-bottom:4px;">依赖字段 (仅当前对象)</div>
+                                    <div v-if="field.triggerFields && field.triggerFields.length"
+                                        style="margin-bottom: 6px;">
+                                        <div style="font-size:12px; color:#64748b; margin-bottom:4px;">依赖字段 (仅当前对象)
+                                        </div>
                                         <div>
-                                            <div 
-                                                v-for="tf in field.triggerFields" 
-                                                :key="tf.id || tf.name" 
+                                            <div v-for="tf in field.triggerFields" :key="tf.id || tf.name"
                                                 style="padding:4px 6px; margin-bottom:4px; border-radius:4px; background:#f8fafc;">
                                                 <div style="font-size:12px; font-weight:600; color:#0f172a;">
                                                     {{ tf.apiName || tf.name }}
@@ -483,8 +819,10 @@
                                                 <div style="font-size:11px; color:#94a3b8; margin-bottom:2px;">
                                                     {{ tf.title || '-' }}
                                                 </div>
-                                                <div v-if="tf.triggerExpr || tf.expression || tf.virtualExpr" class="code-box-inline" style="margin-top:2px;">
-                                                    {{ formatJsonOneLine(tf.triggerExpr || tf.expression || tf.virtualExpr) }}
+                                                <div v-if="tf.triggerExpr || tf.expression || tf.virtualExpr"
+                                                    class="code-box-inline" style="margin-top:2px;">
+                                                    {{ formatJsonOneLine(tf.triggerExpr || tf.expression ||
+                                                    tf.virtualExpr) }}
                                                 </div>
                                             </div>
                                         </div>
@@ -498,10 +836,7 @@
                                         <div class="code-box-inline">{{ formatJsonOneLine(field.writeBackExpr) }}</div>
                                     </div>
                                     <div style="margin-top: 8px; text-align: right;">
-                                        <el-button 
-                                            size="small" 
-                                            type="primary" 
-                                            plain 
+                                        <el-button size="small" type="primary" plain
                                             @click.stop="openSourceFieldInGraph(field)">
                                             在图谱中查看
                                         </el-button>
@@ -513,9 +848,12 @@
 
                     <!-- 右侧详情面板：展示选中字段及其 trigger 字段（仅当前对象） -->
                     <div class="detail-drawer" :class="{ visible: selectedSourceField }">
-                        <div style="padding: 16px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
+                        <div
+                            style="padding: 16px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
                             <div style="font-weight: bold; font-size: 16px;">来源字段详情</div>
-                            <el-button link @click="selectedSourceField = null"><el-icon><Close /></el-icon></el-button>
+                            <el-button link @click="selectedSourceField = null"><el-icon>
+                                    <Close />
+                                </el-icon></el-button>
                         </div>
                         <div v-if="selectedSourceField" style="padding: 16px; flex: 1; overflow-y: auto;">
                             <div style="font-size: 14px; font-weight: 600; margin-bottom: 4px;">
@@ -532,9 +870,7 @@
                             <div v-if="selectedSourceField.triggerFields && selectedSourceField.triggerFields.length">
                                 <div class="config-label">依赖的 trigger 字段（仅当前对象）</div>
                                 <div style="margin-top: 8px;">
-                                    <div 
-                                        v-for="tf in selectedSourceField.triggerFields" 
-                                        :key="tf.id || tf.name" 
+                                    <div v-for="tf in selectedSourceField.triggerFields" :key="tf.id || tf.name"
                                         style="padding:6px 8px; margin-bottom:6px; border-radius:6px; background:#f8fafc;">
                                         <div style="font-size:13px; font-weight:600; color:#0f172a;">
                                             {{ tf.apiName || tf.name }}
@@ -545,10 +881,8 @@
                                         <div style="font-size:11px; color:#94a3b8; margin-bottom:2px;">
                                             {{ tf.type || '-' }} · {{ tf.bizType || '-' }}
                                         </div>
-                                        <div 
-                                            v-if="tf.triggerExpr || tf.expression || tf.virtualExpr" 
-                                            class="code-box-inline" 
-                                            style="margin-top:4px;">
+                                        <div v-if="tf.triggerExpr || tf.expression || tf.virtualExpr"
+                                            class="code-box-inline" style="margin-top:4px;">
                                             {{ formatJsonOneLine(tf.triggerExpr || tf.expression || tf.virtualExpr) }}
                                         </div>
                                     </div>
@@ -565,19 +899,19 @@
         </div>
 
         <!-- GraphQL 导出弹窗 -->
-        <el-dialog
-            v-model="graphQLDialogVisible"
-            title="导出 GraphQL"
-            width="560px"
-            destroy-on-close
-            append-to-body>
-            <p style="color:#64748b; font-size: 13px; margin-bottom: 12px;">以下为当前图谱中可见对象与字段，criteriaStr 已用占位符 <code>&lt;criteriaStr&gt;</code>，可按需替换为实际条件（如 id='xxx'）。</p>
-            <div v-if="graphqlTenantId" style="margin-bottom: 12px; padding: 10px 12px; background: #eff6ff; border-radius: 8px; font-size: 13px;">
+        <el-dialog v-model="graphQLDialogVisible" title="导出 GraphQL" width="560px" destroy-on-close append-to-body>
+            <p style="color:#64748b; font-size: 13px; margin-bottom: 12px;">以下为当前图谱中可见对象与字段，criteriaStr 已用占位符
+                <code>&lt;criteriaStr&gt;</code>，可按需替换为实际条件（如 id='xxx'）。
+            </p>
+            <div v-if="graphqlTenantId"
+                style="margin-bottom: 12px; padding: 10px 12px; background: #eff6ff; border-radius: 8px; font-size: 13px;">
                 <span style="color:#64748b;">请求头 Tenant-Id：</span>
                 <code style="font-weight: 600;">{{ graphqlTenantId }}</code>
-                <el-button size="small" text type="primary" @click="copyTenantId" style="margin-left: 8px;">复制</el-button>
+                <el-button size="small" text type="primary" @click="copyTenantId"
+                    style="margin-left: 8px;">复制</el-button>
             </div>
-            <pre style="background:#f1f5f9; padding: 16px; border-radius: 8px; overflow: auto; max-height: 400px; font-size: 13px; margin: 0;">{{ graphQLText }}</pre>
+            <pre
+                style="background:#f1f5f9; padding: 16px; border-radius: 8px; overflow: auto; max-height: 400px; font-size: 13px; margin: 0;">{{ graphQLText }}</pre>
             <template #footer>
                 <el-button @click="graphQLDialogVisible = false">关闭</el-button>
                 <el-button type="primary" @click="copyGraphQL" icon="DocumentCopy">复制查询</el-button>
@@ -586,9 +920,13 @@
     </div>
 
     <script>
-        window.onerror = function(msg, url, line) {
+        window.onerror = function (msg, url, line) {
+            // 忽略 ResizeObserver 的良性错误
+            if (msg && msg.includes && (msg.includes('ResizeObserver loop') || msg.includes('ResizeObserver limit'))) {
+                return true;
+            }
             const el = document.getElementById('init-error');
-            if(el) {
+            if (el) {
                 el.style.display = 'block';
                 el.innerText = `系统错误: ${msg}`;
             }
@@ -599,7 +937,7 @@
         const { ElMessage } = ElementPlus;
 
         // 注册 Cytoscape 插件
-        if(window.cytoscapeDagre) {
+        if (window.cytoscapeDagre) {
             cytoscape.use(cytoscapeDagre);
         }
 
@@ -612,22 +950,22 @@
                 const fieldLoading = ref(false);
                 const selectedNode = ref(null);
                 const cyInstance = ref(null);
-                
+
                 const objectOptions = ref([]);
                 const fieldOptions = ref([]);
                 const explainData = ref(null);
-                
+
                 // 对象过滤
                 const allObjects = ref([]);
                 const visibleObjects = ref([]);
-                
+
                 // 搜索和高亮
                 const searchQuery = ref('');
                 const highlightedNodes = ref(new Set());
                 const highlightedEdges = ref(new Set());
                 const pathNodes = ref(new Set());
                 let searchDebounceTimer = null; // 防抖定时器
-                
+
                 // 统计信息
                 const graphStats = ref(null);
 
@@ -642,7 +980,7 @@
                 const sourceImpactLoading = ref(false);
                 const sourceImpactFields = ref([]);
                 const selectedSourceField = ref(null);
-                
+
                 // 保存被移除的元素，用于恢复
                 let removedElements = null;
 
@@ -654,61 +992,156 @@
                     relTypes: ['intra', 'writeBack', 'view']
                 });
 
+                const filteredObjectOptions = ref([]); // 过滤后列表
+
+                const filterObjects = (query) => {
+                    const q = (query || '').trim();
+                    if (!q) {
+                        // 无搜索词时显示前100个
+                        filteredObjectOptions.value = objectOptions.value.slice(0, 100);
+                        return;
+                    }
+                    const qLower = q.toLowerCase();
+                    const matched = objectOptions.value.filter(item => {
+                        const v = String(item.value || '');
+                        const t = String(item.title || '');
+                        return v.includes(q) || t.includes(q) ||
+                            v.toLowerCase().includes(qLower) || t.toLowerCase().includes(qLower);
+                    });
+                    // 限制显示数量，提升渲染性能
+                    filteredObjectOptions.value = matched.slice(0, 100);
+                };
+
                 const loadObjects = async () => {
                     metaLoading.value = true;
                     try {
-                        const res = await fetch('/api/impact/meta/objects');
-                        if(res.ok) {
-                            const data = await res.json();
-                            // bill 类型对象优先，其余按名称排序
+                        let list = [];
+                        let usingLegacy = false;
+
+                        try {
+                            // 尝试获取详情（包含标题）
+                            const res = await fetch('/api/impact/meta/objectDetails');
+                            if (res.ok) {
+                                const data = await res.json();
+                                list = data.map(d => ({
+                                    value: d.name,
+                                    label: d.name,
+                                    title: d.title
+                                }));
+                            } else {
+                                usingLegacy = true;
+                            }
+                        } catch (e) {
+                            usingLegacy = true;
+                        }
+
+                        if (usingLegacy) {
+                            console.warn('objectDetails API unavailable, falling back');
+                            const res = await fetch('/api/impact/meta/objects');
+                            if (res.ok) {
+                                const data = await res.json();
+                                list = data.map(s => ({ value: s, label: s, title: null }));
+                            }
+                        }
+
+                        if (list.length > 0) {
+                            // bill 类型对象优先
                             const score = (name) => {
                                 const n = String(name || '').toLowerCase();
-                                // 名称中包含 bill 的排在前面
                                 return n.includes('bill') ? 0 : 1;
                             };
-                            objectOptions.value = data.sort((a, b) => {
-                                const sa = score(a);
-                                const sb = score(b);
+
+                            list.sort((a, b) => {
+                                const sa = score(a.value);
+                                const sb = score(b.value);
                                 if (sa !== sb) return sa - sb;
-                                return String(a).localeCompare(String(b));
+                                return String(a.value).localeCompare(String(b.value));
                             });
+
+                            objectOptions.value = list;
+                            filteredObjectOptions.value = list.slice(0, 100); // 初始限制100个
                         }
-                    } catch(e) { ElMessage.error('加载对象列表失败'); } 
-                    finally { metaLoading.value = false; }
+                    } catch (e) {
+                        console.error(e);
+                        ElMessage.error('加载对象列表失败');
+                    } finally { metaLoading.value = false; }
+                };
+
+                // 字段搜索过滤
+                const filteredFieldOptions = ref([]);
+
+                const filterFields = (query) => {
+                    const q = (query || '').trim();
+                    if (!q) {
+                        // 无搜索词时显示前100个
+                        filteredFieldOptions.value = fieldOptions.value.slice(0, 100);
+                        return;
+                    }
+                    const qLower = q.toLowerCase();
+                    const matched = fieldOptions.value.filter(item => {
+                        const v = String(item.value || '');
+                        const t = String(item.title || '');
+                        return v.includes(q) || t.includes(q) ||
+                            v.toLowerCase().includes(qLower) || t.toLowerCase().includes(qLower);
+                    });
+                    // 限制显示数量，提升渲染性能
+                    filteredFieldOptions.value = matched.slice(0, 100);
                 };
 
                 const handleObjectChange = async (val) => {
-                    params.fields = []; // 清空字段选择
+                    params.fields = [];
                     fieldOptions.value = [];
-                    if(!val) return;
+                    filteredFieldOptions.value = [];
+                    if (!val) return;
                     fieldLoading.value = true;
                     try {
-                        const res = await fetch(`/api/impact/meta/fields?objectType=${encodeURIComponent(val)}`);
-                        if(res.ok) {
-                            const list = await res.json();
-                            // 根据真实字段类型排序：BigDecimal 优先，其余按名称
-                            const enriched = await Promise.all(list.map(async (name) => {
-                                try {
-                                    const infoRes = await fetch(`/api/impact/fieldInfo?objectType=${encodeURIComponent(val)}&field=${encodeURIComponent(name)}`);
-                                    if (infoRes.ok) {
-                                        const info = await infoRes.json();
-                                        return { name, type: info && info.type ? info.type : null };
-                                    }
-                                } catch (e) {
-                                    console.warn('load fieldInfo failed', e);
-                                }
-                                return { name, type: null };
-                            }));
-                            enriched.sort((a, b) => {
-                                const sa = a.type === 'BigDecimal' ? 0 : 1;
-                                const sb = b.type === 'BigDecimal' ? 0 : 1;
-                                if (sa !== sb) return sa - sb;
-                                return String(a.name).localeCompare(String(b.name));
-                            });
-                            fieldOptions.value = enriched.map(e => e.name);
+                        let list = [];
+                        let usingLegacy = false;
+
+                        try {
+                            const res = await fetch(`/api/impact/meta/fieldDetails?objectType=${encodeURIComponent(val)}`);
+                            if (res.ok) {
+                                list = await res.json();
+                            } else {
+                                usingLegacy = true;
+                            }
+                        } catch (e) {
+                            usingLegacy = true;
                         }
-                    } catch(e) { ElMessage.error('加载字段列表失败'); }
-                    finally { fieldLoading.value = false; }
+
+                        if (usingLegacy) {
+                            console.warn('fieldDetails API unavailable, falling back to legacy fields API');
+                            const res = await fetch(`/api/impact/meta/fields?objectType=${encodeURIComponent(val)}`);
+                            if (res.ok) {
+                                const strings = await res.json();
+                                list = strings.map(s => ({ name: s, apiName: s, title: null, type: null }));
+                            }
+                        }
+
+                        if (list.length > 0) {
+                            // 构造选项列表
+                            const opts = list.map(f => ({
+                                value: f.apiName || f.name,
+                                label: f.apiName || f.name, // 选中后回显的值
+                                title: f.title,
+                                type: f.type,
+                                // 用于排序
+                                sortType: f.type === 'BigDecimal' ? 0 : 1
+                            }));
+
+                            // 排序
+                            opts.sort((a, b) => {
+                                if (a.sortType !== b.sortType) return a.sortType - b.sortType;
+                                return String(a.value).localeCompare(String(b.value));
+                            });
+
+                            fieldOptions.value = opts;
+                            filteredFieldOptions.value = opts.slice(0, 100); // 初始限制100个
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        ElMessage.error('加载字段列表失败');
+                    } finally { fieldLoading.value = false; }
                 };
 
                 // 加载：指定来源对象对当前对象的写回/聚合影响字段
@@ -826,18 +1259,18 @@
                             {
                                 selector: 'node[group="object"]',
                                 style: {
-                                    'label': 'data(label)', 
-                                    'text-valign': 'top', 
+                                    'label': 'data(label)',
+                                    'text-valign': 'top',
                                     'text-halign': 'center',
                                     'background-color': ele => {
                                         const d = ele.data('depth');
                                         // 如果有层级信息，用分层色；否则回退到对象配色
                                         return d !== undefined && d !== null ? getDepthColor(d) : getObjectBgColor(ele.data('label'));
                                     },
-                                    'border-width': 2, 
+                                    'border-width': 2,
                                     'border-color': ele => getObjectBorderColor(ele.data('label')),
-                                    'font-size': 14, 
-                                    'font-weight': 'bold', 
+                                    'font-size': 14,
+                                    'font-weight': 'bold',
                                     'color': ele => getObjectTextColor(ele.data('label')),
                                     'padding': 14,
                                     'background-opacity': 0.4
@@ -858,7 +1291,8 @@
                             { selector: 'edge[type="intra"]', style: { 'line-color': '#3b82f6', 'target-arrow-color': '#3b82f6' } },
                             { selector: 'edge[type="writeBack"]', style: { 'line-color': '#10b981', 'target-arrow-color': '#10b981', 'line-style': 'dashed' } },
                             { selector: 'edge[type="view"]', style: { 'line-color': '#8b5cf6', 'target-arrow-color': '#8b5cf6' } },
-                            { selector: '.hidden-obj', style: { 'display': 'none' } },
+                            // 通过降低不透明度和事件响应来“隐藏”元素，避免 Cytoscape 在 display:none 下的布局/样式索引问题
+                            { selector: '.hidden-obj', style: { 'opacity': 0, 'events': 'no' } },
                             { selector: '.node-highlighted', style: { 'border-width': 3, 'border-color': '#f59e0b', 'background-color': '#fef3c7' } },
                             { selector: '.edge-highlighted', style: { 'width': 4, 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b' } },
                             { selector: '.path-highlighted', style: { 'border-width': 3, 'border-color': '#10b981', 'background-color': '#d1fae5' } },
@@ -873,7 +1307,7 @@
                         ],
                         wheelSensitivity: 0.3
                     });
-                    
+
                     cyInstance.value.on('tap', 'node[type="field"]', evt => {
                         const n = evt.target;
                         // 如果再次点击同一个字段，则取消选中和高亮
@@ -891,7 +1325,7 @@
                         highlightRelatedNodes(n);
                     });
                     cyInstance.value.on('tap', evt => {
-                        if(evt.target === cyInstance.value) {
+                        if (evt.target === cyInstance.value) {
                             selectedNode.value = null;
                             // 清除关联高亮
                             clearRelatedHighlight();
@@ -900,7 +1334,7 @@
                 };
 
                 const runAnalysis = async () => {
-                    if(!params.objectType || !params.fields || params.fields.length === 0) {
+                    if (!params.objectType || !params.fields || params.fields.length === 0) {
                         return ElMessage.warning('请选择对象和至少一个字段');
                     }
                     analyzing.value = true;
@@ -908,15 +1342,15 @@
                         const includeViewUI = params.relTypes.includes('view');
                         // Map checkboxes to relType int
                         let r = 0; // Default all
-                        if(params.relTypes.length === 1) {
-                            if(params.relTypes.includes('writeBack')) r = 1;
-                            else if(params.relTypes.includes('intra')) r = 2;
-                            else if(params.relTypes.includes('view')) r = 3;
+                        if (params.relTypes.length === 1) {
+                            if (params.relTypes.includes('writeBack')) r = 1;
+                            else if (params.relTypes.includes('intra')) r = 2;
+                            else if (params.relTypes.includes('view')) r = 3;
                         }
-                        
+
                         // 批量分析：如果选择了多个字段，使用批量接口
                         let gRes;
-                        if(params.fields.length === 1) {
+                        if (params.fields.length === 1) {
                             // 单个字段，使用原有接口
                             gRes = await fetch(`/api/impact?objectType=${encodeURIComponent(params.objectType)}&field=${encodeURIComponent(params.fields[0])}&depth=${params.depth}&relType=${r}&direction=${params.direction}`);
                         } else {
@@ -924,12 +1358,12 @@
                             const fieldsStr = params.fields.join(',');
                             gRes = await fetch(`/api/impact/batch?objectType=${encodeURIComponent(params.objectType)}&fields=${encodeURIComponent(fieldsStr)}&depth=${params.depth}&relType=${r}&direction=${params.direction}`);
                         }
-                        
+
                         // 解释接口暂时只支持单个字段，使用第一个字段
-                        const eRes = params.fields.length > 0 ? 
-                            await fetch(`/api/impact/explain?objectType=${encodeURIComponent(params.objectType)}&field=${encodeURIComponent(params.fields[0])}&depth=${params.depth}&relType=${r}`) :
+                        const eRes = params.fields.length > 0 ?
+                            await fetch(`/api/impact/explain?objectType=${encodeURIComponent(params.objectType)}&field=${encodeURIComponent(params.fields[0])}&depth=${params.depth}&relType=${r}&direction=${params.direction}`) :
                             Promise.resolve({ ok: false });
-                        
+
                         const gRaw = await gRes.json();
                         let gData = gRaw;
                         // 如果 UI 上未勾选“视图映射”，在前端过滤掉 view 类型的边和纯视图节点
@@ -963,16 +1397,16 @@
                             eData = Object.assign({}, eData, { groups: newGroups });
                         }
                         explainData.value = eData;
-                        
+
                         renderGraph(gData);
                         calculateStats(gData);
-                        
-                        if(gData.nodes.length === 0) ElMessage.info('未找到相关路径');
+
+                        if (gData.nodes.length === 0) ElMessage.info('未找到相关路径');
                         else {
                             const fieldCount = params.fields.length;
                             ElMessage.success(`分析完成: ${gData.nodes.length} 节点, ${gData.edges.length} 边${fieldCount > 1 ? ` (${fieldCount}个字段)` : ''}`);
                         }
-                    } catch(e) {
+                    } catch (e) {
                         console.error(e);
                         ElMessage.error('分析请求失败');
                     } finally { analyzing.value = false; }
@@ -1077,30 +1511,30 @@
                         graphStats.value = null;
                         return;
                     }
-                    
+
                     const objectSet = new Set();
                     const fieldSet = new Set();
                     const edgeByType = { intra: 0, writeBack: 0, view: 0 };
                     const depthMap = new Map(); // nodeId -> depth
-                    
+
                     // 构建图结构用于计算深度
                     const graph = {};
                     const inDegree = {};
-                    
+
                     data.nodes.forEach(n => {
                         objectSet.add(n.object);
                         fieldSet.add(n.id);
                         graph[n.id] = [];
                         inDegree[n.id] = 0;
                     });
-                    
+
                     data.edges.forEach(e => {
                         edgeByType[e.type] = (edgeByType[e.type] || 0) + 1;
                         if (!graph[e.source]) graph[e.source] = [];
                         graph[e.source].push(e.target);
                         inDegree[e.target] = (inDegree[e.target] || 0) + 1;
                     });
-                    
+
                     // 找到起点节点（入度为0的节点）
                     const roots = [];
                     data.nodes.forEach(n => {
@@ -1108,15 +1542,15 @@
                             roots.push(n.id);
                         }
                     });
-                    
+
                     // BFS计算深度
                     const queue = [...roots];
                     roots.forEach(r => depthMap.set(r, 0));
-                    
+
                     while (queue.length > 0) {
                         const current = queue.shift();
                         const currentDepth = depthMap.get(current) || 0;
-                        
+
                         (graph[current] || []).forEach(next => {
                             if (!depthMap.has(next) || depthMap.get(next) > currentDepth + 1) {
                                 depthMap.set(next, currentDepth + 1);
@@ -1124,9 +1558,9 @@
                             }
                         });
                     }
-                    
+
                     const maxDepth = Math.max(...Array.from(depthMap.values()), 0);
-                    
+
                     // 计算路径数（简单估算：从根节点到所有叶子节点的路径）
                     let pathCount = 0;
                     const leafNodes = data.nodes.filter(n => {
@@ -1134,7 +1568,7 @@
                         return outEdges.length === 0;
                     });
                     pathCount = leafNodes.length;
-                    
+
                     graphStats.value = {
                         objectCount: objectSet.size,
                         fieldCount: fieldSet.size,
@@ -1144,7 +1578,7 @@
                         pathCount
                     };
                 };
-                
+
                 // 基于当前可见节点更新统计信息
                 const updateGraphStats = () => {
                     const cy = cyInstance.value;
@@ -1152,22 +1586,22 @@
                         graphStats.value = null;
                         return;
                     }
-                    
+
                     const visibleNodes = cy.nodes().not('.hidden-obj');
                     const visibleEdges = cy.edges().not('.hidden-obj');
-                    
+
                     if (visibleNodes.length === 0) {
                         graphStats.value = null;
                         return;
                     }
-                    
+
                     const objectSet = new Set();
                     const fieldSet = new Set();
                     const edgeByType = { intra: 0, writeBack: 0, view: 0 };
                     const depthMap = new Map();
                     const graph = {};
                     const inDegree = {};
-                    
+
                     // 统计可见节点
                     visibleNodes.forEach(node => {
                         const nodeData = node.data();
@@ -1178,7 +1612,7 @@
                             inDegree[nodeData.id] = 0;
                         }
                     });
-                    
+
                     // 统计可见边
                     visibleEdges.forEach(edge => {
                         const edgeData = edge.data();
@@ -1187,7 +1621,7 @@
                         graph[edgeData.source].push(edgeData.target);
                         inDegree[edgeData.target] = (inDegree[edgeData.target] || 0) + 1;
                     });
-                    
+
                     // 找到起点节点（入度为0的节点）
                     const roots = [];
                     Object.keys(inDegree).forEach(nodeId => {
@@ -1195,15 +1629,15 @@
                             roots.push(nodeId);
                         }
                     });
-                    
+
                     // BFS计算深度
                     const queue = [...roots];
                     roots.forEach(r => depthMap.set(r, 0));
-                    
+
                     while (queue.length > 0) {
                         const current = queue.shift();
                         const currentDepth = depthMap.get(current) || 0;
-                        
+
                         (graph[current] || []).forEach(next => {
                             if (!depthMap.has(next) || depthMap.get(next) > currentDepth + 1) {
                                 depthMap.set(next, currentDepth + 1);
@@ -1211,9 +1645,9 @@
                             }
                         });
                     }
-                    
+
                     const maxDepth = depthMap.size > 0 ? Math.max(...Array.from(depthMap.values()), 0) : 0;
-                    
+
                     // 计算路径数（叶子节点数）
                     let pathCount = 0;
                     visibleNodes.forEach(node => {
@@ -1225,7 +1659,7 @@
                             }
                         }
                     });
-                    
+
                     graphStats.value = {
                         objectCount: objectSet.size,
                         fieldCount: fieldSet.size,
@@ -1260,11 +1694,11 @@
                     const objMap = new Set();
                     const nodeIds = new Set();
                     const objectMinDepth = new Map();
-                    
+
                     // Identify Views
                     const viewObjs = new Set();
                     data.nodes.forEach(n => {
-                        if(n.object.endsWith('View')) viewObjs.add(n.object);
+                        if (n.object.endsWith('View')) viewObjs.add(n.object);
                     });
 
                     // 计算字段的分层深度（以当前对象选中的字段为根，向下游 BFS）
@@ -1277,8 +1711,16 @@
                             adj[id] = [];
                         });
                         data.edges.forEach(e => {
-                            if (!adj[e.source]) adj[e.source] = [];
-                            adj[e.source].push(e.target);
+                            // 根据分析方向决定遍历方向
+                            // 如果是 Downstream (默认): Source -> Target
+                            // 如果是 Upstream: Target -> Source (因为我们从 Subject 出发，要找 Sources，必须逆着箭头走)
+                            if (params.direction === 'upstream') {
+                                if (!adj[e.target]) adj[e.target] = [];
+                                adj[e.target].push(e.source);
+                            } else {
+                                if (!adj[e.source]) adj[e.source] = [];
+                                adj[e.source].push(e.target);
+                            }
                         });
                         const queue = [];
                         const roots = data.nodes.filter(n => {
@@ -1320,12 +1762,12 @@
 
                     // Parent Nodes（对象框）
                     data.nodes.forEach(n => {
-                        if(!objMap.has(n.object)) {
+                        if (!objMap.has(n.object)) {
                             objMap.add(n.object);
                             const objDepth = objectMinDepth.has(n.object) ? objectMinDepth.get(n.object) : null;
                             nodes.push({
                                 group: 'nodes',
-                                data: { id: `grp_${n.object}`, label: n.object, group: 'object', isView: viewObjs.has(n.object)?'true':'false', depth: objDepth }
+                                data: { id: `grp_${n.object}`, label: n.object, group: 'object', isView: viewObjs.has(n.object) ? 'true' : 'false', depth: objDepth }
                             });
                         }
                         const nodeId = n.id || `${n.object}.${n.field}`;
@@ -1340,44 +1782,43 @@
                             }
                         });
                     });
-                    
+
                     // Edges - validate source/target exist
                     data.edges.forEach((e, i) => {
-                        if(!nodeIds.has(e.source) || !nodeIds.has(e.target)) {
+                        if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) {
                             console.warn(`跳过无效边: ${e.source} -> ${e.target}`);
                             return;
                         }
                         let l = '';
-                        if(e.type==='intra') l='触发'; else if(e.type==='writeBack') l='回写'; else if(e.type==='view') l='映射';
+                        if (e.type === 'intra') l = '触发'; else if (e.type === 'writeBack') l = '回写'; else if (e.type === 'view') l = '映射';
                         edges.push({ group: 'edges', data: { id: `e${i}`, source: e.source, target: e.target, type: e.type, typeLabel: l } });
                     });
-                    
+
                     console.log(`渲染图: ${nodes.length} 节点, ${edges.length} 边`);
                     cy.add([...nodes, ...edges]);
-                    
+
                     // 收集所有对象用于过滤
                     const objects = Array.from(objMap).sort((a, b) => {
                         // 视图排在后面
                         const aIsView = a.endsWith('View');
                         const bIsView = b.endsWith('View');
-                        if(aIsView !== bIsView) return aIsView ? 1 : -1;
+                        if (aIsView !== bIsView) return aIsView ? 1 : -1;
                         return a.localeCompare(b);
                     });
                     allObjects.value = objects;
                     visibleObjects.value = [...objects]; // 默认全部可见
-                    
+
                     layoutGraph();
                 };
-
                 const layoutGraph = () => {
                     const cy = cyInstance.value;
                     if (!cy) return;
                     try {
-                        const layerGapX = 260;   // 层级之间的水平间距
-                        const fieldGapY = 32;    // 同对象字段之间的垂直间距
-                        const objMarginY = 40;   // 同层对象之间的间隔
+                        const layerGapX = 350;   // 层级之间的水平间距 (加大以展示开)
+                        const fieldGapY = 40;    // 同对象字段之间的垂直间距
+                        const objMarginY = 60;   // 同层对象之间的间隔
 
-                        // 1. 统计每个对象下的字段数量，用于估算对象高度，避免上下重叠
+                        // 1. 统计每个对象下的字段数量
                         const objFieldCounts = new Map();
                         cy.nodes('node[type="field"]').forEach(node => {
                             const parent = node.parent();
@@ -1396,30 +1837,55 @@
                             depthToObjects.get(depth).push(node);
                         });
 
-                        // 3. 为每一层的对象分配 X/Y 坐标，按“高度 + 间隔”顺次向下排，避免重叠
+                        // 3. 为每一层的对象分配 X/Y 坐标
                         const objectPositions = new Map(); // objName -> {x,y}
                         const allDepths = Array.from(depthToObjects.keys()).sort((a, b) => a - b);
+
+                        // 计算每层的高度，用于垂直居中对齐
+                        const layerHeights = new Map();
+                        allDepths.forEach(depth => {
+                            const objs = depthToObjects.get(depth);
+                            let totalH = 0;
+                            objs.forEach(node => {
+                                const objName = node.data('label');
+                                const fieldCount = objFieldCounts.get(objName) || 1;
+                                const h = Math.max(fieldCount * fieldGapY + 60, 100);
+                                totalH += h + objMarginY;
+                            });
+                            layerHeights.set(depth, totalH);
+                        });
+
+                        const maxLayerHeight = Math.max(...Array.from(layerHeights.values()));
 
                         allDepths.forEach(depth => {
                             const objs = depthToObjects.get(depth).sort((a, b) => {
                                 const la = a.data('label') || '';
                                 const lb = b.data('label') || '';
+                                // 简单的字母序排序
                                 return String(la).localeCompare(String(lb));
                             });
+
+                            // X 轴：严格按深度向右延伸
                             const x = depth * layerGapX;
-                            let cursorY = 0;
+
+                            // Y 轴：从上往下排，尝试垂直居中
+                            const currentLayerHeight = layerHeights.get(depth) || 0;
+                            let cursorY = (maxLayerHeight - currentLayerHeight) / 2;
+
                             objs.forEach((node, idx) => {
                                 const objName = node.data('label');
                                 const fieldCount = objFieldCounts.get(objName) || 1;
-                                const estimatedHeight = Math.max(fieldCount * fieldGapY + 40, 120);
+                                const estimatedHeight = Math.max(fieldCount * fieldGapY + 60, 100);
+
                                 const yCenter = cursorY + estimatedHeight / 2;
                                 objectPositions.set(objName, { x, y: yCenter });
+
                                 cursorY += estimatedHeight + objMarginY;
                             });
                         });
 
-                        // 4. 为字段节点分配坐标：跟随所属对象，同一对象内部上下排布
-                        const fieldPositions = new Map(); // nodeId -> {x,y}
+                        // 4. 为字段节点分配坐标：跟随所属对象
+                        const fieldPositions = new Map();
                         const objToFields = new Map();
 
                         cy.nodes('node[type="field"]').forEach(node => {
@@ -1441,6 +1907,7 @@
                             const n = list.length;
                             const centerIndex = (n - 1) / 2;
                             list.forEach((node, idx) => {
+                                // 字段在对象框内垂直排列
                                 const y = basePos.y + (idx - centerIndex) * fieldGapY;
                                 fieldPositions.set(node.id(), { x: basePos.x, y });
                             });
@@ -1448,12 +1915,12 @@
 
                         // 5. 应用坐标（使用 preset 布局）
                         cy.batch(() => {
-                            cy.nodes('[group=\"object\"]').positions(node => {
+                            cy.nodes('[group="object"]').positions(node => {
                                 const pos = objectPositions.get(node.data('label'));
                                 if (!pos) return { x: 0, y: 0 };
                                 return pos;
                             });
-                            cy.nodes('node[type=\"field\"]').positions(node => {
+                            cy.nodes('node[type="field"]').positions(node => {
                                 const pos = fieldPositions.get(node.id());
                                 if (!pos) return { x: 0, y: 0 };
                                 return pos;
@@ -1461,137 +1928,107 @@
                         });
 
                         cy.fit(undefined, 80);
+                        // 触发一次 resize 以确保 compound 节点边框正确
+                        cy.resize();
+
                     } catch (e) {
-                        console.error('布局失败:', e);
-                        ElMessage.error('图布局失败，请尝试减少深度或筛选条件');
+                        console.error('Calculate positions error', e);
+                        ElMessage.error('图布局计算失败');
                     }
                 };
                 const fitGraph = () => cyInstance.value.fit(null, 50);
-                
-                // 以选中节点为起点，在「新标签页」中打开分析视图
+
                 const focusOnNode = (n) => {
                     const obj = n.parentLabel;
                     if (!obj) return;
-                    
+
                     const url = new URL(window.location.href);
                     url.searchParams.set('objectType', obj);
                     url.searchParams.set('field', n.label);
                     url.searchParams.set('direction', params.direction);
                     url.searchParams.set('depth', String(params.depth));
                     url.searchParams.set('relTypes', params.relTypes.join(','));
-                    
+
                     // 新标签页打开
                     window.open(url.toString(), '_blank');
                 };
-                
+
                 // 对象过滤方法
                 const selectAllObjects = () => {
                     visibleObjects.value = [...allObjects.value];
                     applyObjectFilter();
                 };
-                
+
                 const deselectAllObjects = () => {
                     visibleObjects.value = [];
                     applyObjectFilter();
                 };
-                
+
                 const applyObjectFilter = () => {
                     const cy = cyInstance.value;
-                    if(!cy) return;
-                    
-                    // 第一步：恢复之前移除的元素（如果有）
-                    if (removedElements && removedElements.length > 0) {
-                        cy.add(removedElements);
-                        removedElements = null;
-                    }
-                    
+                    if (!cy) return;
+
                     const visibleSet = new Set(visibleObjects.value);
-                    
-                    // 第二步：找出需要移除的对象节点
-                    const nodesToRemove = [];
+
+                    // 1. 基于 class 控制对象节点和字段节点的显示/隐藏（不真正删除）
                     cy.nodes('[group="object"]').forEach(node => {
                         const objName = node.data('label');
-                        if(!visibleSet.has(objName)) {
-                            // 收集该对象及其所有子节点
-                            nodesToRemove.push(node);
-                            node.children().forEach(child => {
-                                nodesToRemove.push(child);
-                            });
+                        if (!visibleSet.has(objName)) {
+                            node.addClass('hidden-obj');
+                        } else {
+                            node.removeClass('hidden-obj');
                         }
                     });
-                    
-                    // 第三步：找出连接到被移除节点的边
-                    const edgesToRemove = [];
-                    const nodeIdsToRemove = new Set(nodesToRemove.map(n => n.id()));
-                    
+
+                    cy.nodes('node[type="field"]').forEach(node => {
+                        const parent = node.parent();
+                        const objName = parent.length > 0 ? parent.data('label') : null;
+                        if (!objName || !visibleSet.has(objName)) {
+                            node.addClass('hidden-obj');
+                        } else {
+                            node.removeClass('hidden-obj');
+                        }
+                    });
+
+                    // 2. 边：如果任一端点（或其父对象）被隐藏，则隐藏该边
                     cy.edges().forEach(edge => {
                         const src = edge.source();
                         const tgt = edge.target();
-                        
-                        // 如果边的源或目标节点要被移除，或者它们的父节点要被移除
-                        if(nodeIdsToRemove.has(src.id()) || nodeIdsToRemove.has(tgt.id()) ||
-                           (src.parent().length && nodeIdsToRemove.has(src.parent().id())) ||
-                           (tgt.parent().length && nodeIdsToRemove.has(tgt.parent().id()))) {
-                            edgesToRemove.push(edge);
+                        const hide =
+                            src.hasClass('hidden-obj') ||
+                            tgt.hasClass('hidden-obj') ||
+                            (src.parent().length && src.parent().hasClass('hidden-obj')) ||
+                            (tgt.parent().length && tgt.parent().hasClass('hidden-obj'));
+                        if (hide) {
+                            edge.addClass('hidden-obj');
+                        } else {
+                            edge.removeClass('hidden-obj');
                         }
                     });
-                    
-                    console.log(`准备移除 ${nodesToRemove.length} 个节点和 ${edgesToRemove.length} 条边`);
-                    
-                    // 第四步：保存被移除的元素（用于后续恢复）
-                    const allToRemove = cy.collection([...nodesToRemove, ...edgesToRemove]);
-                    if(allToRemove.length > 0) {
-                        // 保存元素的 JSON 数据
-                        removedElements = allToRemove.jsons();
-                        // 从图中移除
-                        cy.remove(allToRemove);
-                    }
-                    
-                    // 第五步：对剩余的节点重新布局
+
+                    // 3. 仅基于可见元素更新统计与视图适配
                     nextTick(() => {
-                        const remainingNodes = cy.nodes();
-                        const remainingEdges = cy.edges();
-                        
-                        console.log(`剩余节点数: ${remainingNodes.length}, 剩余边数: ${remainingEdges.length}`);
-                        
-                        if(remainingNodes.length > 0) {
-                            // 对剩余元素重新布局
-                            const layout = cy.layout({
-                                name: 'breadthfirst',
-                                directed: true,
-                                spacingFactor: 1.5,
-                                padding: 30,
-                                animate: true,
-                                animationDuration: 500,
-                                animationEasing: 'ease-out',
-                                fit: true,
-                                avoidOverlap: true
-                            });
-                            
-                            layout.run();
-                            
-                            // 布局完成后提示并更新统计
-                            layout.on('layoutstop', () => {
-                                cy.fit(remainingNodes, 60);
-                                updateGraphStats();
-                                ElMessage.success(`已重新布局 ${visibleSet.size} 个对象`);
-                            });
-                        } else {
-                            ElMessage.info('没有可见的对象');
+                        const visibleNodes = cy.nodes().not('.hidden-obj');
+                        const visibleEdges = cy.edges().not('.hidden-obj');
+                        console.log(`可见节点数: ${visibleNodes.length}, 可见边数: ${visibleEdges.length}`);
+
+                        if (visibleNodes.length > 0) {
+                            cy.fit(visibleNodes, 60);
                         }
+                        updateGraphStats();
                     });
                 };
 
-                const getStepClass = (t) => ({ 'step-intra': t==='intra', 'step-wb': t==='writeBack', 'step-view': t==='view' });
-                const getBadgeClass = (t) => ({ 'badge-blue': t==='intra', 'badge-green': t==='writeBack', 'badge-purple': t==='view' });
-                
+                const getStepClass = (t) => ({ 'step-intra': t === 'intra', 'step-wb': t === 'writeBack', 'step-view': t === 'view' });
+                const getBadgeClass = (t) => ({ 'badge-blue': t === 'intra', 'badge-green': t === 'writeBack', 'badge-purple': t === 'view' });
+
                 // 计算过滤后的归因数据
                 const filteredExplainData = computed(() => {
-                    if(!explainData.value || visibleObjects.value.length === 0) return [];
+                    if (!explainData.value || visibleObjects.value.length === 0) return [];
                     const visibleSet = new Set(visibleObjects.value);
                     return explainData.value.groups.filter(group => visibleSet.has(group.object));
                 });
-                
+
                 // 仅使用 3 组柔和配色，对象按哈希轮询到 3 组里，整体不那么花
                 const COLOR_PRESETS = [
                     { text: '#1d4ed8', bg: '#dbeafe' }, // 蓝
@@ -1610,20 +2047,20 @@
                     }
                     return COLOR_PRESETS[hash % COLOR_PRESETS.length];
                 };
-                
+
                 // 对象框框的配色方案（用于图谱）
                 const getObjectBgColor = (objName) => {
                     if (!objName) return '#f1f5f9';
                     const preset = pickColorPreset(objName);
                     return preset.bg;
                 };
-                
+
                 const getObjectBorderColor = (objName) => {
                     if (!objName) return '#e2e8f0';
                     const preset = pickColorPreset(objName);
                     return preset.text;
                 };
-                
+
                 const getObjectTextColor = (objName) => {
                     if (!objName) return '#64748b';
                     const preset = pickColorPreset(objName);
@@ -1649,7 +2086,7 @@
                     const objName = fieldPath.split('.')[0];
                     return { color: getObjectColor(objName), fontWeight: '600' };
                 };
-                
+
 
                 const buildFieldExplainText = (objectName, field) => {
                     const lines = [];
@@ -1711,46 +2148,46 @@
                         ElMessage.error('复制失败，请稍后重试');
                     }
                 };
-                
+
                 // 搜索输入处理（防抖）
                 const handleSearchInput = () => {
                     // 清除之前的定时器
                     if (searchDebounceTimer) {
                         clearTimeout(searchDebounceTimer);
                     }
-                    
+
                     // 如果输入框为空，立即清除搜索
                     if (!searchQuery.value || !searchQuery.value.trim()) {
                         clearSearch();
                         return;
                     }
-                    
+
                     // 设置防抖：等待用户停止输入 500ms 后再搜索
                     searchDebounceTimer = setTimeout(() => {
                         handleSearch();
                     }, 500);
                 };
-                
+
                 // 搜索功能
                 const handleSearch = () => {
                     if (!cyInstance.value || !searchQuery.value) {
                         clearSearch();
                         return;
                     }
-                    
+
                     const query = searchQuery.value.toLowerCase().trim();
                     if (!query) {
                         clearSearch();
                         return;
                     }
-                    
+
                     const cy = cyInstance.value;
                     let matchedNodes;
                     cy.batch(() => {
                         // 清除之前的高亮
                         cy.nodes().removeClass('node-highlighted');
                         cy.edges().removeClass('edge-highlighted');
-                        
+
                         // 搜索匹配的节点
                         matchedNodes = cy.nodes().filter(node => {
                             const label = node.data('label') || '';
@@ -1759,11 +2196,11 @@
                             const fullPath = `${parentLabel}.${label}`.toLowerCase();
                             return fullPath.includes(query) || label.toLowerCase().includes(query) || parentLabel.toLowerCase().includes(query);
                         });
-                        
+
                         matchedNodes.forEach(node => {
                             node.addClass('node-highlighted');
                         });
-                        
+
                         // 高亮连接到匹配节点的边
                         matchedNodes.forEach(node => {
                             node.connectedEdges().forEach(edge => {
@@ -1771,7 +2208,7 @@
                             });
                         });
                     });
-                    
+
                     if (matchedNodes.length > 0) {
                         // 聚焦到匹配的节点
                         cy.animate({
@@ -1786,7 +2223,7 @@
                         ElMessage.warning('未找到匹配项');
                     }
                 };
-                
+
                 // 清除搜索高亮
                 const clearSearch = () => {
                     // 清除防抖定时器
@@ -1794,7 +2231,7 @@
                         clearTimeout(searchDebounceTimer);
                         searchDebounceTimer = null;
                     }
-                    
+
                     searchQuery.value = '';
                     if (!cyInstance.value) return;
                     const cy = cyInstance.value;
@@ -1803,21 +2240,21 @@
                         cy.edges().removeClass('edge-highlighted');
                     });
                 };
-                
+
                 // 高亮关联节点和边（只显示下游）
                 const highlightRelatedNodes = (selectedNode) => {
                     if (!cyInstance.value) return;
                     const cy = cyInstance.value;
-                    
+
                     cy.batch(() => {
                         // 清除之前的高亮
                         clearRelatedHighlight();
-                        
+
                         // 高亮选中的节点
                         selectedNode.addClass('node-selected');
-                        
+
                         const nodeId = selectedNode.id();
-                        
+
                         // 手动查找所有以当前节点为source的边（下游边）
                         // 包括所有类型的边：intra, writeBack, view
                         const allEdges = cy.edges();
@@ -1825,16 +2262,16 @@
                             const sourceId = edge.data('source');
                             return sourceId === nodeId;
                         });
-                        
+
                         console.log(`节点 ${nodeId} 的下游边数: ${downstreamEdges.length}`);
                         downstreamEdges.forEach(edge => {
                             console.log(`  边: ${edge.data('source')} -> ${edge.data('target')}, 类型: ${edge.data('type')}`);
                         });
-                        
+
                         // 高亮下游的边（包括回写边）
                         downstreamEdges.forEach(edge => {
                             edge.addClass('edge-related');
-                            
+
                             // 找到边的目标节点并高亮
                             const targetId = edge.data('target');
                             const targetNode = cy.getElementById(targetId);
@@ -1844,7 +2281,7 @@
                         });
                     });
                 };
-                
+
                 // 清除关联高亮
                 const clearRelatedHighlight = () => {
                     if (!cyInstance.value) return;
@@ -1854,16 +2291,16 @@
                         cy.edges().removeClass('edge-related');
                     });
                 };
-                
+
                 // 聚焦到关联节点（只显示下游）
                 const fitToRelatedNodes = () => {
                     if (!cyInstance.value || !selectedNode.value) return;
                     const cy = cyInstance.value;
                     const node = cy.getElementById(selectedNode.value.id);
                     if (node.length === 0) return;
-                    
+
                     const nodeId = node.id();
-                    
+
                     // 手动查找所有下游节点
                     const allEdges = cy.edges();
                     const downstreamNodeIds = new Set();
@@ -1872,7 +2309,7 @@
                             downstreamNodeIds.add(edge.data('target'));
                         }
                     });
-                    
+
                     // 获取所有下游节点
                     const downstreamNodes = cy.collection();
                     downstreamNodeIds.forEach(id => {
@@ -1881,10 +2318,10 @@
                             downstreamNodes.merge(targetNode);
                         }
                     });
-                    
+
                     // 合并选中节点和下游节点
                     const relatedNodes = node.union(downstreamNodes);
-                    
+
                     if (downstreamNodes.length > 0) {
                         cy.animate({
                             fit: {
@@ -1898,14 +2335,14 @@
                         ElMessage.info('该节点没有下游关联节点');
                     }
                 };
-                
+
                 // 高亮路径（从起点到搜索到的节点）
                 const highlightPath = () => {
                     if (!cyInstance.value || !searchQuery.value) return;
-                    
+
                     const cy = cyInstance.value;
                     const query = searchQuery.value.toLowerCase().trim();
-                    
+
                     // 找到匹配的节点
                     const targetNodes = cy.nodes().filter(node => {
                         const label = node.data('label') || '';
@@ -1914,28 +2351,28 @@
                         const fullPath = `${parentLabel}.${label}`.toLowerCase();
                         return fullPath.includes(query) || label.toLowerCase().includes(query) || parentLabel.toLowerCase().includes(query);
                     });
-                    
+
                     if (targetNodes.length === 0) {
                         ElMessage.warning('未找到目标节点');
                         return;
                     }
-                    
+
                     // 找到起点节点（通常是第一个字段节点）
                     const rootNodes = cy.nodes('[type="field"]').filter(node => {
                         const parent = node.parent();
                         return parent.length > 0 && parent.data('label') === params.objectType;
                     });
-                    
+
                     if (rootNodes.length === 0) {
                         ElMessage.warning('未找到起点节点');
                         return;
                     }
-                    
+
                     cy.batch(() => {
                         // 清除之前的高亮
                         cy.nodes().removeClass('node-highlighted path-highlighted');
                         cy.edges().removeClass('edge-highlighted');
-                        
+
                         // 对每个目标节点，找到从起点到它的路径
                         targetNodes.forEach(target => {
                             const paths = [];
@@ -1945,7 +2382,7 @@
                                     paths.push(path);
                                 }
                             });
-                            
+
                             // 高亮最短路径
                             if (paths.length > 0) {
                                 const shortestPath = paths.reduce((min, p) => p.length < min.length ? p : min, paths[0]);
@@ -1964,7 +2401,7 @@
                             }
                         });
                     });
-                    
+
                     // 聚焦到路径
                     const pathNodes = targetNodes.union(
                         cy.nodes('.path-highlighted')
@@ -1979,20 +2416,20 @@
                         });
                     }
                 };
-                
+
                 // BFS查找最短路径
                 const findShortestPath = (cy, source, target) => {
                     if (source.id() === target.id()) {
                         return [source];
                     }
-                    
+
                     const queue = [[source]];
                     const visited = new Set([source.id()]);
-                    
+
                     while (queue.length > 0) {
                         const path = queue.shift();
                         const current = path[path.length - 1];
-                        
+
                         const neighbors = current.outgoers('node');
                         for (let i = 0; i < neighbors.length; i++) {
                             const neighbor = neighbors[i];
@@ -2005,10 +2442,10 @@
                             }
                         }
                     }
-                    
+
                     return null;
                 };
-                
+
                 // 从 URL 参数初始化（用于"以此为起点分析"新标签页）
                 const initFromUrl = async () => {
                     try {
@@ -2039,30 +2476,52 @@
                         }
 
                         // 设置对象 & 字段
+                        console.log(`[InitFromUrl] Setting objectType=${obj}, field=${field}`);
                         params.objectType = obj;
                         await handleObjectChange(obj); // 加载字段列表
+
+                        // 确保 handleObjectChange 完成后再设置 fields
+                        console.log('[InitFromUrl] handleObjectChange done. Setting fields...');
                         params.fields = [field]; // 改为数组
+                        console.log(`[InitFromUrl] params.fields set to:`, params.fields);
 
                         await nextTick();
+                        console.log('[InitFromUrl] Running analysis...');
                         runAnalysis();
                     } catch (e) {
                         console.warn('initFromUrl 失败:', e);
                     }
                 };
-                
+
                 onMounted(async () => {
                     await loadObjects();
                     initCy();
                     await initFromUrl();
                 });
-                
+
+
+
                 watch(viewMode, () => {
-                    nextTick(() => { if(cyInstance.value) cyInstance.value.resize(); });
+                    nextTick(() => { if (cyInstance.value) cyInstance.value.resize(); });
                 });
+
+                const downloadGraph = () => {
+                    if (!cyInstance.value) return;
+                    try {
+                        const pngBase64 = cyInstance.value.png({ full: true, scale: 2, bg: 'white' });
+                        const link = document.createElement('a');
+                        link.href = pngBase64;
+                        link.download = `impact-graph-${params.objectType || 'export'}-${new Date().getTime()}.png`;
+                        link.click();
+                    } catch (e) {
+                        console.error('Export failed', e);
+                        ElMessage.error('导出图片失败');
+                    }
+                };
 
                 return {
                     viewMode, isSidebarCollapsed, analyzing, metaLoading, fieldLoading,
-                    objectOptions, fieldOptions, params, selectedNode, explainData,
+                    objectOptions, fieldOptions, filteredObjectOptions, filteredFieldOptions, params, selectedNode, explainData,
                     allObjects, visibleObjects, filteredExplainData,
                     searchQuery, graphStats,
                     sourceObject, sourceImpactLoading, sourceImpactFields, selectedSourceField,
@@ -2075,7 +2534,8 @@
                     loadSourceImpact, openSourceFieldInGraph, formatJsonOneLine, selectSourceField,
                     generateUpgradeScript,
                     hasGraphData, exportGraphQL, graphQLDialogVisible, graphQLText, copyGraphQL,
-                    graphqlUrl, graphqlTenantId, copyTenantId
+                    graphqlUrl, graphqlTenantId, copyTenantId,
+                    filterObjects, filterFields, downloadGraph
                 };
             }
         });
@@ -2093,4 +2553,5 @@
         app.mount('#app');
     </script>
 </body>
+
 </html>

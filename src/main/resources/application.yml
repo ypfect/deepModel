@@ -8,11 +8,11 @@ writeback-sql:
 
 spring:
   datasource:
-#    url: jdbc:postgresql://localhost:5432/testapp
-    url: jdbc:postgresql://postgres.hotfix-aws-1.e7link.com:5432/tenant-public
+    url: jdbc:postgresql://localhost:5432/testapp
+#    url: jdbc:postgresql://postgres.test-tx-16.e7link.com:5432/tenant-public
     username: postgres
-#    password: 123
-    password: stet44{czars
+    password: 123
+#    password: stet44{czars
     driver-class-name: org.postgresql.Driver
   jackson:
     serialization:
