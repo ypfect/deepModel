@@ -52,6 +52,11 @@ public class ImpactController {
         return analyzerService.getFieldDetailsForObject(objectType);
     }
 
+    @GetMapping("/api/impact/meta/health")
+    public ImpactAnalyzerService.ObjectHealth getObjectHealth(@RequestParam("objectType") String objectType) {
+        return analyzerService.getObjectHealth(objectType);
+    }
+
     // 新增：字段详情
     @GetMapping("/api/impact/fieldInfo")
     public BaseappObjectField fieldInfo(@RequestParam("objectType") String objectType,

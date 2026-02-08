@@ -40,7 +40,8 @@
   <select id="selectViewDefinitions" resultType="string">
     select content::text
     from baseapp_system_metadata
-    where is_deleted = false
+         where  name like '%View%'
+      and is_deleted = false and type_id='MetaType.entity'
   </select>
 
   <select id="selectAppNameByObjectType" resultType="string">

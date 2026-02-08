@@ -553,6 +553,33 @@
                             </div>
                         </div>
 
+                        <div class="config-item" v-if="objectHealth">
+                            <div class="config-label">对象健康度（{{ params.objectType }}）</div>
+                            <div
+                                style="font-size:12px; color:#475569; line-height:1.6; background:#f8fafc; border-radius:8px; padding:8px 10px;">
+                                <div>字段总数：<b>{{ objectHealth.totalFields }}</b></div>
+                                <div>有公式字段：<b>{{ objectHealth.formulaFields }}</b></div>
+                                <div>被引用字段：<b>{{ objectHealth.referencedFields }}</b></div>
+                                <div style="margin-top:4px;">
+                                    疑似废字段：
+                                    <b style="color:#b91c1c; cursor:pointer; text-decoration:underline;"
+                                        @click="showHealthFields('疑似废字段', objectHealth.deadFieldList || [])"
+                                        :title="objectHealth.deadFields > 0 ? '点击查看详情' : ''">
+                                        {{ objectHealth.deadFields }}
+                                    </b>
+                                </div>
+                                <div>writeBack 字段：<b>{{ objectHealth.writeBackFields }}</b></div>
+                                <div>
+                                    writeBack 但无下游：
+                                    <b style="color:#b45309; cursor:pointer; text-decoration:underline;"
+                                        @click="showHealthFields('writeBack 但无下游', objectHealth.writeBackNoDownstreamList || [])"
+                                        :title="objectHealth.writeBackNoDownstream > 0 ? '点击查看详情' : ''">
+                                        {{ objectHealth.writeBackNoDownstream }}
+                                    </b>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="action-buttons">
                             <el-button type="primary" size="large" class="action-btn" @click="runAnalysis"
                                 :loading="analyzing" icon="Search">
@@ -917,6 +944,25 @@
                 <el-button type="primary" @click="copyGraphQL" icon="DocumentCopy">复制查询</el-button>
             </template>
         </el-dialog>
+
+        <!-- 健康度字段列表弹窗 -->
+        <el-dialog v-model="healthDialogVisible" :title="healthDialogTitle" width="480px" destroy-on-close append-to-body>
+            <div v-if="healthFieldList && healthFieldList.length > 0">
+                <p style="color:#64748b; font-size: 13px; margin-bottom: 12px;">
+                    共 {{ healthFieldList.length }} 个字段：
+                </p>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <div v-for="(field, idx) in healthFieldList" :key="idx"
+                        style="padding: 8px 12px; margin-bottom: 4px; background: #f8fafc; border-radius: 6px; font-size: 13px;">
+                        <code style="font-weight: 600; color: #0f172a;">{{ field }}</code>
+                    </div>
+                </div>
+            </div>
+            <el-empty v-else description="暂无字段" :image-size="80"></el-empty>
+            <template #footer>
+                <el-button @click="healthDialogVisible = false">关闭</el-button>
+            </template>
+        </el-dialog>
     </div>
 
     <script>
@@ -954,6 +1000,12 @@
                 const objectOptions = ref([]);
                 const fieldOptions = ref([]);
                 const explainData = ref(null);
+
+                // 对象健康度
+                const objectHealth = ref(null);
+                const healthDialogVisible = ref(false);
+                const healthDialogTitle = ref('');
+                const healthFieldList = ref([]);
 
                 // 对象过滤
                 const allObjects = ref([]);
@@ -1088,6 +1140,34 @@
                     filteredFieldOptions.value = matched.slice(0, 100);
                 };
 
+                const loadObjectHealth = async () => {
+                    if (!params.objectType) {
+                        objectHealth.value = null;
+                        return;
+                    }
+                    try {
+                        const res = await fetch(`/api/impact/meta/health?objectType=${encodeURIComponent(params.objectType)}`);
+                        if (res.ok) {
+                            objectHealth.value = await res.json();
+                        } else {
+                            objectHealth.value = null;
+                        }
+                    } catch (e) {
+                        console.error('加载对象健康度失败', e);
+                        objectHealth.value = null;
+                    }
+                };
+
+                const showHealthFields = (title, fields) => {
+                    if (!fields || fields.length === 0) {
+                        ElMessage.info('该类别下暂无字段');
+                        return;
+                    }
+                    healthDialogTitle.value = `${params.objectType} - ${title}`;
+                    healthFieldList.value = fields;
+                    healthDialogVisible.value = true;
+                };
+
                 const handleObjectChange = async (val) => {
                     params.fields = [];
                     fieldOptions.value = [];
@@ -1142,6 +1222,9 @@
                         console.error(e);
                         ElMessage.error('加载字段列表失败');
                     } finally { fieldLoading.value = false; }
+
+                    // 加载当前对象的健康度指标
+                    await loadObjectHealth();
                 };
 
                 // 加载：指定来源对象对当前对象的写回/聚合影响字段
@@ -2523,7 +2606,8 @@
                     viewMode, isSidebarCollapsed, analyzing, metaLoading, fieldLoading,
                     objectOptions, fieldOptions, filteredObjectOptions, filteredFieldOptions, params, selectedNode, explainData,
                     allObjects, visibleObjects, filteredExplainData,
-                    searchQuery, graphStats,
+                    searchQuery, graphStats, objectHealth,
+                    healthDialogVisible, healthDialogTitle, healthFieldList, showHealthFields,
                     sourceObject, sourceImpactLoading, sourceImpactFields, selectedSourceField,
                     handleObjectChange, runAnalysis, fitGraph, layoutGraph, focusOnNode,
                     selectAllObjects, deselectAllObjects, applyObjectFilter,

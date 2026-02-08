@@ -215,10 +215,20 @@ public class ImpactAnalyzerService {
                             totalSqlsParsed++;
                         }
                     } else {
-                        log.warn("[视图加载] viewDef 不是数组");
+                        log.warn("[视图加载] viewDef 不是数组 - 视图名称: {}, viewDef类型: {}, viewDef值: {}", 
+                                viewName, 
+                                viewDefs.isMissingNode() ? "missing" : viewDefs.getNodeType().toString(),
+                                viewDefs.isMissingNode() ? "null" : viewDefs.toString());
                     }
                 } catch (Exception e) {
-                    log.error("[视图加载] 解析视图定义失败，跳过此视图", e);
+                    String viewNameInError = null;
+                    try {
+                        JsonNode root = objectMapper.readTree(viewJson);
+                        viewNameInError = root.path("name").asText();
+                    } catch (Exception ignored) {
+                    }
+                    log.error("[视图加载] 解析视图定义失败，跳过此视图 - 视图名称: {}, 错误: {}", 
+                            viewNameInError != null ? viewNameInError : "未知", e.getMessage(), e);
                 }
             }
 
@@ -235,6 +245,37 @@ public class ImpactAnalyzerService {
         } catch (Exception e) {
             log.error("加载视图定义失败", e);
         }
+    }
+
+    /**
+     * 提取主 SELECT 和其对应 FROM 之间的子句。避免子查询中的 FROM 导致截断（如
+     * case when ... then (select ... from baseapp_customer ...) when ...）。
+     */
+    private String extractSelectClause(String cleanSql) {
+        if (cleanSql == null || cleanSql.isEmpty()) return null;
+        int selIdx = cleanSql.toUpperCase().indexOf("SELECT");
+        if (selIdx < 0) return null;
+        int start = selIdx + 6; // 跳过 SELECT
+        // 跳过 SELECT 后的空白，定位到 SELECT 后的第一个非空白字符（即列表达式的开始）
+        while (start < cleanSql.length() && Character.isWhitespace(cleanSql.charAt(start))) {
+            start++;
+        }
+        int balance = 0;
+        int fromStart = -1;
+        for (int i = start; i < cleanSql.length(); i++) {
+            char c = cleanSql.charAt(i);
+            if (c == '(') balance++;
+            else if (c == ')') balance--;
+            else if (balance == 0 && i + 4 <= cleanSql.length()) {
+                String chunk = cleanSql.substring(i, Math.min(i + 5, cleanSql.length())).toUpperCase();
+                if (chunk.startsWith("FROM") && (i + 4 == cleanSql.length() || !Character.isLetterOrDigit(cleanSql.charAt(i + 4)))) {
+                    fromStart = i;
+                    break;
+                }
+            }
+        }
+        if (fromStart < 0) return null;
+        return cleanSql.substring(start, fromStart).trim();
     }
 
     private void parseSqlDependencies(String viewName, String sql) {
@@ -263,15 +304,12 @@ public class ImpactAnalyzerService {
             // log.info("[视图解析] 别名映射明细: {}", aliasMap);
         }
 
-        // 2. 提取 SELECT ... FROM 之间的内容
-        Pattern selectPat = Pattern.compile("SELECT\\s+(.+?)\\s+FROM", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-        Matcher mSel = selectPat.matcher(cleanSql);
-        if (!mSel.find()) {
-            log.warn("[视图解析] 无法匹配 SELECT...FROM 语句");
+        // 2. 提取 SELECT ... FROM 之间的内容（需避免子查询中的 FROM 截断，按括号层级匹配主 SELECT 的 FROM）
+        String selectClause = extractSelectClause(cleanSql);
+        if (selectClause == null) {
+            log.warn("[视图解析] 无法匹配 SELECT...FROM 语句");//IsOrgCrossDocView
             return;
         }
-
-        String selectClause = mSel.group(1);
 
         // 3. 简单的逗号分割（忽略括号内的逗号）
         List<String> columns = splitColumns(selectClause);
@@ -477,6 +515,79 @@ public class ImpactAnalyzerService {
                 .filter(r -> canonicalFieldName(r) != null)
                 .sorted(Comparator.comparing(this::canonicalFieldName))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 对象级健康度概览，用于前端模型健康面板。
+     */
+    public static class ObjectHealth {
+        public String object;
+        public int totalFields;
+        public int formulaFields;
+        public int referencedFields;
+        public int deadFields;
+        public int writeBackFields;
+        public int writeBackNoDownstream;
+        // 字段列表（用于穿透查看）
+        public List<String> deadFieldList = new ArrayList<>();
+        public List<String> writeBackNoDownstreamList = new ArrayList<>();
+    }
+
+    /**
+     * 计算指定对象的字段健康度指标：
+     * - totalFields: 字段总数
+     * - formulaFields: 有任意公式（trigger/expression/virtual/writeBack）的字段数
+     * - referencedFields: 被其他字段公式引用到的字段数
+     * - deadFields: 无公式且从未被引用的“疑似废字段”数量
+     * - writeBackFields: 有 writeBackExpr 的字段数
+     * - writeBackNoDownstream: 有 writeBack 但从未被下游使用的字段数
+     */
+    public ObjectHealth getObjectHealth(String objectType) {
+        List<BaseappObjectField> rows = rowsByObject.getOrDefault(objectType, Collections.emptyList());
+        ObjectHealth h = new ObjectHealth();
+        h.object = objectType;
+        h.totalFields = rows.size();
+
+        // 统计每个字段被引用次数（仅限本对象内）
+        Map<String, Integer> refCount = new HashMap<String, Integer>();
+        for (BaseappObjectField r : rows) {
+            List<String> refs = collectCamelRefs(r);
+            for (String f : refs) {
+                refCount.put(f, refCount.getOrDefault(f, 0) + 1);
+            }
+        }
+
+        for (BaseappObjectField r : rows) {
+            String camel = canonicalFieldName(r);
+            if (camel == null || camel.isEmpty())
+                continue;
+
+            boolean hasFormula = (r.getExpression() != null && !r.getExpression().trim().isEmpty())
+                    || (r.getTriggerExpr() != null && !r.getTriggerExpr().trim().isEmpty())
+                    || (r.getVirtualExpr() != null && !r.getVirtualExpr().trim().isEmpty())
+                    || (r.getWriteBackExpr() != null && !r.getWriteBackExpr().trim().isEmpty());
+            boolean referenced = refCount.getOrDefault(camel, 0) > 0;
+
+            if (hasFormula)
+                h.formulaFields++;
+            if (referenced)
+                h.referencedFields++;
+            if (!hasFormula && !referenced) {
+                h.deadFields++;
+                h.deadFieldList.add(camel);
+            }
+
+            boolean hasWriteBack = r.getWriteBackExpr() != null && !r.getWriteBackExpr().trim().isEmpty();
+            if (hasWriteBack) {
+                h.writeBackFields++;
+                if (!referenced) {
+                    h.writeBackNoDownstream++;
+                    h.writeBackNoDownstreamList.add(camel);
+                }
+            }
+        }
+
+        return h;
     }
 
     private void fillNodeMeta(GraphModels.Node node) {
