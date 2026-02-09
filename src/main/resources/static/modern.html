@@ -922,6 +922,8 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Cross-object Mapping View 已迁移到 cross.html（此处不再展示） -->
             </main>
         </div>
 
@@ -946,7 +948,8 @@
         </el-dialog>
 
         <!-- 健康度字段列表弹窗 -->
-        <el-dialog v-model="healthDialogVisible" :title="healthDialogTitle" width="480px" destroy-on-close append-to-body>
+        <el-dialog v-model="healthDialogVisible" :title="healthDialogTitle" width="480px" destroy-on-close
+            append-to-body>
             <div v-if="healthFieldList && healthFieldList.length > 0">
                 <p style="color:#64748b; font-size: 13px; margin-bottom: 12px;">
                     共 {{ healthFieldList.length }} 个字段：
@@ -1006,6 +1009,14 @@
                 const healthDialogVisible = ref(false);
                 const healthDialogTitle = ref('');
                 const healthFieldList = ref([]);
+
+                // 跨对象映射
+                const crossSourceObject = ref('');
+                const crossTargets = ref([]);
+                const crossLoading = ref(false);
+                const crossSelectedTarget = ref('');
+                const crossFields = ref([]);
+                const crossFieldsLoading = ref(false);
 
                 // 对象过滤
                 const allObjects = ref([]);
@@ -1097,7 +1108,7 @@
                         }
 
                         if (list.length > 0) {
-                            // bill 类型对象优先
+                            // bill 类型对象优先排在前面（后端已经按 bill 过滤）
                             const score = (name) => {
                                 const n = String(name || '').toLowerCase();
                                 return n.includes('bill') ? 0 : 1;
@@ -1166,6 +1177,65 @@
                     healthDialogTitle.value = `${params.objectType} - ${title}`;
                     healthFieldList.value = fields;
                     healthDialogVisible.value = true;
+                };
+
+                // 跨对象：加载来源对象列表（哪些对象写回/聚合到当前对象）
+                const loadCrossTargets = async () => {
+                    if (!crossSourceObject.value) {
+                        ElMessage.warning('请先选择当前对象');
+                        return;
+                    }
+                    crossLoading.value = true;
+                    try {
+                        const url = `/api/impact/cross/sourcesForTarget?targetObject=${encodeURIComponent(crossSourceObject.value)}`;
+                        const res = await fetch(url);
+                        if (!res.ok) {
+                            ElMessage.error('加载目标对象列表失败');
+                            crossTargets.value = [];
+                            return;
+                        }
+                        crossTargets.value = await res.json();
+                        crossSelectedTarget.value = '';
+                        crossFields.value = [];
+                    } catch (e) {
+                        console.error(e);
+                        ElMessage.error('加载目标对象列表失败');
+                        crossTargets.value = [];
+                    } finally {
+                        crossLoading.value = false;
+                    }
+                };
+
+                // 跨对象：加载某一来源对象的字段关系
+                const loadCrossFields = async (sourceObjectName) => {
+                    console.log('loadCrossFields called with:', sourceObjectName);
+                    if (!sourceObjectName || !crossSourceObject.value) {
+                        console.warn('Missing params:', { source: sourceObjectName, target: crossSourceObject.value });
+                        return;
+                    }
+                    crossSelectedTarget.value = sourceObjectName;
+                    crossFieldsLoading.value = true;
+                    try {
+                        const url = `/api/impact/bySourceObject?targetObject=${encodeURIComponent(crossSourceObject.value)}&sourceObject=${encodeURIComponent(sourceObjectName)}`;
+                        console.log('Fetching cross fields from:', url);
+                        const res = await fetch(url);
+                        if (!res.ok) {
+                            console.error('Fetch failed:', res.status, res.statusText);
+                            ElMessage.error('加载字段关系失败');
+                            crossFields.value = [];
+                            return;
+                        }
+                        const data = await res.json();
+                        console.log('Cross fields data received:', data);
+                        crossFields.value = Array.isArray(data) ? data : [];
+                        console.log('crossFields updated, length:', crossFields.value.length);
+                    } catch (e) {
+                        console.error('Load cross fields error:', e);
+                        ElMessage.error('加载字段关系失败');
+                        crossFields.value = [];
+                    } finally {
+                        crossFieldsLoading.value = false;
+                    }
                 };
 
                 const handleObjectChange = async (val) => {
@@ -1318,6 +1388,26 @@
                         ElMessage.warning('该字段缺少可用的字段名');
                         return;
                     }
+                    params.fields = [fieldName];
+                    viewMode.value = 'graph';
+                    nextTick(() => {
+                        runAnalysis();
+                    });
+                };
+
+                // 从跨对象页签，直接跳到图谱中查看某个字段的完整影响路径
+                const openCrossFieldInGraph = (field) => {
+                    if (!crossSourceObject.value) {
+                        ElMessage.warning('请先选择目标对象');
+                        return;
+                    }
+                    const fieldName = field.apiName || field.name;
+                    if (!fieldName) {
+                        ElMessage.warning('该字段缺少可用的字段名');
+                        return;
+                    }
+                    // 设置分析参数并切换视图
+                    params.objectType = crossSourceObject.value;
                     params.fields = [fieldName];
                     viewMode.value = 'graph';
                     nextTick(() => {
@@ -2577,9 +2667,10 @@
                 };
 
                 onMounted(async () => {
-                    await loadObjects();
                     initCy();
                     await initFromUrl();
+                    // 对象列表后台加载，避免阻塞首屏渲染
+                    loadObjects();
                 });
 
 
@@ -2606,8 +2697,11 @@
                     viewMode, isSidebarCollapsed, analyzing, metaLoading, fieldLoading,
                     objectOptions, fieldOptions, filteredObjectOptions, filteredFieldOptions, params, selectedNode, explainData,
                     allObjects, visibleObjects, filteredExplainData,
-                    searchQuery, graphStats, objectHealth,
-                    healthDialogVisible, healthDialogTitle, healthFieldList, showHealthFields,
+                    searchQuery, graphStats,
+                    // 健康度
+                    objectHealth, healthDialogVisible, healthDialogTitle, healthFieldList, showHealthFields,
+                    // 跨对象
+                    crossSourceObject, crossTargets, crossLoading, crossSelectedTarget, crossFields, crossFieldsLoading,
                     sourceObject, sourceImpactLoading, sourceImpactFields, selectedSourceField,
                     handleObjectChange, runAnalysis, fitGraph, layoutGraph, focusOnNode,
                     selectAllObjects, deselectAllObjects, applyObjectFilter,
@@ -2615,8 +2709,8 @@
                     highlightRelatedNodes, clearRelatedHighlight, fitToRelatedNodes,
                     highlightRelatedNodes, clearRelatedHighlight, fitToRelatedNodes,
                     getStepClass, getBadgeClass, getObjectStyle, getObjectColor, getGroupCardStyle, copyFieldExplain, copyGroupExplain,
-                    loadSourceImpact, openSourceFieldInGraph, formatJsonOneLine, selectSourceField,
-                    generateUpgradeScript,
+                    loadSourceImpact, openSourceFieldInGraph, openCrossFieldInGraph, formatJsonOneLine, selectSourceField,
+                    generateUpgradeScript, loadCrossTargets, loadCrossFields,
                     hasGraphData, exportGraphQL, graphQLDialogVisible, graphQLText, copyGraphQL,
                     graphqlUrl, graphqlTenantId, copyTenantId,
                     filterObjects, filterFields, downloadGraph

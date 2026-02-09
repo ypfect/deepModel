@@ -56,4 +56,11 @@
     from baseapp_object_type
   </select>
 
+  <!-- 只取 type='bill' 的对象类型，用于前端对象下拉过滤 -->
+  <select id="selectBillObjectTypes" resultType="string">
+    select name
+    from baseapp_object_type
+    where coalesce(type,'') = 'bill'
+  </select>
+
 </mapper>

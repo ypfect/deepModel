@@ -39,11 +39,12 @@ public class ImpactAnalyzerService {
             .configure(JsonParser.Feature.ALLOW_TRAILING_COMMA, true);
 
     // 缓存
-    // 缓存
     private volatile List<BaseappObjectField> allRows = Collections.emptyList();
     private final Map<String, List<BaseappObjectField>> rowsByObject = new ConcurrentHashMap<String, List<BaseappObjectField>>();
     // 缓存对象标题: objectType -> title
     private final Map<String, String> objectTitles = new ConcurrentHashMap<>();
+    // bill 类型对象集合（来自 baseapp_object_type.type='bill'）
+    private volatile Set<String> billObjectTypes = Collections.emptySet();
 
     // 视图依赖反向索引: SourceObject.field -> Set<ViewName.field> (用于下游分析)
     private final Map<String, Set<String>> viewReverseDeps = new ConcurrentHashMap<>();
@@ -93,6 +94,21 @@ public class ImpactAnalyzerService {
             log.info("Loaded {} object titles", objectTitles.size());
         } catch (Exception e) {
             log.warn("Failed to load object titles", e);
+        }
+
+        // 加载 bill 类型对象列表（baseapp_object_type.type='bill'）
+        try {
+            List<String> billNames = mapper.selectBillObjectTypes();
+            billObjectTypes = new HashSet<String>();
+            for (String n : billNames) {
+                if (n != null && !n.trim().isEmpty()) {
+                    billObjectTypes.add(n.trim());
+                }
+            }
+            log.info("Loaded {} bill object types", billObjectTypes.size());
+        } catch (Exception e) {
+            log.warn("Failed to load bill object types", e);
+            billObjectTypes = Collections.emptySet();
         }
 
         // 清除分析结果缓存（因为数据源已更新）
@@ -476,13 +492,94 @@ public class ImpactAnalyzerService {
         return result;
     }
 
+    // ======== Cross-object mapping ========
+
+    public static class CrossTargetSummary {
+        public String targetObject;
+        public int fieldCount;
+    }
+
+    /**
+     * 视角一：给定来源对象（sourceObjectType），它作为 writeBack 源，影响到哪些目标对象。
+     * 即：有哪些对象的字段定义中，writeBackExpr.srcObjectType = sourceObjectType。
+     */
+    public List<CrossTargetSummary> listTargetsBySource(String sourceObjectType) {
+        if (sourceObjectType == null || sourceObjectType.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<CrossTargetSummary> out = new ArrayList<CrossTargetSummary>();
+        for (String target : rowsByObject.keySet()) {
+            List<BaseappObjectField> fields = getFieldsImpactedBySourceObject(target, sourceObjectType);
+            if (fields != null && !fields.isEmpty()) {
+                CrossTargetSummary s = new CrossTargetSummary();
+                s.targetObject = target;
+                s.fieldCount = fields.size();
+                out.add(s);
+            }
+        }
+
+        // 按关联字段数降序，再按对象名排序，便于前端展示
+        out.sort((a, b) -> {
+            if (a.fieldCount != b.fieldCount) return Integer.compare(b.fieldCount, a.fieldCount);
+            return a.targetObject.compareTo(b.targetObject);
+        });
+        return out;
+    }
+
+    public static class CrossSourceSummary {
+        public String sourceObject;
+        public int fieldCount;
+    }
+
+    /**
+     * 视角二（本需求）：给定目标对象（targetObjectType），它的字段定义中，
+     * 引用了哪些来源对象（writeBackExpr.srcObjectType），以及每个来源对象涉及多少字段。
+     */
+    public List<CrossSourceSummary> listSourcesForTarget(String targetObjectType) {
+        if (targetObjectType == null || targetObjectType.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<BaseappObjectField> rows = rowsByObject.getOrDefault(targetObjectType,
+                Collections.<BaseappObjectField>emptyList());
+        Map<String, Integer> counts = new HashMap<String, Integer>();
+        for (BaseappObjectField r : rows) {
+            WriteBackExpr wb = parseWriteBack(r.getWriteBackExpr());
+            if (wb == null)
+                continue;
+            String srcObj = wb.getSrcObjectType();
+            if (srcObj == null || srcObj.trim().isEmpty())
+                continue;
+            counts.put(srcObj, counts.getOrDefault(srcObj, 0) + 1);
+        }
+        List<CrossSourceSummary> out = new ArrayList<CrossSourceSummary>();
+        for (Map.Entry<String, Integer> e : counts.entrySet()) {
+            CrossSourceSummary s = new CrossSourceSummary();
+            s.sourceObject = e.getKey();
+            s.fieldCount = e.getValue();
+            out.add(s);
+        }
+        out.sort((a, b) -> {
+            if (a.fieldCount != b.fieldCount) return Integer.compare(b.fieldCount, a.fieldCount);
+            return a.sourceObject.compareTo(b.sourceObject);
+        });
+        return out;
+    }
+
     // Meta APIs for Frontend
     public Set<String> getAllObjectTypes() {
-        return new TreeSet<>(rowsByObject.keySet());
+        // 仅保留 baseapp_object_type 中 type='bill' 的对象；若配置为空则退回全部
+        Set<String> all = new TreeSet<>(rowsByObject.keySet());
+        if (billObjectTypes == null || billObjectTypes.isEmpty()) {
+            return all;
+        }
+        Set<String> billOnly = all.stream()
+                .filter(name -> name != null && billObjectTypes.contains(name))
+                .collect(Collectors.toCollection(TreeSet::new));
+        return billOnly.isEmpty() ? all : billOnly;
     }
 
     public List<Map<String, String>> getObjectDetails() {
-        Set<String> types = rowsByObject.keySet();
+        Set<String> types = getAllObjectTypes();
         List<Map<String, String>> result = new ArrayList<>();
         for (String type : types) {
             Map<String, String> map = new HashMap<>();

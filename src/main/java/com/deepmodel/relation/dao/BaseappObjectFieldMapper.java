@@ -26,4 +26,9 @@ public interface BaseappObjectFieldMapper {
      * 查询所有对象类型的标题映射
      */
     List<BaseappObjectField> selectObjectTitles();
+
+    /**
+     * 查询 type='bill' 的对象类型名称列表
+     */
+    List<String> selectBillObjectTypes();
 }

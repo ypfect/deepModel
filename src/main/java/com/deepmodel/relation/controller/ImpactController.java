@@ -57,6 +57,25 @@ public class ImpactController {
         return analyzerService.getObjectHealth(objectType);
     }
 
+    /**
+     * 跨对象：给定来源对象，查询所有被其 writeBack/聚合影响到的目标对象列表。
+     */
+    @GetMapping("/api/impact/cross/targetsBySource")
+    public List<ImpactAnalyzerService.CrossTargetSummary> listTargetsBySource(
+            @RequestParam("sourceObject") String sourceObject) {
+        return analyzerService.listTargetsBySource(sourceObject);
+    }
+
+    /**
+     * 跨对象：给定目标对象，查询有哪些来源对象通过 writeBack/聚合影响到它。
+     * 本需求中，左侧选择的是“当前对象 A”，因此这里用 targetObject 参数。
+     */
+    @GetMapping("/api/impact/cross/sourcesForTarget")
+    public List<ImpactAnalyzerService.CrossSourceSummary> listSourcesForTarget(
+            @RequestParam("targetObject") String targetObject) {
+        return analyzerService.listSourcesForTarget(targetObject);
+    }
+
     // 新增：字段详情
     @GetMapping("/api/impact/fieldInfo")
     public BaseappObjectField fieldInfo(@RequestParam("objectType") String objectType,
