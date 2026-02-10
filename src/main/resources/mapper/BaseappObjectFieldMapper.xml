@@ -14,34 +14,72 @@
     <result property="triggerExpr" column="trigger_expr"/>
     <result property="virtualExpr" column="virtual_expr"/>
     <result property="writeBackExpr" column="write_back_expr" jdbcType="OTHER"/>
+    <result property="appName" column="app_name"/>
   </resultMap>
 
   <select id="selectByObjectType" resultMap="BaseappObjectFieldMap">
-    select id, object_type, name, api_name, title, type, biz_type, expression, trigger_expr, virtual_expr,
-           write_back_expr::text as write_back_expr
-    from baseapp_object_field
-    where object_type = #{objectType}
+    select f.id,
+           f.object_type,
+           f.name,
+           f.api_name,
+           f.title,
+           f.type,
+           f.biz_type,
+           f.expression,
+           f.trigger_expr,
+           f.virtual_expr,
+           f.write_back_expr::text as write_back_expr,
+           t.app_name
+    from baseapp_object_field f
+    left join baseapp_object_type t on f.object_type = t.name
+    where f.object_type = #{objectType}
   </select>
 
   <!-- 放宽：仅在 DB 层筛选非空，命中逻辑放到服务层，更稳健 -->
   <select id="selectWriteBackCandidates" resultMap="BaseappObjectFieldMap">
-    select id, object_type, name, api_name, title, type, biz_type, expression, trigger_expr, virtual_expr,
-           write_back_expr::text as write_back_expr
-    from baseapp_object_field
-    where write_back_expr is not null
+    select f.id,
+           f.object_type,
+           f.name,
+           f.api_name,
+           f.title,
+           f.type,
+           f.biz_type,
+           f.expression,
+           f.trigger_expr,
+           f.virtual_expr,
+           f.write_back_expr::text as write_back_expr,
+           t.app_name
+    from baseapp_object_field f
+    left join baseapp_object_type t on f.object_type = t.name
+    where f.write_back_expr is not null
   </select>
 
   <select id="selectAll" resultMap="BaseappObjectFieldMap">
-    select id, object_type, name, api_name, title, type, biz_type, expression, trigger_expr, virtual_expr,
-           write_back_expr::text as write_back_expr
-    from baseapp_object_field
+    select f.id,
+           f.object_type,
+           f.name,
+           f.api_name,
+           f.title,
+           f.type,
+           f.biz_type,
+           f.expression,
+           f.trigger_expr,
+           f.virtual_expr,
+           f.write_back_expr::text as write_back_expr,
+           t.app_name
+    from baseapp_object_field f
+    left join baseapp_object_type t on f.object_type = t.name
   </select>
 
   <select id="selectViewDefinitions" resultType="string">
-    select content::text
-    from baseapp_system_metadata
-         where  name like '%View%'
-      and is_deleted = false and type_id='MetaType.entity'
+    select m.content::text
+    from baseapp_system_metadata m
+         join baseapp_object_type t on m.name = t.name
+    where m.name like '%View%'
+      and m.is_deleted = false
+      and m.type_id = 'MetaType.entity'
+      and coalesce(t.type, '') = 'bill'
+      and lower(coalesce(t.app_name, '')) in ('arap', 'sales', 'contract')
   </select>
 
   <select id="selectAppNameByObjectType" resultType="string">

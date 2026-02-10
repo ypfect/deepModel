@@ -4,11 +4,14 @@ import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.GraphModels;
 import com.deepmodel.relation.service.ImpactAnalyzerService;
 import com.deepmodel.relation.service.UpgradeScriptService;
+import com.deepmodel.relation.service.HealthCheckService;
+import com.deepmodel.relation.service.SnapshotService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -19,11 +22,17 @@ public class ImpactController {
 
     private final ImpactAnalyzerService analyzerService;
     private final UpgradeScriptService upgradeScriptService;
+    private final HealthCheckService healthCheckService;
+    private final SnapshotService snapshotService;
 
     public ImpactController(ImpactAnalyzerService analyzerService,
-            UpgradeScriptService upgradeScriptService) {
+            UpgradeScriptService upgradeScriptService,
+            HealthCheckService healthCheckService,
+            SnapshotService snapshotService) {
         this.analyzerService = analyzerService;
         this.upgradeScriptService = upgradeScriptService;
+        this.healthCheckService = healthCheckService;
+        this.snapshotService = snapshotService;
     }
 
     @GetMapping("/api/reload")
@@ -55,6 +64,98 @@ public class ImpactController {
     @GetMapping("/api/impact/meta/health")
     public ImpactAnalyzerService.ObjectHealth getObjectHealth(@RequestParam("objectType") String objectType) {
         return analyzerService.getObjectHealth(objectType);
+    }
+
+    @GetMapping("/api/impact/health/cycles")
+    public HealthCheckService.CycleResult checkCycles(@RequestParam(required = false) String appName) {
+        List<String> apps = parseAppNames(appName);
+        return healthCheckService.detectCycles(apps);
+    }
+
+    @GetMapping("/api/impact/health/chains")
+    public HealthCheckService.ChainResult checkChains(@RequestParam(defaultValue = "10") int threshold,
+            @RequestParam(required = false) String appName) {
+        List<String> apps = parseAppNames(appName);
+        return healthCheckService.detectDeepChains(threshold, apps);
+    }
+
+    /**
+     * 调试用：查看当前全局依赖图的节点/边统计，方便排查为什么 chains 结果为空。
+     */
+    @GetMapping("/api/impact/health/graph/debug")
+    public Map<String, Object> debugHealthGraph(@RequestParam(required = false) String appName) {
+        List<String> apps = parseAppNames(appName);
+        return healthCheckService.debugGlobalGraph(apps);
+    }
+
+    /**
+     * 调试用：按 appName 查看当前内存中的字段数量和示例，用来确认 appName 填充是否正确。
+     */
+    @GetMapping("/api/debug/fieldsByApp")
+    public Map<String, Object> debugFieldsByApp(@RequestParam("appName") String appName) {
+        Map<String, Object> result = new HashMap<>();
+        if (appName == null || appName.trim().isEmpty()) {
+            result.put("error", "appName is empty");
+            return result;
+        }
+        String target = appName.trim().toLowerCase(Locale.ROOT);
+        List<BaseappObjectField> all = analyzerService.getAllFields();
+        List<Map<String, String>> samples = new ArrayList<>();
+        int count = 0;
+        for (BaseappObjectField f : all) {
+            String app = f.getAppName();
+            if (app == null) continue;
+            String a = app.toLowerCase(Locale.ROOT);
+            if (a.equals(target) || a.startsWith(target) || a.contains(target)) {
+                count++;
+                if (samples.size() < 20) {
+                    Map<String, String> m = new HashMap<>();
+                    m.put("id", String.valueOf(f.getId()));
+                    m.put("objectType", String.valueOf(f.getObjectType()));
+                    m.put("field", String.valueOf(f.getApiName() != null ? f.getApiName() : f.getName()));
+                    m.put("appName", app);
+                    samples.add(m);
+                }
+            }
+        }
+        result.put("appName", appName);
+        result.put("totalMatchedFields", count);
+        result.put("samples", samples);
+        return result;
+    }
+
+    @PostMapping("/api/impact/snapshot/create")
+    public String createSnapshot() throws java.io.IOException {
+        return snapshotService.createSnapshot();
+    }
+
+    @GetMapping("/api/impact/snapshot/list")
+    public java.util.List<String> listSnapshots() {
+        return snapshotService.listSnapshots();
+    }
+
+    @GetMapping("/api/impact/snapshot/diff")
+    public SnapshotService.VersionDiff diffSnapshots(@RequestParam("id1") String id1, @RequestParam("id2") String id2)
+            throws java.io.IOException {
+        return snapshotService.compare(id1, id2);
+    }
+
+    /**
+     * 远程数据库对比：前端传入 JDBC URL、用户名、密码和可选 appName 列表，
+     * 后端从远程库加载 baseapp_object_field + object_type，再与本地当前定义做差异分析。
+     */
+    @PostMapping("/api/impact/snapshot/diff/remote")
+    public SnapshotService.VersionDiff diffRemote(@org.springframework.web.bind.annotation.RequestBody RemoteRequest req)
+            throws Exception {
+        List<String> apps = parseAppNames(req.appName);
+        return snapshotService.compareWithRemote(req.url, req.username, req.password, apps);
+    }
+
+    public static class RemoteRequest {
+        public String url;
+        public String username;
+        public String password;
+        public String appName;
     }
 
     /**
@@ -218,6 +319,26 @@ public class ImpactController {
         }
         sb.append("}\n");
         return sb.toString();
+    }
+
+    /**
+     * 解析 appName 参数，支持逗号分隔的多应用名，自动去空格和空串。
+     * 示例：\"arap, baseapp\" -> [\"arap\", \"baseapp\"]
+     */
+    private List<String> parseAppNames(String appName) {
+        if (appName == null || appName.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> result = new ArrayList<String>();
+        for (String part : appName.split(",")) {
+            if (part != null) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) {
+                    result.add(trimmed);
+                }
+            }
+        }
+        return result;
     }
 
     @GetMapping("/api/impact/objects")

@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>DeepModel Insight - Advanced</title>
+    <link rel="icon" type="image/svg+xml"
+          href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='0.5' stop-color='%236366f1'/%3E%3Cstop offset='1' stop-color='%23a855f7'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='18' height='18' rx='4' fill='url(%23g)'/%3E%3Cpath d='M8 15.5 10.8 9l2.4 6 1.8-3.5L17 15.5' fill='none' stroke='%23f9fafb' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <style>
+        body {
+            font-family: -apple-system, system-ui, sans-serif;
+            padding: 20px;
+            color: #333;
+        }
+
+        h2 {
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+
+        .card {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        button {
+            padding: 8px 18px;
+            background: linear-gradient(135deg,#2563eb,#4f46e5);
+            color: white;
+            border: none;
+            border-radius: 999px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 6px 16px rgba(37,99,235,0.35);
+            transition: box-shadow 0.15s ease, transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+        }
+
+        button:hover {
+            background: linear-gradient(135deg,#1d4ed8,#4338ca);
+            box-shadow: 0 10px 24px rgba(37,99,235,0.45);
+            transform: translateY(-1px);
+        }
+
+        button:disabled {
+            background: #cbd5f5;
+            cursor: not-allowed;
+            box-shadow: none;
+            opacity: 0.75;
+            transform: none;
+        }
+
+        input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+            display: block;
+            margin-bottom: 10px;
+        }
+
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            overflow: auto;
+            max-height: 400px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .pill {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            background: #eff6ff;
+            color: #1d4ed8;
+            margin-left: 8px;
+        }
+
+        .pill-muted {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+
+        details {
+            margin-bottom: 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            background: #f9fafb;
+        }
+
+        details>summary {
+            padding: 8px 12px;
+            cursor: pointer;
+            font-weight: 600;
+            list-style: none;
+        }
+
+        details>summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .diff-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .diff-table th,
+        .diff-table td {
+            border-bottom: 1px solid #e5e7eb;
+            padding: 6px 10px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        .diff-table th {
+            background: #f8fafc;
+            font-weight: 600;
+            color: #4b5563;
+        }
+
+        .mono {
+            font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .pill-selected {
+            box-shadow: 0 0 0 1px #1d4ed8 inset;
+        }
+
+        tr[data-kind] {
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+        }
+
+        tr[data-kind]:hover {
+            background-color: #eff6ff;
+        }
+
+        /* Field detail dialog */
+        #field-detail-dialog {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.45);
+            z-index: 1100;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #field-detail-content {
+            width: 70%;
+            max-width: 960px;
+            max-height: 80%;
+            background: #ffffff;
+            border-radius: 10px;
+            box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        #field-detail-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 14px;
+            font-weight: 600;
+            background: #f9fafb;
+        }
+
+        #field-detail-body {
+            padding: 12px 16px;
+            overflow: auto;
+        }
+
+        #field-detail-pre {
+            margin: 0;
+            font-size: 12px;
+            background: #0f172a;
+            color: #e5e7eb;
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        #field-detail-close {
+            cursor: pointer;
+            color: #64748b;
+            font-size: 18px;
+        }
+
+        /* Progress Overlay */
+        #progress-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+
+        .progress-container {
+            width: 300px;
+            background: #f3f3f3;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .progress-bar {
+            height: 20px;
+            background: #2563eb;
+            width: 0%;
+            transition: width 0.3s ease;
+            text-align: center;
+            color: white;
+            font-size: 12px;
+            line-height: 20px;
+        }
+
+        /* Indeterminate animation */
+        .progress-bar.indeterminate {
+            width: 100%;
+            background: linear-gradient(90deg, #2563eb 0%, #60a5fa 50%, #2563eb 100%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+        }
+
+        @keyframes loading {
+            0% {
+                background-position: 100% 0;
+            }
+
+            100% {
+                background-position: -100% 0;
+            }
+        }
+
+        .status-text {
+            margin-top: 10px;
+            font-weight: bold;
+            color: #333;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Progress Overlay -->
+    <div id="progress-overlay">
+        <div class="progress-container">
+            <div id="progress-bar" class="progress-bar indeterminate"></div>
+        </div>
+        <div id="status-text" class="status-text">Processing...</div>
+    </div>
+
+    <div class="card">
+        <h2>🔄 Version Comparison (Remote)</h2>
+        <input type="text" id="remoteUrl" placeholder="JDBC URL (e.g., jdbc:postgresql://...)"
+            value="jdbc:postgresql://localhost:5432/testapp">
+        <input type="text" id="remoteUser" placeholder="Username" value="postgres">
+        <input type="password" id="remotePass" placeholder="Password" value="123">
+        <input type="text" id="diffAppName" placeholder="App Names (Comma separated, optional)" value="arap">
+        <button onclick="compareRemote()" id="btn-compare">Compare with Remote</button>
+
+        <div id="diff-result" style="margin-top: 20px;"></div>
+
+        <!-- Field Detail Dialog -->
+        <div id="field-detail-dialog">
+            <div id="field-detail-content">
+                <div id="field-detail-header">
+                    <span id="field-detail-title">字段详情</span>
+                    <span id="field-detail-close">&times;</span>
+                </div>
+                <div id="field-detail-body">
+                    <pre id="field-detail-pre">{}</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showProgress(msg) {
+            const overlay = document.getElementById('progress-overlay');
+            const text = document.getElementById('status-text');
+            text.innerText = msg || 'Processing...';
+            overlay.style.display = 'flex';
+        }
+
+        function hideProgress() {
+            document.getElementById('progress-overlay').style.display = 'none';
+        }
+
+        async function checkHealth(type) {
+            const resDiv = document.getElementById('health-result');
+            const appName = document.getElementById('healthAppName').value.trim();
+            const threshold = document.getElementById('chainThreshold').value;
+            const progressBar = document.getElementById('progress-bar');
+
+            showProgress('Checking health...');
+            resDiv.innerHTML = '';
+
+            try {
+                // Build plain JSON API URL (no SSE)
+                let url = `/api/impact/health/${type}`;
+                const params = [];
+                if (appName) params.push(`appName=${encodeURIComponent(appName)}`);
+                if (type === 'chains') params.push(`threshold=${encodeURIComponent(threshold)}`);
+                if (params.length > 0) url += '?' + params.join('&');
+
+                const resp = await fetch(url);
+                hideProgress();
+                progressBar.classList.add('indeterminate');
+                progressBar.style.width = '0%';
+                progressBar.textContent = '';
+
+                if (!resp.ok) {
+                    resDiv.innerHTML = `<span style="color:red">Request failed: ${resp.status} ${resp.statusText}</span>`;
+                    return;
+                }
+
+                const data = await resp.json();
+                resDiv.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            } catch (e) {
+                hideProgress();
+                progressBar.classList.add('indeterminate');
+                progressBar.style.width = '0%';
+                progressBar.textContent = '';
+                resDiv.innerHTML = `<span style="color:red">Connection error or timeout: ${e.message}</span>`;
+            }
+        }
+
+        function renderDiff(data) {
+            const resDiv = document.getElementById('diff-result');
+            if (!resDiv) return;
+
+            const added = Array.isArray(data.added) ? data.added.slice() : [];
+            const removed = Array.isArray(data.removed) ? data.removed.slice() : [];
+            const modified = Array.isArray(data.modified) ? data.modified.slice() : [];
+
+            if (!added.length && !removed.length && !modified.length) {
+                resDiv.innerHTML = '<p>No differences found.</p>';
+                return;
+            }
+
+            // 排序辅助：先按对象，再按字段
+            const cmp = (a, b) => (a || '').localeCompare(b || '');
+
+            added.sort((a, b) => {
+                const ao = a.objectType || '';
+                const bo = b.objectType || '';
+                if (ao !== bo) return cmp(ao, bo);
+                const af = (a.apiName || a.name || '') || '';
+                const bf = (b.apiName || b.name || '') || '';
+                return cmp(af, bf);
+            });
+
+            removed.sort((a, b) => {
+                const ao = a.objectType || '';
+                const bo = b.objectType || '';
+                if (ao !== bo) return cmp(ao, bo);
+                const af = (a.apiName || a.name || '') || '';
+                const bf = (b.apiName || b.name || '') || '';
+                return cmp(af, bf);
+            });
+
+            // 构建“字段调整类型”列表
+            const propSet = new Set();
+            modified.forEach(d => {
+                if (d && d.property) propSet.add(d.property);
+            });
+            const uniqueProps = Array.from(propSet).sort((a, b) => cmp(a, b));
+
+            // 当前多选过滤条件（property，保存在全局，便于切换时复用）
+            let selectedProps = Array.isArray(window.__modifiedPropFilterMulti)
+                ? window.__modifiedPropFilterMulti.slice()
+                : [];
+            selectedProps = selectedProps.filter(p => uniqueProps.includes(p));
+            window.__modifiedPropFilterMulti = selectedProps;
+
+            // 构建“对象过滤”列表
+            const addedObjSet = new Set();
+            added.forEach(d => {
+                if (d && d.objectType) addedObjSet.add(d.objectType);
+            });
+            const uniqueAddedObjs = Array.from(addedObjSet).sort((a, b) => cmp(a, b));
+
+            const removedObjSet = new Set();
+            removed.forEach(d => {
+                if (d && d.objectType) removedObjSet.add(d.objectType);
+            });
+            const uniqueRemovedObjs = Array.from(removedObjSet).sort((a, b) => cmp(a, b));
+
+            const modifiedObjSet = new Set();
+            modified.forEach(d => {
+                if (d && d.objectType) modifiedObjSet.add(d.objectType);
+            });
+            const uniqueModifiedObjs = Array.from(modifiedObjSet).sort((a, b) => cmp(a, b));
+
+            // 当前多选过滤条件（对象）
+            let selectedAddedObjs = Array.isArray(window.__addedObjectFilterMulti)
+                ? window.__addedObjectFilterMulti.slice()
+                : [];
+            selectedAddedObjs = selectedAddedObjs.filter(o => uniqueAddedObjs.includes(o));
+            window.__addedObjectFilterMulti = selectedAddedObjs;
+
+            let selectedRemovedObjs = Array.isArray(window.__removedObjectFilterMulti)
+                ? window.__removedObjectFilterMulti.slice()
+                : [];
+            selectedRemovedObjs = selectedRemovedObjs.filter(o => uniqueRemovedObjs.includes(o));
+            window.__removedObjectFilterMulti = selectedRemovedObjs;
+
+            let selectedModifiedObjs = Array.isArray(window.__modifiedObjectFilterMulti)
+                ? window.__modifiedObjectFilterMulti.slice()
+                : [];
+            selectedModifiedObjs = selectedModifiedObjs.filter(o => uniqueModifiedObjs.includes(o));
+            window.__modifiedObjectFilterMulti = selectedModifiedObjs;
+
+            // 先根据过滤条件筛选，再按 对象+字段 聚合
+            let filteredModified = modified.slice();
+            if (selectedProps.length) {
+                const selSet = new Set(selectedProps);
+                filteredModified = filteredModified.filter(d => selSet.has(d.property || ''));
+            }
+            if (selectedModifiedObjs.length) {
+                const objSel = new Set(selectedModifiedObjs);
+                filteredModified = filteredModified.filter(d => objSel.has(d.objectType || ''));
+            }
+
+            // 聚合：同一对象+字段的多条修改合并成一行
+            const modifiedGrouped = [];
+            const groupMap = {};
+            filteredModified.forEach(d => {
+                if (!d) return;
+                const obj = d.objectType || '';
+                const field = d.fieldName || '';
+                const key = obj + '::' + field;
+                if (!groupMap[key]) {
+                    groupMap[key] = {
+                        objectType: obj,
+                        fieldName: field,
+                        changes: []
+                    };
+                    modifiedGrouped.push(groupMap[key]);
+                }
+                groupMap[key].changes.push({
+                    property: d.property || '',
+                    oldValue: d.oldValue,
+                    newValue: d.newValue
+                });
+            });
+
+            modifiedGrouped.forEach(g => {
+                g.changes.sort((a, b) => cmp(a.property, b.property));
+            });
+
+            modifiedGrouped.sort((a, b) => {
+                const ao = a.objectType || '';
+                const bo = b.objectType || '';
+                if (ao !== bo) return cmp(ao, bo);
+                const af = a.fieldName || '';
+                const bf = b.fieldName || '';
+                return cmp(af, bf);
+            });
+
+            let html = '';
+            html += `<p style="margin-bottom:8px;font-size:13px;color:#4b5563;">
+                       <strong>Summary</strong>
+                       <span class="pill pill-muted">Added: ${added.length}</span>
+                       <span class="pill pill-muted">Removed: ${removed.length}</span>
+                       <span class="pill pill-muted">Modified: ${modifiedGrouped.length}</span>
+                     </p>`;
+
+            // Added
+            let addedForRender = added.slice();
+            if (selectedAddedObjs.length) {
+                const addSel = new Set(selectedAddedObjs);
+                addedForRender = addedForRender.filter(d => addSel.has(d.objectType || ''));
+            }
+            if (added.length) {
+                html += `<details open>
+                           <summary>🟢 Added <span class="pill">${addedForRender.length}</span></summary>
+                           <div style="padding:8px 12px;">
+                             ${uniqueAddedObjs.length ? `
+                             <div id="addedObjectFilterBar" style="margin-bottom:8px;font-size:12px;color:#4b5563;">
+                               对象：
+                               ${uniqueAddedObjs.map(o => {
+                                 const sel = selectedAddedObjs.includes(o);
+                                 return `<span class="pill${sel ? ' pill-selected' : ''}" data-obj="${o}" data-scope="added" style="cursor:pointer;margin-left:4px;">${o}</span>`;
+                               }).join('')}
+                               <span class="pill pill-muted" data-obj="__clear__" data-scope="added" style="cursor:pointer;margin-left:8px;">清除筛选</span>
+                             </div>` : ''}
+                             <table class="diff-table">
+                               <thead>
+                                 <tr>
+                                   <th>Object</th>
+                                   <th>Field</th>
+                                   <th>Title / Type</th>
+                                 </tr>
+                               </thead>
+                               <tbody>`;
+                addedForRender.forEach((f, idx) => {
+                    const obj = f.objectType || '';
+                    const field = (f.apiName || f.name || '') || '';
+                    const title = f.title || '';
+                    const type = f.type || '';
+                    html += `<tr data-kind="added" data-idx="${idx}">
+                               <td>${obj}</td>
+                               <td style="color:#2563eb;">${field}</td>
+                               <td>${title ? title + ' · ' : ''}${type}</td>
+                             </tr>`;
+                });
+                html += `      </tbody>
+                             </table>
+                           </div>
+                         </details>`;
+            }
+
+            // Removed
+            let removedForRender = removed.slice();
+            if (selectedRemovedObjs.length) {
+                const remSel = new Set(selectedRemovedObjs);
+                removedForRender = removedForRender.filter(d => remSel.has(d.objectType || ''));
+            }
+            if (removed.length) {
+                html += `<details>
+                           <summary>🔴 Removed <span class="pill">${removedForRender.length}</span></summary>
+                           <div style="padding:8px 12px;">
+                             ${uniqueRemovedObjs.length ? `
+                             <div id="removedObjectFilterBar" style="margin-bottom:8px;font-size:12px;color:#4b5563;">
+                               对象：
+                               ${uniqueRemovedObjs.map(o => {
+                                 const sel = selectedRemovedObjs.includes(o);
+                                 return `<span class="pill${sel ? ' pill-selected' : ''}" data-obj="${o}" data-scope="removed" style="cursor:pointer;margin-left:4px;">${o}</span>`;
+                               }).join('')}
+                               <span class="pill pill-muted" data-obj="__clear__" data-scope="removed" style="cursor:pointer;margin-left:8px;">清除筛选</span>
+                             </div>` : ''}
+                             <table class="diff-table">
+                               <thead>
+                                 <tr>
+                                   <th>Object</th>
+                                   <th>Field</th>
+                                   <th>Title / Type</th>
+                                 </tr>
+                               </thead>
+                               <tbody>`;
+                removedForRender.forEach((f, idx) => {
+                    const obj = f.objectType || '';
+                    const field = (f.apiName || f.name || '') || '';
+                    const title = f.title || '';
+                    const type = f.type || '';
+                    html += `<tr data-kind="removed" data-idx="${idx}">
+                               <td>${obj}</td>
+                               <td style="color:#2563eb;">${field}</td>
+                               <td>${title ? title + ' · ' : ''}${type}</td>
+                             </tr>`;
+                });
+                html += `      </tbody>
+                             </table>
+                           </div>
+                         </details>`;
+            }
+
+            // Modified
+            if (modified.length) {
+                const showCount = modifiedGrouped.length;
+                // 使用 open，避免每次过滤重渲染后默认收起
+                html += `<details open>
+                           <summary>🟡 Modified <span class="pill">${showCount}</span></summary>
+                           <div style="padding:8px 12px;">
+                             ${uniqueProps.length ? `
+                             <div id="modifiedFilterBar" style="margin-bottom:8px;font-size:12px;color:#4b5563;">
+                               字段调整类型：
+                               ${uniqueProps.map(p => {
+                                 const sel = selectedProps.includes(p);
+                                 return `<span class="pill${sel ? ' pill-selected' : ''}" data-prop="${p}" style="cursor:pointer;margin-left:4px;">${p}</span>`;
+                               }).join('')}
+                               <span class="pill pill-muted" data-prop="__clear__" style="cursor:pointer;margin-left:8px;">清除筛选</span>
+                             </div>` : ''}
+                             ${uniqueModifiedObjs.length ? `
+                             <div id="modifiedObjectFilterBar" style="margin-bottom:8px;font-size:12px;color:#4b5563;">
+                               对象：
+                               ${uniqueModifiedObjs.map(o => {
+                                 const sel = selectedModifiedObjs.includes(o);
+                                 return `<span class="pill${sel ? ' pill-selected' : ''}" data-obj="${o}" data-scope="modified" style="cursor:pointer;margin-left:4px;">${o}</span>`;
+                               }).join('')}
+                               <span class="pill pill-muted" data-obj="__clear__" data-scope="modified" style="cursor:pointer;margin-left:8px;">清除筛选</span>
+                             </div>` : ''}
+                             <table class="diff-table">
+                               <thead>
+                                 <tr>
+                                   <th>Object</th>
+                                   <th>Field</th>
+                                   <th>Property</th>
+                                   <th>Changes</th>
+                                 </tr>
+                               </thead>
+                               <tbody>`;
+                modifiedGrouped.forEach((g, idx) => {
+                    const obj = g.objectType || '';
+                    const field = g.fieldName || '';
+                    const propNames = Array.from(new Set(
+                        (g.changes || [])
+                            .map(c => c.property || '')
+                            .filter(p => p)
+                    ));
+                    html += `<tr data-kind="modified" data-idx="${idx}">
+                               <td>${obj}</td>
+                               <td style="color:#2563eb;">${field}</td>
+                               <td>
+                                 ${propNames.length
+                                   ? propNames.map(p => {
+                                       const lower = p.toLowerCase();
+                                       let bg = '#ecfdf5';
+                                       let color = '#166534';
+                                       if (lower.includes('trigger')) {
+                                           bg = '#eff6ff';
+                                           color = '#1d4ed8';
+                                       } else if (lower.includes('writeback') || lower.includes('write_back')) {
+                                           bg = '#ecfdf5';
+                                           color = '#166534';
+                                       } else {
+                                           bg = '#f4f4f5';
+                                           color = '#52525b';
+                                       }
+                                       return `<span class="pill" style="background:${bg};color:${color};margin-right:4px;">${p}</span>`;
+                                   }).join('')
+                                   : '<span class="pill pill-muted">-</span>'
+                                 }
+                               </td>
+                               <td>
+                                 ${g.changes.map(c => {
+                                     const oldV = c.oldValue;
+                                     const newV = c.newValue;
+                                     const oldStr = (oldV === null || oldV === undefined) ? '(null)' : String(oldV);
+                                     const newStr = (newV === null || newV === undefined) ? '(null)' : String(newV);
+                                     const propLabel = c.property ? `<div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:2px;">${c.property}</div>` : '';
+                                     return `
+                                       <div style="margin-bottom:8px;">
+                                         ${propLabel}
+                                         <div class="mono" style="color:#9ca3af;">${oldStr}</div>
+                                         <div style="font-size:11px;color:#6b7280;margin:2px 0;">⇩</div>
+                                         <div class="mono">${newStr}</div>
+                                       </div>
+                                     `;
+                                 }).join('')}
+                               </td>
+                             </tr>`;
+                });
+                html += `      </tbody>
+                             </table>
+                           </div>
+                         </details>`;
+            }
+
+            resDiv.innerHTML = html;
+
+            // 绑定 Modified 里的多选过滤标签（property）
+            const propBar = document.getElementById('modifiedFilterBar');
+            if (propBar) {
+                const propPills = propBar.querySelectorAll('[data-prop]');
+                propPills.forEach(el => {
+                    el.onclick = () => {
+                        const prop = el.getAttribute('data-prop');
+                        if (!prop) return;
+                        if (prop === '__clear__') {
+                            window.__modifiedPropFilterMulti = [];
+                        } else {
+                            let curr = Array.isArray(window.__modifiedPropFilterMulti)
+                                ? window.__modifiedPropFilterMulti.slice()
+                                : [];
+                            if (curr.includes(prop)) {
+                                curr = curr.filter(p => p !== prop);
+                            } else {
+                                curr.push(prop);
+                            }
+                            window.__modifiedPropFilterMulti = curr;
+                        }
+                        if (window.__lastDiff) {
+                            renderDiff(window.__lastDiff);
+                        }
+                    };
+                });
+            }
+
+            // 绑定每个类型头部的对象过滤标签
+            const bindObjectFilterBar = (barId, scopeKey) => {
+                const barEl = document.getElementById(barId);
+                if (!barEl) return;
+                const pills = barEl.querySelectorAll('[data-obj]');
+                pills.forEach(el => {
+                    el.onclick = () => {
+                        const obj = el.getAttribute('data-obj');
+                        const scope = el.getAttribute('data-scope');
+                        if (!obj || scope !== scopeKey) return;
+                        const keyName =
+                            scopeKey === 'added'
+                                ? '__addedObjectFilterMulti'
+                                : scopeKey === 'removed'
+                                    ? '__removedObjectFilterMulti'
+                                    : '__modifiedObjectFilterMulti';
+                        if (obj === '__clear__') {
+                            window[keyName] = [];
+                        } else {
+                            let curr = Array.isArray(window[keyName])
+                                ? window[keyName].slice()
+                                : [];
+                            if (curr.includes(obj)) {
+                                curr = curr.filter(o => o !== obj);
+                            } else {
+                                curr.push(obj);
+                            }
+                            window[keyName] = curr;
+                        }
+                        if (window.__lastDiff) {
+                            renderDiff(window.__lastDiff);
+                        }
+                    };
+                });
+            };
+
+            bindObjectFilterBar('addedObjectFilterBar', 'added');
+            bindObjectFilterBar('removedObjectFilterBar', 'removed');
+            bindObjectFilterBar('modifiedObjectFilterBar', 'modified');
+
+            // 绑定表格行双击展示详情（弹框）
+            const detailDialog = document.getElementById('field-detail-dialog');
+            const detailPre = document.getElementById('field-detail-pre');
+            const detailTitle = document.getElementById('field-detail-title');
+            const detailClose = document.getElementById('field-detail-close');
+            if (detailDialog && detailClose) {
+                detailClose.onclick = () => {
+                    detailDialog.style.display = 'none';
+                };
+                detailDialog.onclick = (e) => {
+                    if (e.target === detailDialog) {
+                        detailDialog.style.display = 'none';
+                    }
+                };
+                if (!window.__fieldDetailEscBound) {
+                    window.__fieldDetailEscBound = true;
+                    document.addEventListener('keydown', (e) => {
+                        if (e.key === 'Escape' || e.key === 'Esc') {
+                            if (detailDialog.style.display === 'flex') {
+                                detailDialog.style.display = 'none';
+                            }
+                        }
+                    });
+                }
+            }
+
+            const rows = resDiv.querySelectorAll('tr[data-kind]');
+            rows.forEach(row => {
+                row.ondblclick = () => {
+                    const kind = row.getAttribute('data-kind');
+                    const idxStr = row.getAttribute('data-idx');
+                    const idx = idxStr ? parseInt(idxStr, 10) : -1;
+                    let payload = null;
+                    if (kind === 'added' && idx >= 0 && idx < added.length) {
+                        payload = added[idx];
+                    } else if (kind === 'removed' && idx >= 0 && idx < removed.length) {
+                        payload = removed[idx];
+                    } else if (kind === 'modified' && idx >= 0 && idx < modifiedGrouped.length) {
+                        payload = modifiedGrouped[idx];
+                    }
+                    if (!payload) return;
+                    if (detailDialog && detailPre) {
+                        if (detailTitle) {
+                            const obj = payload.objectType || payload.object_type || '';
+                            const field = payload.fieldName || payload.field_name || payload.apiName || payload.name || '';
+                            detailTitle.textContent = obj && field
+                                ? `字段详情：${obj}.${field}`
+                                : '字段详情';
+                        }
+                        detailPre.textContent = JSON.stringify(payload, null, 2);
+                        detailDialog.style.display = 'flex';
+                    } else {
+                        alert(JSON.stringify(payload, null, 2));
+                    }
+                };
+            });
+        }
+
+        async function compareRemote() {
+            const btn = document.getElementById('btn-compare');
+            const resDiv = document.getElementById('diff-result');
+
+            btn.disabled = true;
+            showProgress('Connecting to remote database & Comparing...');
+            resDiv.innerHTML = '';
+
+            const payload = {
+                url: document.getElementById('remoteUrl').value,
+                username: document.getElementById('remoteUser').value,
+                password: document.getElementById('remotePass').value,
+                appName: document.getElementById('diffAppName').value.trim()
+            };
+
+            try {
+                const response = await fetch('/api/impact/snapshot/diff/remote', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                window.__lastDiff = data;
+                renderDiff(data);
+            } catch (e) {
+                resDiv.innerHTML = `<span style="color:red">Error: ${e.message}</span>`;
+            } finally {
+                btn.disabled = false;
+                hideProgress();
+            }
+        }
+    </script>
+</body>
+
+</html>

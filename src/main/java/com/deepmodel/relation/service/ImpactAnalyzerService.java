@@ -18,8 +18,6 @@ import javax.annotation.PostConstruct;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
@@ -61,28 +59,41 @@ public class ImpactAnalyzerService {
             .maximumSize(1000) // 最多缓存1000个结果
             .build();
 
-    public ImpactAnalyzerService(BaseappObjectFieldMapper mapper) {
+    private final FormulaParserService formulaParserService;
+
+    public ImpactAnalyzerService(BaseappObjectFieldMapper mapper, FormulaParserService formulaParserService) {
         this.mapper = mapper;
+        this.formulaParserService = formulaParserService;
     }
 
     @PostConstruct
     public void loadCache() {
         reload();
-        loadViews();
     }
 
     public synchronized void reload() {
+        long t0 = System.currentTimeMillis();
+
+        long tSelectStart = System.currentTimeMillis();
         List<BaseappObjectField> rows = mapper.selectAll();
+        long tSelectEnd = System.currentTimeMillis();
+
+        long tGroupStart = System.currentTimeMillis();
         Map<String, List<BaseappObjectField>> byObj = rows.stream()
                 .collect(Collectors.groupingBy(BaseappObjectField::getObjectType));
+        long tGroupEnd = System.currentTimeMillis();
+
         rowsByObject.clear();
         rowsByObject.putAll(byObj);
         allRows = rows;
 
         // 重新加载视图字段（因为 allRows 覆盖了）
+        long tViewsStart = System.currentTimeMillis();
         loadViews();
+        long tViewsEnd = System.currentTimeMillis();
 
         // 加载对象标题
+        long tTitleStart = System.currentTimeMillis();
         objectTitles.clear();
         try {
             List<BaseappObjectField> titles = mapper.selectObjectTitles();
@@ -95,8 +106,10 @@ public class ImpactAnalyzerService {
         } catch (Exception e) {
             log.warn("Failed to load object titles", e);
         }
+        long tTitleEnd = System.currentTimeMillis();
 
         // 加载 bill 类型对象列表（baseapp_object_type.type='bill'）
+        long tBillStart = System.currentTimeMillis();
         try {
             List<String> billNames = mapper.selectBillObjectTypes();
             billObjectTypes = new HashSet<String>();
@@ -110,11 +123,25 @@ public class ImpactAnalyzerService {
             log.warn("Failed to load bill object types", e);
             billObjectTypes = Collections.emptySet();
         }
+        long tBillEnd = System.currentTimeMillis();
 
         // 清除分析结果缓存（因为数据源已更新）
+        long tCacheStart = System.currentTimeMillis();
         clearAnalysisCache();
+        long tCacheEnd = System.currentTimeMillis();
 
-        log.info("缓存加载完成: 对象数={}, 记录数={}, 视图={}", rowsByObject.size(), allRows.size(), viewReverseDeps.size());
+        long tEnd = System.currentTimeMillis();
+
+        log.info(
+                "[reload] done. total={}ms, selectAll={}ms, groupBy={}ms, loadViews={}ms, loadTitles={}ms, loadBillTypes={}ms, clearCache={}ms, objects={}, fields={}, views={}",
+                (tEnd - t0),
+                (tSelectEnd - tSelectStart),
+                (tGroupEnd - tGroupStart),
+                (tViewsEnd - tViewsStart),
+                (tTitleEnd - tTitleStart),
+                (tBillEnd - tBillStart),
+                (tCacheEnd - tCacheStart),
+                rowsByObject.size(), allRows.size(), viewReverseDeps.size());
     }
 
     /**
@@ -231,8 +258,8 @@ public class ImpactAnalyzerService {
                             totalSqlsParsed++;
                         }
                     } else {
-                        log.warn("[视图加载] viewDef 不是数组 - 视图名称: {}, viewDef类型: {}, viewDef值: {}", 
-                                viewName, 
+                        log.warn("[视图加载] viewDef 不是数组 - 视图名称: {}, viewDef类型: {}, viewDef值: {}",
+                                viewName,
                                 viewDefs.isMissingNode() ? "missing" : viewDefs.getNodeType().toString(),
                                 viewDefs.isMissingNode() ? "null" : viewDefs.toString());
                     }
@@ -243,7 +270,7 @@ public class ImpactAnalyzerService {
                         viewNameInError = root.path("name").asText();
                     } catch (Exception ignored) {
                     }
-                    log.error("[视图加载] 解析视图定义失败，跳过此视图 - 视图名称: {}, 错误: {}", 
+                    log.error("[视图加载] 解析视图定义失败，跳过此视图 - 视图名称: {}, 错误: {}",
                             viewNameInError != null ? viewNameInError : "未知", e.getMessage(), e);
                 }
             }
@@ -263,134 +290,51 @@ public class ImpactAnalyzerService {
         }
     }
 
-    /**
-     * 提取主 SELECT 和其对应 FROM 之间的子句。避免子查询中的 FROM 导致截断（如
-     * case when ... then (select ... from baseapp_customer ...) when ...）。
-     */
-    private String extractSelectClause(String cleanSql) {
-        if (cleanSql == null || cleanSql.isEmpty()) return null;
-        int selIdx = cleanSql.toUpperCase().indexOf("SELECT");
-        if (selIdx < 0) return null;
-        int start = selIdx + 6; // 跳过 SELECT
-        // 跳过 SELECT 后的空白，定位到 SELECT 后的第一个非空白字符（即列表达式的开始）
-        while (start < cleanSql.length() && Character.isWhitespace(cleanSql.charAt(start))) {
-            start++;
-        }
-        int balance = 0;
-        int fromStart = -1;
-        for (int i = start; i < cleanSql.length(); i++) {
-            char c = cleanSql.charAt(i);
-            if (c == '(') balance++;
-            else if (c == ')') balance--;
-            else if (balance == 0 && i + 4 <= cleanSql.length()) {
-                String chunk = cleanSql.substring(i, Math.min(i + 5, cleanSql.length())).toUpperCase();
-                if (chunk.startsWith("FROM") && (i + 4 == cleanSql.length() || !Character.isLetterOrDigit(cleanSql.charAt(i + 4)))) {
-                    fromStart = i;
-                    break;
-                }
-            }
-        }
-        if (fromStart < 0) return null;
-        return cleanSql.substring(start, fromStart).trim();
-    }
-
     private void parseSqlDependencies(String viewName, String sql) {
         if (sql == null || sql.isEmpty())
             return;
-        // 简单清理
-        String cleanSql = sql.replace("${SystemFields}", " ");
 
-        // 1. 提取 FROM 和 JOIN 的别名映射 Map<Alias, TableName>
-        Map<String, String> aliasMap = new HashMap<>();
-        // 支持 "FROM table alias" 和 "FROM table AS alias" 以及 "FROM table"
-        // 支持 schema.table 格式
-        Pattern tablePat = Pattern.compile("\\b(FROM|JOIN)\\s+([a-zA-Z0-9_\\.]+)(?:\\s+(?:AS\\s+)?([a-zA-Z0-9_]+))?",
-                Pattern.CASE_INSENSITIVE);
-        Matcher mTable = tablePat.matcher(cleanSql);
-        while (mTable.find()) {
-            String tableName = mTable.group(2);
-            String alias = mTable.group(3);
-            if (alias == null)
-                alias = tableName; // 若无别名，使用表名本身作为别名
-            aliasMap.put(alias, tableName);
-        }
-
-        // log.info("[视图解析] 视图={}, 别名映射数量={}", viewName, aliasMap.size());
-        if (aliasMap.size() <= 3) {
-            // log.info("[视图解析] 别名映射明细: {}", aliasMap);
-        }
-
-        // 2. 提取 SELECT ... FROM 之间的内容（需避免子查询中的 FROM 截断，按括号层级匹配主 SELECT 的 FROM）
-        String selectClause = extractSelectClause(cleanSql);
-        if (selectClause == null) {
-            log.warn("[视图解析] 无法匹配 SELECT...FROM 语句");//IsOrgCrossDocView
-            return;
-        }
-
-        // 3. 简单的逗号分割（忽略括号内的逗号）
-        List<String> columns = splitColumns(selectClause);
-        // log.info("[视图解析] SELECT 子句列数={}", columns.size());
+        // 使用 JSqlParser 解析字段血缘
+        // Map<OutputColumn, Map<SourceTable, Set<SourceColumn>>>
+        Map<String, Map<String, Set<String>>> lineage = formulaParserService.extractColumnLineage(sql);
 
         int parsedCount = 0;
-        for (String colDef : columns) {
-            // 查找 AS alias (支持不带 AS 的列别名，但这比较困难，这里假设规范 SQL 都有 AS)
-            Pattern asPat = Pattern.compile("(.+?)\\s+AS\\s+([a-zA-Z0-9_]+)$",
-                    Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-            Matcher mAs = asPat.matcher(colDef.trim());
-            if (mAs.find()) {
-                String expr = mAs.group(1).trim();
-                String targetSnake = mAs.group(2).trim();
-                String targetCamel = ExprUtils.snakeToCamel(targetSnake);
 
-                // 查找 expr 中的 alias.column
-                // 简单匹配: 单词.单词
-                Pattern refPat = Pattern.compile("\\b([a-zA-Z0-9_]+)\\.([a-zA-Z0-9_]+)\\b");
-                Matcher mRef = refPat.matcher(expr);
-                while (mRef.find()) {
-                    String alias = mRef.group(1);
-                    String col = mRef.group(2);
-                    String tableName = aliasMap.get(alias);
-                    if (tableName != null) {
-                        String srcObj = tableToObject(tableName);
-                        String srcField = ExprUtils.snakeToCamel(col);
-                        if (srcObj != null && srcField != null) {
-                            // 记录依赖: srcObj.srcField -> viewName.targetCamel (下游)
-                            String srcKey = srcObj + "." + srcField;
-                            String tgtKey = viewName + "." + targetCamel;
-                            viewReverseDeps.computeIfAbsent(srcKey, k -> new HashSet<>()).add(tgtKey);
+        for (Map.Entry<String, Map<String, Set<String>>> entry : lineage.entrySet()) {
+            String targetSnake = entry.getKey();
+            String targetCamel = ExprUtils.snakeToCamel(targetSnake);
+            Map<String, Set<String>> sources = entry.getValue();
 
-                            // 记录依赖: viewName.targetCamel -> srcObj.srcField (上游溯源)
-                            viewDirectDeps.computeIfAbsent(tgtKey, k -> new HashSet<>()).add(srcKey);
+            for (Map.Entry<String, Set<String>> srcEntry : sources.entrySet()) {
+                String tableName = srcEntry.getKey();
+                // 忽略未识别的表
+                if (tableName == null || "UNKNOWN".equals(tableName)) {
+                    continue;
+                }
 
-                            parsedCount++;
-                            if (parsedCount <= 5) {
-                                // log.info("[视图解析] 依赖: {} -> {}", srcKey, tgtKey);
-                            }
-                        }
-                    }
+                String srcObj = tableToObject(tableName);
+                if (srcObj == null) {
+                    continue;
+                }
+
+                for (String col : srcEntry.getValue()) {
+                    String srcField = ExprUtils.snakeToCamel(col);
+                    if (srcField == null)
+                        continue;
+
+                    // 记录依赖: srcObj.srcField -> viewName.targetCamel (下游)
+                    String srcKey = srcObj + "." + srcField;
+                    String tgtKey = viewName + "." + targetCamel;
+                    viewReverseDeps.computeIfAbsent(srcKey, k -> new HashSet<>()).add(tgtKey);
+
+                    // 记录依赖: viewName.targetCamel -> srcObj.srcField (上游溯源)
+                    viewDirectDeps.computeIfAbsent(tgtKey, k -> new HashSet<>()).add(srcKey);
+
+                    parsedCount++;
                 }
             }
         }
         // log.info("[视图解析] 视图={}, 解析出依赖关系总数={}", viewName, parsedCount);
-    }
-
-    private List<String> splitColumns(String text) {
-        List<String> list = new ArrayList<>();
-        int balance = 0;
-        int start = 0;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '(')
-                balance++;
-            else if (c == ')')
-                balance--;
-            else if (c == ',' && balance == 0) {
-                list.add(text.substring(start, i));
-                start = i + 1;
-            }
-        }
-        list.add(text.substring(start));
-        return list;
     }
 
     private String canonicalFieldName(BaseappObjectField r) {
@@ -520,7 +464,8 @@ public class ImpactAnalyzerService {
 
         // 按关联字段数降序，再按对象名排序，便于前端展示
         out.sort((a, b) -> {
-            if (a.fieldCount != b.fieldCount) return Integer.compare(b.fieldCount, a.fieldCount);
+            if (a.fieldCount != b.fieldCount)
+                return Integer.compare(b.fieldCount, a.fieldCount);
             return a.targetObject.compareTo(b.targetObject);
         });
         return out;
@@ -559,7 +504,8 @@ public class ImpactAnalyzerService {
             out.add(s);
         }
         out.sort((a, b) -> {
-            if (a.fieldCount != b.fieldCount) return Integer.compare(b.fieldCount, a.fieldCount);
+            if (a.fieldCount != b.fieldCount)
+                return Integer.compare(b.fieldCount, a.fieldCount);
             return a.sourceObject.compareTo(b.sourceObject);
         });
         return out;
@@ -703,11 +649,11 @@ public class ImpactAnalyzerService {
     private List<String> collectCamelRefs(BaseappObjectField row) {
         Set<String> refs = new HashSet<String>();
         if (row.getTriggerExpr() != null)
-            refs.addAll(ExprUtils.extractCamelFieldsFromSql(row.getTriggerExpr()));
+            refs.addAll(formulaParserService.extractCamelFields(row.getTriggerExpr()));
         if (row.getExpression() != null)
-            refs.addAll(ExprUtils.extractCamelFieldsFromSql(row.getExpression()));
+            refs.addAll(formulaParserService.extractCamelFields(row.getExpression()));
         if (row.getVirtualExpr() != null)
-            refs.addAll(ExprUtils.extractCamelFieldsFromSql(row.getVirtualExpr()));
+            refs.addAll(formulaParserService.extractCamelFields(row.getVirtualExpr()));
         return new ArrayList<String>(refs);
     }
 
@@ -795,7 +741,8 @@ public class ImpactAnalyzerService {
     /**
      * 构建当前对象内「trigger 聚合字段」到其组成字段集合的映射。
      *
-     * <p>例如：<code>makeInvoiceAmount</code> 的 triggerExpr 为
+     * <p>
+     * 例如：<code>makeInvoiceAmount</code> 的 triggerExpr 为
      * <code>make_invoice_amount_blue + make_invoice_amount_red + red_app_make_invoice_amount</code>，
      * 则会记录一条：
      *
@@ -834,9 +781,11 @@ public class ImpactAnalyzerService {
      * 判断 needle 是否为 haystack 的一个「连续子序列」（顺序一致且中间不被其他字段打断）。
      */
     private boolean containsSubsequence(List<String> haystack, List<String> needle) {
-        if (haystack == null || needle == null) return false;
+        if (haystack == null || needle == null)
+            return false;
         int n = haystack.size(), m = needle.size();
-        if (m == 0 || n < m) return false;
+        if (m == 0 || n < m)
+            return false;
         for (int i = 0; i <= n - m; i++) {
             boolean ok = true;
             for (int j = 0; j < m; j++) {
@@ -845,7 +794,8 @@ public class ImpactAnalyzerService {
                     break;
                 }
             }
-            if (ok) return true;
+            if (ok)
+                return true;
         }
         return false;
     }
@@ -854,7 +804,8 @@ public class ImpactAnalyzerService {
      * intra 依赖：给定 sourceFieldCamel（同一对象内的某个字段），找出所有
      * 公式中引用了该字段（或其 trigger 聚合等价字段集合）的「被影响字段」列表。
      *
-     * <p>特殊处理 trigger 聚合字段：如果 sourceFieldCamel 恰好是一个 trigger 聚合字段，
+     * <p>
+     * 特殊处理 trigger 聚合字段：如果 sourceFieldCamel 恰好是一个 trigger 聚合字段，
      * 那么凡是引用了其组成字段（例如 make_invoice_amount_blue 等）的字段，也会被认为
      * 是由 sourceFieldCamel 触发，从而补上「等价关系」这层语义。
      */
@@ -913,11 +864,11 @@ public class ImpactAnalyzerService {
             if (matched) {
                 Set<String> refs = new HashSet<String>();
                 if (r.getTriggerExpr() != null)
-                    refs.addAll(ExprUtils.extractCamelFieldsFromSql(r.getTriggerExpr()));
+                    refs.addAll(formulaParserService.extractCamelFields(r.getTriggerExpr()));
                 if (r.getExpression() != null)
-                    refs.addAll(ExprUtils.extractCamelFieldsFromSql(r.getExpression()));
+                    refs.addAll(formulaParserService.extractCamelFields(r.getExpression()));
                 if (r.getVirtualExpr() != null)
-                    refs.addAll(ExprUtils.extractCamelFieldsFromSql(r.getVirtualExpr()));
+                    refs.addAll(formulaParserService.extractCamelFields(r.getVirtualExpr()));
                 refs.remove(targetFieldCamel);
                 List<String> list = new ArrayList<String>(refs);
                 // log.info("upstream: {}.{} <- {} 条, 字段: {}", objectType, targetFieldCamel,
@@ -945,7 +896,7 @@ public class ImpactAnalyzerService {
             if (!writebackHitsCurrentObject(wb, objectType))
                 continue;
             String expr = (wb != null) ? wb.getExpression() : null;
-            Set<String> refs = ExprUtils.extractCamelFieldsFromSql(expr);
+            Set<String> refs = formulaParserService.extractCamelFields(expr);
             if (refs.contains(sourceFieldCamel)) {
                 String dstObj = r.getObjectType();
                 if (objectType.equals(dstObj))
@@ -1419,5 +1370,9 @@ public class ImpactAnalyzerService {
         result.put("totalMappings", totalMappings);
 
         return result;
+    }
+
+    public List<BaseappObjectField> getAllFields() {
+        return allRows;
     }
 }

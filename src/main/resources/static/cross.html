@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeepModel Insight - 跨对象来源分析</title>
+    <link rel="icon" type="image/svg+xml"
+          href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='0.5' stop-color='%236366f1'/%3E%3Cstop offset='1' stop-color='%23a855f7'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='18' height='18' rx='4' fill='url(%23g)'/%3E%3Cpath d='M8 15.5 10.8 9l2.4 6 1.8-3.5L17 15.5' fill='none' stroke='%23f9fafb' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+            background: #f8fafc;
+        }
+        #app {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            height: 56px;
+            background: #fff;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        }
+        .logo {
+            font-size: 18px;
+            font-weight: 700;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .main {
+            flex: 1;
+            display: flex;
+            padding: 24px;
+            box-sizing: border-box;
+        }
+        .panel {
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.10);
+            padding: 24px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #e2e8f0;
+        }
+        .panel-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .panel-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #0f172a;
+        }
+        .panel-sub {
+            font-size: 12px;
+            color: #64748b;
+        }
+        .el-button--primary {
+            border-radius: 999px;
+            padding: 7px 16px;
+            box-shadow: 0 4px 10px rgba(37,99,235,0.25);
+            font-weight: 500;
+        }
+        .el-button--primary:hover {
+            box-shadow: 0 6px 16px rgba(37,99,235,0.35);
+        }
+        .split {
+            display: grid;
+            grid-template-rows: auto 1fr;
+            row-gap: 16px;
+            height: 100%;
+        }
+        [v-cloak] { display: none; }
+    </style>
+</head>
+<body>
+    <div id="app" v-cloak style="display:none;">
+        <header class="header">
+            <div class="logo">
+                <el-icon size="24" color="#3b82f6"><Share /></el-icon>
+                <span>跨对象来源分析</span>
+            </div>
+            <div style="flex: 1"></div>
+            <a href="modern.html" style="font-size: 12px; color:#64748b; text-decoration:none;">
+                ← 返回字段影响分析
+            </a>
+        </header>
+        <main class="main">
+            <section class="panel">
+                <div class="split">
+                    <!-- 顶部：当前对象选择 -->
+                    <div>
+                        <div class="panel-header">
+                            <div class="panel-title">当前对象的回写来源</div>
+                            <div class="panel-sub">选择一个对象，查看有哪些对象通过 writeBack/聚合写回到它</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
+                            <div>当前对象：</div>
+                            <el-select
+                                v-model="currentObject"
+                                filterable
+                                :filter-method="filterObjects"
+                                default-first-option
+                                placeholder="输入对象名或标题搜索..."
+                                style="width: 320px;"
+                            >
+                                <el-option
+                                    v-for="item in filteredObjectOptions"
+                                    :key="item.value"
+                                    :label="item.label"
+                                    :value="item.value"
+                                >
+                                    <div
+                                        style="display:flex; flex-direction:column; justify-content:center; line-height:1.2; padding:4px 0"
+                                    >
+                                        <div style="font-weight:600; font-size:13px">{{ item.value }}</div>
+                                        <div style="color:#64748b; font-size:11px" v-if="item.title">
+                                            {{ item.title }}
+                                        </div>
+                                    </div>
+                                </el-option>
+                            </el-select>
+                            <el-button type="primary" :loading="loadingTargets" @click="loadSources">
+                                查询
+                            </el-button>
+                        </div>
+                        <div v-if="currentObject" style="font-size: 12px; color:#64748b; margin-bottom: 4px;">
+                            {{ currentObject }} 的字段定义中，哪些 writeBackExpr.srcObjectType 出现过？
+                        </div>
+                    </div>
+
+                    <!-- 下部：来源对象列表 + 字段表 -->
+                    <div style="display:grid; grid-template-rows: auto 1fr; row-gap: 12px; min-height:0;">
+                        <!-- 来源对象列表 -->
+                        <div>
+                            <div v-if="sourceList.length" style="margin-bottom: 4px; font-size: 12px; color:#64748b;">
+                                共找到 {{ sourceList.length }} 个来源对象
+                            </div>
+                            <el-table
+                                v-if="sourceList.length"
+                                :data="sourceList"
+                                size="small"
+                                style="width: 100%;"
+                                @row-dblclick="({ sourceObject }) => loadFields(sourceObject)">
+                                <el-table-column label="来源对象" min-width="260">
+                                    <template #default="{ row }">
+                                        <span>{{ row.sourceObject }}</span>
+                                        <span
+                                            v-if="objectTitleMap[row.sourceObject]"
+                                            style="color:#64748b; font-size:12px; margin-left:4px;">
+                                            （{{ objectTitleMap[row.sourceObject] }}）
+                                        </span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column prop="fieldCount" label="关联字段数" width="120" />
+                            </el-table>
+                            <el-empty
+                                v-else
+                                description="请选择当前对象并点击查询"
+                                :image-size="80" />
+                        </div>
+
+                        <!-- 字段关系表 -->
+                        <div v-if="selectedSource" style="min-height:0;">
+                            <div style="margin: 4px 0 8px; font-size: 13px; color:#64748b;">
+                                {{ selectedSource }} → {{ currentObject }} 的字段关系（{{ fieldList.length }} 个）
+                            </div>
+                            <el-table
+                                :data="fieldList"
+                                size="small"
+                                height="360"
+                                v-loading="loadingFields"
+                                style="width: 100%;">
+                                <el-table-column label="序号" width="70" align="center">
+                                    <template #default="{ $index }">
+                                        {{ $index + 1 }}
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="目标字段" width="220">
+                                    <template #default="{ row }">
+                                        <div>
+                                            <span
+                                                style="color:#2563eb; cursor:pointer; text-decoration:underline;"
+                                                @click="openImpact(row)"
+                                            >
+                                                {{ row.apiName || row.name }}
+                                            </span>
+                                            <div v-if="row.title"
+                                                 style="font-size:12px; color:#64748b; margin-top:2px;">
+                                                {{ row.title }}
+                                            </div>
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="当前对象 Trigger" width="220">
+                                    <template #default="{ row }">
+                                        <span style="font-size:13px; color:#64748b; white-space: pre-wrap; word-break: break-all; line-height: 1.4;">
+                                            {{ getTriggerSummary(row) }}
+                                        </span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="来源对象" width="140">
+                                    <template #default="{ row }">
+                                        <span style="font-size:13px;">
+                                            {{ getWbField(row, 'srcObjectType') || selectedSource || '-' }}
+                                        </span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="ID 字段" width="160">
+                                    <template #default="{ row }">
+                                        <span style="font-size:13px; color:#64748b; white-space: pre-wrap; word-break: break-all;">
+                                            {{ getWbField(row, 'idField') || '-' }}
+                                        </span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="执行时机" width="120">
+                                    <template #default="{ row }">
+                                        <span style="font-size:13px; color:#64748b;">
+                                            {{ getWbField(row, 'executingMoment') || '-' }}
+                                        </span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="表达式">
+                                    <template #default="{ row }">
+                                        <span style="font-size:13px; color:#64748b; white-space: pre-wrap; word-break: break-all; line-height: 1.4;">
+                                            {{ getWbField(row, 'expression') || '-' }}
+                                        </span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="条件" width="220">
+                                    <template #default="{ row }">
+                                        <span style="font-size:13px; color:#64748b; white-space: pre-wrap; word-break: break-all; line-height: 1.4;">
+                                            {{ getWbField(row, 'condition') || '-' }}
+                                        </span>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/element-plus@2.4.4/dist/index.full.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+
+    <script>
+        const { createApp, ref, onMounted } = Vue;
+        const { ElMessage } = ElementPlus;
+
+        const app = createApp({
+            setup() {
+                const currentObject = ref('');
+                const objectOptions = ref([]);
+                const filteredObjectOptions = ref([]);
+                const objectTitleMap = ref({});
+                const loadingTargets = ref(false);
+                const loadingFields = ref(false);
+                const sourceList = ref([]);
+                const selectedSource = ref('');
+                const fieldList = ref([]);
+                const triggerMap = ref({});
+
+                const loadObjects = async () => {
+                    try {
+                        const res = await fetch('/api/impact/meta/objectDetails');
+                        if (res.ok) {
+                            const data = await res.json();
+                            const opts = data.map(d => ({
+                                value: d.name,
+                                label: d.name,
+                                title: d.title
+                            }));
+
+                            objectOptions.value = opts;
+                            const map = {};
+                            opts.forEach(o => {
+                                if (o.title) {
+                                    map[o.value] = o.title;
+                                }
+                            });
+                            objectTitleMap.value = map;
+                        } else {
+                            // 退化：使用简单对象列表
+                            const res2 = await fetch('/api/impact/meta/objects');
+                            if (res2.ok) {
+                                const data2 = await res2.json();
+                                const opts2 = data2.map(s => ({ value: s, label: s, title: null }));
+                                objectOptions.value = opts2;
+                                objectTitleMap.value = {};
+                            }
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        ElMessage.error('加载对象列表失败');
+                    }
+                };
+
+                const filterObjects = (query) => {
+                    const q = (query || '').trim();
+                    if (!q) {
+                        // 无搜索词时显示前100个
+                        filteredObjectOptions.value = objectOptions.value.slice(0, 100);
+                        return;
+                    }
+                    const qLower = q.toLowerCase();
+                    const matched = objectOptions.value.filter(item => {
+                        const v = String(item.value || '');
+                        const t = String(item.title || '');
+                        return v.includes(q) || t.includes(q) ||
+                            v.toLowerCase().includes(qLower) || t.toLowerCase().includes(qLower);
+                    });
+                    // 限制显示数量，提升渲染性能
+                    filteredObjectOptions.value = matched.slice(0, 100);
+                };
+
+                const loadSources = async () => {
+                    if (!currentObject.value) {
+                        ElMessage.warning('请先选择当前对象');
+                        return;
+                    }
+                    loadingTargets.value = true;
+                    try {
+                        const url = `/api/impact/cross/sourcesForTarget?targetObject=${encodeURIComponent(currentObject.value)}`;
+                        const res = await fetch(url);
+                        if (!res.ok) {
+                            ElMessage.error('加载来源对象列表失败');
+                            sourceList.value = [];
+                            return;
+                        }
+                        sourceList.value = await res.json();
+                        selectedSource.value = '';
+                        fieldList.value = [];
+                    } catch (e) {
+                        console.error(e);
+                        ElMessage.error('加载来源对象列表失败');
+                        sourceList.value = [];
+                    } finally {
+                        loadingTargets.value = false;
+                    }
+                };
+
+                const loadFields = async (sourceObjectName) => {
+                    if (!sourceObjectName || !currentObject.value) return;
+                    selectedSource.value = sourceObjectName;
+                    loadingFields.value = true;
+                    try {
+                        const url = `/api/impact/bySourceObject?targetObject=${encodeURIComponent(currentObject.value)}&sourceObject=${encodeURIComponent(sourceObjectName)}`;
+                        const res = await fetch(url);
+                        if (!res.ok) {
+                            ElMessage.error('加载字段关系失败');
+                            fieldList.value = [];
+                            return;
+                        }
+                        const data = await res.json();
+                        fieldList.value = Array.isArray(data) ? data : [];
+                        // 异步加载当前对象的 trigger 字段信息
+                        loadTriggersForFields(fieldList.value);
+                    } catch (e) {
+                        console.error(e);
+                        ElMessage.error('加载字段关系失败');
+                        fieldList.value = [];
+                    } finally {
+                        loadingFields.value = false;
+                    }
+                };
+
+                const getWbField = (row, key) => {
+                    if (!row || !row.writeBackExpr) return null;
+                    try {
+                        const obj = typeof row.writeBackExpr === 'string'
+                            ? JSON.parse(row.writeBackExpr)
+                            : row.writeBackExpr;
+                        if (!obj || typeof obj !== 'object') return null;
+                        return obj[key] || null;
+                    } catch (e) {
+                        console.warn('解析 writeBackExpr 失败', e, row.writeBackExpr);
+                        return null;
+                    }
+                };
+
+                const loadTriggersForFields = async (fields) => {
+                    if (!currentObject.value || !Array.isArray(fields) || !fields.length) return;
+                    const obj = currentObject.value;
+                    const map = { ...triggerMap.value };
+                    for (const row of fields) {
+                        if (!row) continue;
+                        const fieldName = row.apiName || row.name;
+                        if (!fieldName) continue;
+                        const key = obj + '::' + fieldName;
+                        if (map[key] !== undefined) continue;
+                        try {
+                            const url = `/api/impact/triggerFields?objectType=${encodeURIComponent(obj)}&field=${encodeURIComponent(fieldName)}`;
+                            const res = await fetch(url);
+                            if (!res.ok) {
+                                map[key] = '';
+                                continue;
+                            }
+                            const arr = await res.json();
+                            if (Array.isArray(arr) && arr.length) {
+                                const names = arr.map(f => f.apiName || f.name).filter(Boolean);
+                                map[key] = names.join(', ');
+                            } else {
+                                map[key] = '';
+                            }
+                        } catch (e) {
+                            console.error('加载 trigger 字段失败', e);
+                            map[key] = '';
+                        }
+                    }
+                    triggerMap.value = map;
+                };
+
+                const getTriggerSummary = (row) => {
+                    if (!row || !currentObject.value) return '-';
+                    const fieldName = row.apiName || row.name;
+                    if (!fieldName) return '-';
+                    const key = currentObject.value + '::' + fieldName;
+                    const v = triggerMap.value[key];
+                    return v && v.length ? v : '-';
+                };
+
+                const openImpact = (row) => {
+                    if (!row) return;
+                    const fieldName = row.apiName || row.name;
+                    if (!currentObject.value || !fieldName) {
+                        ElMessage.warning('缺少对象或字段信息，无法跳转字段影响分析');
+                        return;
+                    }
+                    const params = new URLSearchParams();
+                    params.set('objectType', currentObject.value);
+                    params.set('field', fieldName);
+                    // 默认下游 + 回写/触发
+                    params.set('direction', 'downstream');
+                    params.set('depth', '3');
+                    params.set('relTypes', 'intra,writeBack');
+                    const url = `modern.html?${params.toString()}`;
+                    window.open(url, '_blank');
+                };
+
+                onMounted(async () => {
+                    // 后台加载对象列表，避免阻塞首屏
+                    loadObjects().then(() => {
+                        // 初始化过滤结果
+                        filteredObjectOptions.value = objectOptions.value.slice(0, 100);
+                        // 去掉根元素上的行内隐藏样式，避免 v-cloak 残影
+                        const root = document.getElementById('app');
+                        if (root) {
+                            root.style.display = '';
+                        }
+                    });
+                });
+
+                return {
+                    currentObject,
+                    objectOptions,
+                    filteredObjectOptions,
+                    objectTitleMap,
+                    loadingTargets,
+                    loadingFields,
+                    sourceList,
+                    selectedSource,
+                    fieldList,
+                    loadSources,
+                    loadFields,
+                    getWbField,
+                    getTriggerSummary,
+                    filterObjects,
+                    openImpact
+                };
+            }
+        });
+
+        if (typeof ElementPlusIconsVue !== 'undefined') {
+            for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+                app.component(key, component);
+            }
+        }
+
+        app.use(ElementPlus);
+        app.mount('#app');
+    </script>
+</body>
+</html>
+

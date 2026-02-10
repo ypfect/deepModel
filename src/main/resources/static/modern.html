@@ -68,7 +68,24 @@
             color: #0f172a;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 10px;
+        }
+        .logo-mark {
+            width: 26px;
+            height: 26px;
+            border-radius: 8px;
+            background: radial-gradient(circle at 0 0,#38bdf8,#6366f1 45%,#a855f7 100%);
+            box-shadow: 0 0 0 1px rgba(15,23,42,0.15), 0 8px 18px rgba(15,23,42,0.35);
+            position: relative;
+            overflow: hidden;
+        }
+        .logo-mark::after {
+            content: '';
+            position: absolute;
+            inset: 4px;
+            border-radius: 6px;
+            border: 1px solid rgba(248,250,252,0.75);
+            box-shadow: inset 0 0 0 1px rgba(15,23,42,0.12);
         }
 
         /* 主布局 - 使用 Grid 布局更稳定 */
@@ -186,6 +203,17 @@
             display: flex;
             gap: 8px;
             z-index: 10;
+        }
+        .floating-toolbar .el-button--primary,
+        .config-panel .el-button--primary {
+            border-radius: 999px;
+            padding: 7px 16px;
+            box-shadow: 0 4px 10px rgba(37,99,235,0.25);
+            font-weight: 500;
+        }
+        .floating-toolbar .el-button--primary:hover,
+        .config-panel .el-button--primary:hover {
+            box-shadow: 0 6px 16px rgba(37,99,235,0.35);
         }
 
         /* 统计面板 */
@@ -445,9 +473,7 @@
         <!-- Header -->
         <header class="header">
             <div class="logo">
-                <el-icon size="24" color="#3b82f6">
-                    <Share />
-                </el-icon>
+                <div class="logo-mark"></div>
                 <span>DeepModel Insight</span>
             </div>
             <div style="flex: 1"></div>
@@ -464,10 +490,6 @@
                             <List />
                         </el-icon></span>
                     <span>归因</span>
-                </el-radio-button>
-                <el-radio-button label="source">
-                    <span class="source-tab-icon" aria-hidden="true">↗</span>
-                    <span>来源对象</span>
                 </el-radio-button>
             </el-radio-group>
         </header>
@@ -785,7 +807,7 @@
                     </div>
                 </div>
 
-                <!-- Source Object Impact View -->
+                <!-- Source Object Impact View (moved to source.html, kept here for reference)
                 <div v-show="viewMode === 'source'" class="explain-container">
                     <div style="margin-bottom: 16px; display:flex; align-items:center; gap: 12px; flex-wrap: wrap;">
                         <div>当前对象：<b>{{ params.objectType || '未选择' }}</b></div>
@@ -922,6 +944,7 @@
                         </div>
                     </div>
                 </div>
+                -->
 
                 <!-- Cross-object Mapping View 已迁移到 cross.html（此处不再展示） -->
             </main>
