@@ -79,7 +79,7 @@
       and m.is_deleted = false
       and m.type_id = 'MetaType.entity'
       and coalesce(t.type, '') = 'bill'
-      and lower(coalesce(t.app_name, '')) in ('arap', 'sales', 'contract')
+      and lower(coalesce(t.app_name, '')) in ('arap','purchase', 'sales', 'contract')
   </select>
 
   <select id="selectAppNameByObjectType" resultType="string">
