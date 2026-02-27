@@ -340,7 +340,12 @@ public class ImpactAnalyzerService {
     private String canonicalFieldName(BaseappObjectField r) {
         if (r.getApiName() != null && !r.getApiName().trim().isEmpty())
             return r.getApiName().trim();
-        return r.getName() != null ? r.getName().trim() : null;
+        // api_name 未填写时，把 name（数据库 snake_case）转 camelCase，确保图中节点 ID 统一
+        if (r.getName() != null && !r.getName().trim().isEmpty()) {
+            String n = r.getName().trim();
+            return n.contains("_") ? ExprUtils.snakeToCamel(n) : n;
+        }
+        return null;
     }
 
     // 新增：获取字段元数据
@@ -876,15 +881,107 @@ public class ImpactAnalyzerService {
                 return list;
             }
         }
-        // log.warn("upstream: {}.{} <- 0 条 (未找到该字段)", objectType, targetFieldCamel);
-        // Debug info to see why it wasn't found
-        for (BaseappObjectField r : rows) {
-            if (r.getName().contains("invoiceAppAmount") || r.getApiName().contains("invoiceAppAmount")) {
-                log.warn("Missed candidate: name={}, apiName={}, snakeToCamel={}", r.getName(), r.getApiName(),
-                        ExprUtils.snakeToCamel(r.getName()));
+        return Collections.<String>emptyList();
+    }
+
+    /**
+     * 获取指定字段的直接上游边（一层）：intra 同对象依赖 + writeBack 回写来源。
+     * 用于多根升级脚本时闭合依赖图。
+     */
+    public List<GraphModels.Edge> getDirectUpstreamEdges(String objectType, String fieldCamel,
+            boolean includeIntra, boolean includeWriteBack) {
+        List<GraphModels.Edge> out = new ArrayList<>();
+        String targetId = objectType + "." + fieldCamel;
+
+        if (includeIntra) {
+            List<String> upstream = buildIntraUpstreamDependencies(objectType, fieldCamel);
+            for (String upstreamFld : upstream) {
+                String srcId = objectType + "." + upstreamFld;
+                out.add(new GraphModels.Edge(srcId, targetId, "intra"));
             }
         }
-        return Collections.<String>emptyList();
+
+        if (includeWriteBack) {
+            BaseappObjectField def = getFieldInfo(objectType, fieldCamel);
+            if (def != null) {
+                WriteBackExpr wb = parseWriteBack(def.getWriteBackExpr());
+                if (wb != null && wb.getSrcObjectType() != null) {
+                    String srcObj = wb.getSrcObjectType();
+                    Set<String> srcFields = ExprUtils.extractCamelFieldsFromSql(wb.getExpression());
+                    for (String srcFld : srcFields) {
+                        // 统一转为 camelCase，避免表达式中 snake_case 字段名产生"幽灵节点"
+                        String camelFld = srcFld.contains("_") ? ExprUtils.snakeToCamel(srcFld) : srcFld;
+                        String srcId = srcObj + "." + camelFld;
+                        out.add(new GraphModels.Edge(srcId, targetId, "writeBack"));
+                    }
+                }
+            }
+        }
+
+        return out;
+    }
+
+    /**
+     * 多根合并图并闭合上游：先合并各根的下游图，再对图中每个节点补充直接上游（intra + writeBack），
+     * 递归直到无新节点，得到完整 DAG 用于拓扑排序生成脚本顺序。
+     */
+    public GraphModels.Graph buildMultiRootClosedGraph(List<Map.Entry<String, String>> roots, int depth, int relType) {
+        boolean includeWriteBack = (relType == 0 || relType == 1);
+        boolean includeIntra = (relType == 0 || relType == 2);
+
+        GraphModels.Graph merged = new GraphModels.Graph();
+        Set<String> nodeIds = new HashSet<>();
+        Set<String> edgeKeys = new HashSet<>();
+
+        for (Map.Entry<String, String> root : roots) {
+            String obj = root.getKey();
+            String fld = root.getValue();
+            if (obj == null || fld == null) continue;
+            GraphModels.Graph g = analyzeInternal(obj, fld, depth, relType, false);
+            for (GraphModels.Node n : g.nodes) {
+                String id = n.id != null ? n.id : (n.object + "." + n.field);
+                if (nodeIds.add(id)) {
+                    merged.nodes.add(n);
+                }
+            }
+            for (GraphModels.Edge e : g.edges) {
+                String key = e.source + "|" + e.type + "|" + e.target;
+                if (edgeKeys.add(key)) {
+                    merged.edges.add(e);
+                }
+            }
+        }
+
+        // 闭合：对图中每个节点补充直接上游，直到无新节点（有界迭代防环）
+        int maxRounds = Math.max(500, nodeIds.size() * 2);
+        for (int round = 0; round < maxRounds; round++) {
+            List<String> toProcess = new ArrayList<>(nodeIds);
+            int added = 0;
+            for (String nodeId : toProcess) {
+                int dot = nodeId.indexOf('.');
+                if (dot <= 0) continue;
+                String obj = nodeId.substring(0, dot);
+                String fld = nodeId.substring(dot + 1);
+                for (GraphModels.Edge e : getDirectUpstreamEdges(obj, fld, includeIntra, includeWriteBack)) {
+                    String key = e.source + "|" + e.type + "|" + e.target;
+                    if (edgeKeys.add(key)) {
+                        merged.edges.add(e);
+                        added++;
+                    }
+                    if (nodeIds.add(e.source)) {
+                        String so = e.source.substring(0, e.source.indexOf('.'));
+                        String sf = e.source.substring(e.source.indexOf('.') + 1);
+                        GraphModels.Node up = new GraphModels.Node(so, sf);
+                        fillNodeMeta(up);
+                        merged.nodes.add(up);
+                        added++;
+                    }
+                }
+            }
+            if (added == 0) break;
+        }
+
+        return merged;
     }
 
     private List<Map.Entry<String, String>> buildCrossObjectDependencies(String objectType, String sourceFieldCamel) {
@@ -1058,12 +1155,12 @@ public class ImpactAnalyzerService {
                 if (includeIntra) {
                     for (Map.Entry<String, String> e : buildIntraDependencies(obj, fld)) {
                         String nid = e.getKey() + "." + e.getValue();
-                        addEdgeIfAbsent(edges, edgeSet, cur, nid, "intra");
+                    addEdgeIfAbsent(edges, edgeSet, cur, nid, "intra");
                         if (!nodeSet.contains(nid)) {
-                            nodeSet.add(nid);
-                            GraphModels.Node n = new GraphModels.Node(e.getKey(), e.getValue());
-                            fillNodeMeta(n);
-                            g.nodes.add(n);
+                        nodeSet.add(nid);
+                        GraphModels.Node n = new GraphModels.Node(e.getKey(), e.getValue());
+                        fillNodeMeta(n);
+                        g.nodes.add(n);
                             q.offer(nid);
                             level.put(nid, d + 1);
                         }
@@ -1072,12 +1169,12 @@ public class ImpactAnalyzerService {
                 if (includeWriteBack) {
                     for (Map.Entry<String, String> e : buildCrossObjectDependencies(obj, fld)) {
                         String nid = e.getKey() + "." + e.getValue();
-                        addEdgeIfAbsent(edges, edgeSet, cur, nid, "writeBack");
+                    addEdgeIfAbsent(edges, edgeSet, cur, nid, "writeBack");
                         if (!nodeSet.contains(nid)) {
-                            nodeSet.add(nid);
-                            GraphModels.Node n = new GraphModels.Node(e.getKey(), e.getValue());
-                            fillNodeMeta(n);
-                            g.nodes.add(n);
+                        nodeSet.add(nid);
+                        GraphModels.Node n = new GraphModels.Node(e.getKey(), e.getValue());
+                        fillNodeMeta(n);
+                        g.nodes.add(n);
                             q.offer(nid);
                             level.put(nid, d + 1);
                         }
@@ -1094,8 +1191,8 @@ public class ImpactAnalyzerService {
                                 int dotV = viewId.indexOf('.');
                                 GraphModels.Node n = new GraphModels.Node(viewId.substring(0, dotV),
                                         viewId.substring(dotV + 1));
-                                fillNodeMeta(n);
-                                g.nodes.add(n);
+                            fillNodeMeta(n);
+                            g.nodes.add(n);
                                 q.offer(viewId);
                                 level.put(viewId, d + 1);
                             }

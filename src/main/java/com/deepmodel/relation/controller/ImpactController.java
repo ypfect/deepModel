@@ -6,19 +6,35 @@ import com.deepmodel.relation.service.ImpactAnalyzerService;
 import com.deepmodel.relation.service.UpgradeScriptService;
 import com.deepmodel.relation.service.HealthCheckService;
 import com.deepmodel.relation.service.SnapshotService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.*;
+import java.util.AbstractMap;
 
 @RestController
 public class ImpactController {
+
+    private static final Logger log = LoggerFactory.getLogger(ImpactController.class);
+
+    @Value("${spring.datasource.url:}")
+    private String datasourceUrl;
+
+    @Value("${spring.datasource.username:}")
+    private String datasourceUsername;
+
+    @Value("${spring.datasource.password:}")
+    private String datasourcePassword;
 
     private final ImpactAnalyzerService analyzerService;
     private final UpgradeScriptService upgradeScriptService;
@@ -33,6 +49,15 @@ public class ImpactController {
         this.upgradeScriptService = upgradeScriptService;
         this.healthCheckService = healthCheckService;
         this.snapshotService = snapshotService;
+    }
+
+    @GetMapping("/api/impact/meta/datasource")
+    public Map<String, String> getDatasourceInfo() {
+        Map<String, String> info = new LinkedHashMap<>();
+        info.put("url", datasourceUrl);
+        info.put("username", datasourceUsername);
+        info.put("password", datasourcePassword);
+        return info;
     }
 
     @GetMapping("/api/reload")
@@ -143,12 +168,17 @@ public class ImpactController {
     /**
      * 远程数据库对比：前端传入 JDBC URL、用户名、密码和可选 appName 列表，
      * 后端从远程库加载 baseapp_object_field + object_type，再与本地当前定义做差异分析。
+     *
+     * 支持指定「基准库」：
+     * - localAsBase = true  => 基准库 = 本地 Spring Boot 数据源，比较库 = 远程
+     * - localAsBase = false => 基准库 = 远程，比较库 = 本地（兼容原有语义）
      */
     @PostMapping("/api/impact/snapshot/diff/remote")
     public SnapshotService.VersionDiff diffRemote(@org.springframework.web.bind.annotation.RequestBody RemoteRequest req)
             throws Exception {
         List<String> apps = parseAppNames(req.appName);
-        return snapshotService.compareWithRemote(req.url, req.username, req.password, apps);
+        boolean localAsBase = req.localAsBase == null ? false : req.localAsBase;
+        return snapshotService.compareWithRemote(req.url, req.username, req.password, apps, localAsBase);
     }
 
     public static class RemoteRequest {
@@ -156,6 +186,40 @@ public class ImpactController {
         public String username;
         public String password;
         public String appName;
+        /**
+         * 是否以本地库为基准库（可为空，默认 false 以保持向后兼容；前端会主动传 true 以本地为基准）。
+         */
+        public Boolean localAsBase;
+    }
+
+    /**
+     * 双端 JDBC 对比接口。前端传入「基准库」和「比较库」两个 JDBC 端点（都可为空）。
+     * - 当某一端 URL 为空时，表示使用当前 Spring Boot 数据源。
+     */
+    @PostMapping("/api/impact/snapshot/diff/jdbcPair")
+    public SnapshotService.VersionDiff diffJdbcPair(
+            @org.springframework.web.bind.annotation.RequestBody JdbcPairRequest req) throws Exception {
+        JdbcEndpoint base = req.base != null ? req.base : new JdbcEndpoint();
+        JdbcEndpoint compare = req.compare != null ? req.compare : new JdbcEndpoint();
+
+        List<String> baseApps = parseAppNames(base.appName);
+        List<String> compareApps = parseAppNames(compare.appName);
+
+        return snapshotService.compareJdbcPair(
+                base.url, base.username, base.password, baseApps,
+                compare.url, compare.username, compare.password, compareApps);
+    }
+
+    public static class JdbcEndpoint {
+        public String url;
+        public String username;
+        public String password;
+        public String appName;
+    }
+
+    public static class JdbcPairRequest {
+        public JdbcEndpoint base;
+        public JdbcEndpoint compare;
     }
 
     /**
@@ -409,6 +473,74 @@ public class ImpactController {
         headers.setContentType(MediaType.TEXT_PLAIN);
 
         return new ResponseEntity<String>(sql, headers, HttpStatus.OK);
+    }
+
+    /**
+     * 批量生成升级脚本：多根合并图 + 拓扑排序，一次请求返回整份脚本。
+     * POST body: { "roots": [ { "objectType", "field" }, ... ], "depth": 3, "relTypes": "intra,writeBack" }
+     */
+    @PostMapping(value = "/api/impact/upgradeScript/batch", produces = MediaType.TEXT_PLAIN_VALUE)
+    public ResponseEntity<String> generateUpgradeScriptBatch(@RequestBody UpgradeScriptBatchRequest req) {
+        List<Map.Entry<String, String>> roots = new ArrayList<>();
+        if (req.roots != null) {
+            for (UpgradeScriptBatchRequest.RootItem r : req.roots) {
+                if (r != null && r.objectType != null && r.field != null) {
+                    roots.add(new AbstractMap.SimpleEntry<>(r.objectType.trim(), r.field.trim()));
+                }
+            }
+        }
+        int depth = req.depth != null && req.depth > 0 ? req.depth : 3;
+        String relTypes = req.relTypes != null && !req.relTypes.isEmpty() ? req.relTypes : "intra,writeBack";
+
+        // 如果前端传入了比较库连接，拉取最新字段定义用于生成 SQL（以比较库定义为准）
+        Map<String, BaseappObjectField> latestFieldDefs = null;
+        if (req.compareDbUrl != null && !req.compareDbUrl.trim().isEmpty()) {
+            try {
+                List<String> compareApps = parseAppNames(req.compareDbAppName);
+                List<BaseappObjectField> compareFields = snapshotService.fetchCompareDbFields(
+                        req.compareDbUrl.trim(), req.compareDbUser, req.compareDbPassword, compareApps);
+                latestFieldDefs = new LinkedHashMap<>();
+                for (BaseappObjectField f : compareFields) {
+                    String obj = f.getObjectType();
+                    if (obj == null) continue;
+                    // 以 apiName（camelCase）为主键，name（snake_case）为辅键，都存入，方便双格式查找
+                    if (f.getApiName() != null && !f.getApiName().trim().isEmpty()) {
+                        latestFieldDefs.put(obj + "." + f.getApiName().trim(), f);
+                    }
+                    if (f.getName() != null && !f.getName().trim().isEmpty()) {
+                        latestFieldDefs.put(obj + "." + f.getName().trim(), f);
+                        // name 是 snake_case 时也存 camelCase key
+                        String camel = com.deepmodel.relation.util.ExprUtils.snakeToCamel(f.getName().trim());
+                        latestFieldDefs.putIfAbsent(obj + "." + camel, f);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("[upgradeScript/batch] 拉取比较库字段定义失败，降级为本地定义: {}", e.getMessage());
+            }
+        }
+
+        String sql = upgradeScriptService.generateUpgradeScriptBatch(roots, depth, relTypes, latestFieldDefs);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"batch_upgrade.sql\"");
+        headers.setContentType(MediaType.TEXT_PLAIN);
+        return new ResponseEntity<>(sql, headers, HttpStatus.OK);
+    }
+
+    public static class UpgradeScriptBatchRequest {
+        public List<RootItem> roots;
+        public Integer depth;
+        public String relTypes;
+        /** 比较库 JDBC 连接（可选），用于以最新字段定义生成升级 SQL */
+        public String compareDbUrl;
+        public String compareDbUser;
+        public String compareDbPassword;
+        public String compareDbAppName;
+
+        public static class RootItem {
+            public String objectType;
+            public String field;
+        }
     }
 
     // ===== 解释接口 =====

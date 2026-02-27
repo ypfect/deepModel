@@ -81,12 +81,77 @@ public class SnapshotService {
         public List<FieldDiff> modified = new ArrayList<>();
     }
 
-    public VersionDiff compareWithRemote(String remoteUrl, String username, String password, List<String> appNames)
-            throws Exception {
+    /**
+     * 比较当前 Spring Boot 数据源（本地）与远程库之间的差异。
+     *
+     * @param remoteUrl   远程 JDBC URL
+     * @param username    远程用户名
+     * @param password    远程密码
+     * @param appNames    需要过滤的 appName 列表（可为空）
+     * @param localAsBase 是否以本地库为「基准库」：
+     *                    true  => 基准库 = 本地，比较库 = 远程
+     *                    false => 基准库 = 远程，比较库 = 本地（兼容原有行为）
+     */
+    public VersionDiff compareWithRemote(String remoteUrl, String username, String password, List<String> appNames,
+            boolean localAsBase) throws Exception {
         // 远端：只取 baseapp_object_type.type = 'bill' 的对象，视图不要，可按 appName 过滤
         List<BaseappObjectField> remoteList = fetchRemoteFields(remoteUrl, username, password, appNames);
 
-        // 本地：同样只比较 bill 类型对象（依赖 ImpactAnalyzerService 已按 type='bill' 过滤的对象列表）
+        // 本地：同样只比较 bill 类型对象
+        List<BaseappObjectField> localList = loadLocalFields(appNames);
+
+        // 通用差异含义：
+        // - 基准库：baseList
+        // - 比较库：compareList
+        List<BaseappObjectField> baseList;
+        List<BaseappObjectField> compareList;
+        if (localAsBase) {
+            baseList = localList;
+            compareList = remoteList;
+        } else {
+            baseList = remoteList;
+            compareList = localList;
+        }
+
+        return compareLists(baseList, compareList);
+    }
+
+    /**
+     * 比较两个任意端点（可以都是 JDBC，也可以一端留空代表“当前 Spring Boot 数据源”）。
+     *
+     * @param baseUrl       基准库 JDBC URL（为空则使用当前数据源）
+     * @param baseUser      基准库用户名
+     * @param basePassword  基准库密码
+     * @param baseAppNames  基准库 appName 过滤
+     * @param compareUrl    比较库 JDBC URL（为空则使用当前数据源）
+     * @param compareUser   比较库用户名
+     * @param comparePass   比较库密码
+     * @param compareAppNames 比较库 appName 过滤
+     */
+    public VersionDiff compareJdbcPair(String baseUrl, String baseUser, String basePassword, List<String> baseAppNames,
+            String compareUrl, String compareUser, String comparePass, List<String> compareAppNames) throws Exception {
+        List<BaseappObjectField> baseList;
+        List<BaseappObjectField> compareList;
+
+        if (baseUrl == null || baseUrl.trim().isEmpty()) {
+            baseList = loadLocalFields(baseAppNames);
+        } else {
+            baseList = fetchRemoteFields(baseUrl, baseUser, basePassword, baseAppNames);
+        }
+
+        if (compareUrl == null || compareUrl.trim().isEmpty()) {
+            compareList = loadLocalFields(compareAppNames);
+        } else {
+            compareList = fetchRemoteFields(compareUrl, compareUser, comparePass, compareAppNames);
+        }
+
+        return compareLists(baseList, compareList);
+    }
+
+    /**
+     * 从当前 Spring Boot 数据源加载字段定义（只取 bill 类型对象，支持按 appName 过滤）。
+     */
+    private List<BaseappObjectField> loadLocalFields(List<String> appNames) {
         Set<String> billObjects = analyzerService.getAllObjectTypes();
         List<BaseappObjectField> localList = analyzerService.getAllFields().stream()
                 .filter(f -> billObjects.contains(f.getObjectType()))
@@ -96,17 +161,27 @@ public class SnapshotService {
             localList = localList.stream()
                     .filter(f -> {
                         String app = f.getAppName();
-                        if (app == null) return false;
+                        if (app == null)
+                            return false;
                         for (String target : appNames) {
-                            if (target == null) continue;
-                            if (app.equals(target)) return true;
+                            if (target == null)
+                                continue;
+                            if (app.equals(target))
+                                return true;
                         }
                         return false;
                     })
                     .collect(Collectors.toList());
         }
+        return localList;
+    }
 
-        return compareLists(localList, remoteList);
+    /**
+     * 对外暴露：从任意 JDBC 库拉取字段定义（用于升级脚本按最新定义生成 SQL）。
+     */
+    public List<BaseappObjectField> fetchCompareDbFields(String url, String user, String password,
+            List<String> appNames) throws Exception {
+        return fetchRemoteFields(url, user, password, appNames);
     }
 
     private List<BaseappObjectField> fetchRemoteFields(String url, String user, String password, List<String> appNames)
@@ -168,27 +243,48 @@ public class SnapshotService {
         return list;
     }
 
-    private VersionDiff compareLists(List<BaseappObjectField> list1, List<BaseappObjectField> list2) {
-        Map<String, BaseappObjectField> map1 = list1.stream()
-                .collect(Collectors.toMap(BaseappObjectField::getId, f -> f));
-        Map<String, BaseappObjectField> map2 = list2.stream()
-                .collect(Collectors.toMap(BaseappObjectField::getId, f -> f));
+    /**
+     * 字段的逻辑唯一键：objectType + name（下划线格式）。
+     * 不用 id（UUID），因为不同环境导入时 UUID 可能不同，但 objectType+name 是业务上的唯一标识。
+     */
+    private static String fieldKey(BaseappObjectField f) {
+        String obj = f.getObjectType() != null ? f.getObjectType() : "";
+        String name = f.getName() != null ? f.getName() : (f.getApiName() != null ? f.getApiName() : "");
+        return obj + "." + name;
+    }
+
+    /**
+     * 按「基准库 / 比较库」的通用语义做字段差异对比。
+     *
+     * @param baseList    基准库字段列表
+     * @param compareList 比较库字段列表
+     */
+    private VersionDiff compareLists(List<BaseappObjectField> baseList, List<BaseappObjectField> compareList) {
+        // 用 objectType+name 做逻辑唯一键，避免不同环境 UUID 不同导致所有字段都落入 added/removed
+        Map<String, BaseappObjectField> baseMap = new LinkedHashMap<>();
+        for (BaseappObjectField f : baseList) {
+            baseMap.put(fieldKey(f), f);
+        }
+        Map<String, BaseappObjectField> compareMap = new LinkedHashMap<>();
+        for (BaseappObjectField f : compareList) {
+            compareMap.put(fieldKey(f), f);
+        }
 
         VersionDiff diff = new VersionDiff();
 
-        // Check for removed (in 1 but not in 2)
-        for (String id : map1.keySet()) {
-            if (!map2.containsKey(id)) {
-                diff.removed.add(map1.get(id));
+        // removed: 在基准库有、比较库没有
+        for (String key : baseMap.keySet()) {
+            if (!compareMap.containsKey(key)) {
+                diff.removed.add(baseMap.get(key));
             }
         }
 
-        // Check for added (in 2 but not in 1) and modified
-        for (String id : map2.keySet()) {
-            if (!map1.containsKey(id)) {
-                diff.added.add(map2.get(id));
+        // added: 在比较库有、基准库没有；modified: 两边都存在但定义不同
+        for (String key : compareMap.keySet()) {
+            if (!baseMap.containsKey(key)) {
+                diff.added.add(compareMap.get(key));
             } else {
-                compareFields(map1.get(id), map2.get(id), diff.modified);
+                compareFields(baseMap.get(key), compareMap.get(key), diff.modified);
             }
         }
         return diff;
@@ -197,6 +293,7 @@ public class SnapshotService {
     public VersionDiff compare(String snapshotId1, String snapshotId2) throws IOException {
         List<BaseappObjectField> list1 = loadSnapshot(snapshotId1);
         List<BaseappObjectField> list2 = loadSnapshot(snapshotId2);
+        // 这里约定 snapshotId1 为「基准快照」，snapshotId2 为「比较快照」
         return compareLists(list1, list2);
     }
 

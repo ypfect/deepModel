@@ -3,16 +3,16 @@ server:
 
 # 回写 SQL 接口（调用外部 arap 服务）
 writeback-sql:
-  api-url: http://postgres.hotfix-aws-1.e7link.com/arap/gen/debug/writeBackField2sql
+  api-url: http://arap.release-tx-1.e7link.com/arap/gen/debug/writeBackField2sql
   tenant-id: 711FNX50G6V0009
-
+#连接数据库
 spring:
   datasource:
 #    url: jdbc:postgresql://localhost:5432/testapp
-    url: jdbc:postgresql://postgres.hotfix-aws-1.e7link.com:5432/tenant-public
-    username: postgres
-#    password: 123
+    url: jdbc:postgresql://postgres.release-tx-1.e7link.com:5432/tenant-public
     password: stet44{czars
+#    password: 123
+    username: postgres
     driver-class-name: org.postgresql.Driver
   jackson:
     serialization:

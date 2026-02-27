@@ -278,12 +278,45 @@
 
     <div class="card">
         <h2>🔄 Version Comparison (Remote)</h2>
-        <input type="text" id="remoteUrl" placeholder="JDBC URL (e.g., jdbc:postgresql://...)"
-            value="jdbc:postgresql://localhost:5432/testapp">
-        <input type="text" id="remoteUser" placeholder="Username" value="postgres">
-        <input type="password" id="remotePass" placeholder="Password" value="123">
-        <input type="text" id="diffAppName" placeholder="App Names (Comma separated, optional)" value="arap">
-        <button onclick="compareRemote()" id="btn-compare">Compare with Remote</button>
+
+        <div style="display:flex;gap:0;align-items:stretch;margin-bottom:12px;">
+            <!-- 左侧：基准库（JDBC，留空=当前服务数据库） -->
+            <div style="flex:1;border:1px solid #e5e7eb;border-radius:8px 0 0 8px;padding:12px 14px;">
+                <div style="font-size:13px;font-weight:600;margin-bottom:6px;color:#111827;">📌 基准库</div>
+                <input type="text" id="baseUrl" placeholder="JDBC URL（自动填充当前服务数据库）"
+                    value="" style="margin-bottom:4px;width:100%;box-sizing:border-box;">
+                <input type="text" id="baseUser" placeholder="Username"
+                    value="" style="margin-bottom:4px;width:100%;box-sizing:border-box;">
+                <input type="text" id="basePass" placeholder="Password" value="123"
+                    style="margin-bottom:4px;width:100%;box-sizing:border-box;">
+                <input type="text" id="baseAppName" placeholder="App Names（逗号分隔，可选）" value="arap"
+                    style="width:100%;box-sizing:border-box;">
+            </div>
+
+            <!-- 中间：交换按钮 -->
+            <div style="display:flex;flex-direction:column;justify-content:center;align-items:center;padding:0 12px;gap:10px;">
+                <button type="button" id="btn-switch-base"
+                    style="padding:8px 12px;font-size:18px;border-radius:999px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;cursor:pointer;line-height:1;"
+                    title="交换两侧配置">⇄</button>
+                <button type="button" onclick="compareRemote()" id="btn-compare"
+                    style="padding:8px 14px;font-size:13px;border-radius:8px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;border:none;cursor:pointer;font-weight:500;white-space:nowrap;">
+                    开始对比
+                </button>
+            </div>
+
+            <!-- 右侧：比较库（JDBC） -->
+            <div style="flex:1;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;padding:12px 14px;">
+                <div style="font-size:13px;font-weight:600;margin-bottom:6px;color:#111827;">🔍 比较库</div>
+                <input type="text" id="compareUrl" placeholder="JDBC URL（留空 = 当前服务数据库）"
+                    value="jdbc:postgresql://localhost:5432/testapp" style="margin-bottom:4px;width:100%;box-sizing:border-box;">
+                <input type="text" id="compareUser" placeholder="Username" value="postgres"
+                    style="margin-bottom:4px;width:100%;box-sizing:border-box;">
+                <input type="text" id="comparePass" placeholder="Password" value="123"
+                    style="margin-bottom:4px;width:100%;box-sizing:border-box;">
+                <input type="text" id="compareAppName" placeholder="App Names（逗号分隔，可选）" value="arap"
+                    style="width:100%;box-sizing:border-box;">
+            </div>
+        </div>
 
         <div id="diff-result" style="margin-top: 20px;"></div>
 
@@ -296,6 +329,23 @@
                 </div>
                 <div id="field-detail-body">
                     <pre id="field-detail-pre">{}</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upgrade Script Dialog (金额类型字段升级脚本，执行逻辑后续明确) -->
+        <div id="upgrade-script-dialog" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.45); z-index:1100; justify-content:center; align-items:center; flex-direction:row;">
+            <div style="width:80%; max-width:900px; max-height:85%; background:#fff; border-radius:10px; box-shadow:0 20px 40px rgba(15,23,42,0.25); display:flex; flex-direction:column; overflow:hidden;">
+                <div style="padding:12px 16px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:space-between; background:#f9fafb;">
+                    <span id="upgrade-script-title" style="font-weight:600;">升级脚本</span>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <button type="button" id="upgrade-script-download" style="padding:6px 12px; font-size:12px; border-radius:6px; background:#2563eb; color:#fff; border:none; cursor:pointer;">下载 SQL</button>
+                        <span id="upgrade-script-close" style="cursor:pointer; font-size:18px; color:#64748b;">&times;</span>
+                    </div>
+                </div>
+                <div style="padding:8px 12px; font-size:12px; color:#64748b;">说明：以下为根据当前升级接口生成的脚本，实际执行逻辑后续明确。</div>
+                <div style="padding:12px 16px; overflow:auto; flex:1;">
+                    <pre id="upgrade-script-pre" style="margin:0; font-size:12px; background:#0f172a; color:#e5e7eb; padding:12px; border-radius:6px; white-space:pre-wrap; word-break:break-all;"></pre>
                 </div>
             </div>
         </div>
@@ -313,6 +363,164 @@
             document.getElementById('progress-overlay').style.display = 'none';
         }
 
+        // 中间按钮：交换左右两侧 JDBC 配置（仅前端输入框，后端始终以左侧为基准库、右侧为比较库）
+        function initDbRoleSwitcher() {
+            const btn = document.getElementById('btn-switch-base');
+            if (!btn) return;
+
+            btn.onclick = () => {
+                const baseUrlEl = document.getElementById('baseUrl');
+                const baseUserEl = document.getElementById('baseUser');
+                const basePassEl = document.getElementById('basePass');
+                const baseAppEl = document.getElementById('baseAppName');
+
+                const cmpUrlEl = document.getElementById('compareUrl');
+                const cmpUserEl = document.getElementById('compareUser');
+                const cmpPassEl = document.getElementById('comparePass');
+                const cmpAppEl = document.getElementById('compareAppName');
+
+                if (!baseUrlEl || !baseUserEl || !basePassEl || !baseAppEl ||
+                    !cmpUrlEl || !cmpUserEl || !cmpPassEl || !cmpAppEl) {
+                    return;
+                }
+
+                // 交换两边输入框的值
+                const tmpUrl = baseUrlEl.value;
+                const tmpUser = baseUserEl.value;
+                const tmpPass = basePassEl.value;
+                const tmpApp = baseAppEl.value;
+
+                baseUrlEl.value = cmpUrlEl.value;
+                baseUserEl.value = cmpUserEl.value;
+                basePassEl.value = cmpPassEl.value;
+                baseAppEl.value = cmpAppEl.value;
+
+                cmpUrlEl.value = tmpUrl;
+                cmpUserEl.value = tmpUser;
+                cmpPassEl.value = tmpPass;
+                cmpAppEl.value = tmpApp;
+            };
+        }
+
+        /** 是否为可升级字段（trigger 或 writeBack 相关）——用于「新增」列表 */
+        function isUpgradeByTriggerOrWriteBack_Added(fieldDef) {
+            if (!fieldDef) return false;
+            const t1 = fieldDef.triggerExpr || fieldDef.trigger_expression;
+            const w1 = fieldDef.writeBackExpr || fieldDef.write_back_expr;
+            const tStr = t1 == null ? '' : String(t1).trim();
+            const wStr = w1 == null ? '' : String(w1).trim();
+            return !!tStr || !!wStr;
+        }
+
+        /** 是否为可升级字段（trigger 或 writeBack 相关）——用于「修改」列表 */
+        function isUpgradeByTriggerOrWriteBack_Modified(group) {
+            if (!group || !Array.isArray(group.changes)) return false;
+            return group.changes.some(c => {
+                const p = (c.property || '').toLowerCase();
+                return p.includes('trigger') || p.includes('writeback') || p.includes('write_back');
+            });
+        }
+
+        /** 生成升级脚本：调用升级接口，在弹窗中展示并支持下载（执行逻辑后续明确） */
+        async function openUpgradeScript(objectType, fieldName) {
+            if (!objectType || !fieldName) return;
+            const dialog = document.getElementById('upgrade-script-dialog');
+            const pre = document.getElementById('upgrade-script-pre');
+            const titleEl = document.getElementById('upgrade-script-title');
+            if (!dialog || !pre) return;
+            titleEl.textContent = `升级脚本：${objectType}.${fieldName}`;
+            pre.textContent = '加载中...';
+            dialog.style.display = 'flex';
+            try {
+                const url = `/api/impact/upgradeScript?objectType=${encodeURIComponent(objectType)}&field=${encodeURIComponent(fieldName)}&depth=3&relTypes=intra,writeBack`;
+                const res = await fetch(url);
+                const text = await res.text();
+                pre.textContent = res.ok ? text : `请求失败: ${res.status}\n${text}`;
+                window.__lastUpgradeScript = { objectType, fieldName, sql: text };
+                const downloadBtn = document.getElementById('upgrade-script-download');
+                if (downloadBtn) {
+                    downloadBtn.onclick = () => {
+                        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `${objectType}_${fieldName}_upgrade.sql`;
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                    };
+                }
+            } catch (e) {
+                pre.textContent = `错误: ${e.message}`;
+            }
+            const closeEl = document.getElementById('upgrade-script-close');
+            if (closeEl) closeEl.onclick = () => { dialog.style.display = 'none'; };
+            dialog.onclick = (e) => { if (e.target === dialog) dialog.style.display = 'none'; };
+            document.addEventListener('keydown', function escHandler(e) {
+                if ((e.key === 'Escape' || e.key === 'Esc') && dialog.style.display === 'flex') {
+                    dialog.style.display = 'none';
+                    document.removeEventListener('keydown', escHandler);
+                }
+            });
+        }
+
+        /** 批量生成升级脚本：收集所有勾选的行，一次调用批量接口（多根合并图+拓扑排序），展示并支持下载 */
+        async function batchGenerateUpgradeScripts(container) {
+            const checkboxes = container ? container.querySelectorAll('.upgrade-checkbox:checked') : [];
+            const items = [];
+            checkboxes.forEach(cb => {
+                const obj = cb.getAttribute('data-obj');
+                const field = cb.getAttribute('data-field');
+                if (obj && field) items.push({ objectType: obj, field: field });
+            });
+            if (items.length === 0) {
+                alert('请先勾选需要升级的字段');
+                return;
+            }
+            const dialog = document.getElementById('upgrade-script-dialog');
+            const pre = document.getElementById('upgrade-script-pre');
+            const titleEl = document.getElementById('upgrade-script-title');
+            if (!dialog || !pre) return;
+            titleEl.textContent = `批量升级脚本（${items.length} 个根字段，按依赖顺序）`;
+            pre.textContent = '正在生成...';
+            dialog.style.display = 'flex';
+            try {
+                // 带上比较库连接参数，让后端以最新字段定义生成 SQL
+                const compareDbPayload = {
+                    roots: items,
+                    depth: 3,
+                    relTypes: 'intra,writeBack',
+                    compareDbUrl:      (document.getElementById('compareUrl')  || {}).value || '',
+                    compareDbUser:     (document.getElementById('compareUser') || {}).value || '',
+                    compareDbPassword: (document.getElementById('comparePass') || {}).value || '',
+                    compareDbAppName:  (document.getElementById('compareAppName') || {}).value || ''
+                };
+                const res = await fetch('/api/impact/upgradeScript/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(compareDbPayload)
+                });
+                const text = await res.text();
+                pre.textContent = res.ok ? text : `请求失败: ${res.status}\n${text}`;
+                window.__lastUpgradeScript = { batch: true, sql: text };
+            } catch (e) {
+                pre.textContent = `错误: ${e.message}`;
+            }
+            const downloadBtn = document.getElementById('upgrade-script-download');
+            if (downloadBtn) {
+                downloadBtn.onclick = () => {
+                    const sql = (pre.textContent || '').startsWith('请求失败') || (pre.textContent || '').startsWith('错误:') ? '' : pre.textContent;
+                    const blob = new Blob([sql], { type: 'text/plain;charset=utf-8' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'batch_upgrade.sql';
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                };
+            }
+            const closeEl = document.getElementById('upgrade-script-close');
+            if (closeEl) closeEl.onclick = () => { dialog.style.display = 'none'; };
+            dialog.onclick = (e) => { if (e.target === dialog) dialog.style.display = 'none'; };
+        }
+
         async function checkHealth(type) {
             const resDiv = document.getElementById('health-result');
             const appName = document.getElementById('healthAppName').value.trim();
@@ -325,10 +533,10 @@
             try {
                 // Build plain JSON API URL (no SSE)
                 let url = `/api/impact/health/${type}`;
-                const params = [];
-                if (appName) params.push(`appName=${encodeURIComponent(appName)}`);
+            const params = [];
+            if (appName) params.push(`appName=${encodeURIComponent(appName)}`);
                 if (type === 'chains') params.push(`threshold=${encodeURIComponent(threshold)}`);
-                if (params.length > 0) url += '?' + params.join('&');
+            if (params.length > 0) url += '?' + params.join('&');
 
                 const resp = await fetch(url);
                 hideProgress();
@@ -485,13 +693,20 @@
                 return cmp(af, bf);
             });
 
+            if (!window.__upgradeCheckedSet) window.__upgradeCheckedSet = new Set();
+
             let html = '';
-            html += `<p style="margin-bottom:8px;font-size:13px;color:#4b5563;">
-                       <strong>Summary</strong>
+            html += `<div style="margin-bottom:12px;font-size:13px;color:#4b5563;">
+                       <p style="margin:0 0 8px 0;"><strong>Summary</strong>
                        <span class="pill pill-muted">Added: ${added.length}</span>
                        <span class="pill pill-muted">Removed: ${removed.length}</span>
-                       <span class="pill pill-muted">Modified: ${modifiedGrouped.length}</span>
-                     </p>`;
+                       <span class="pill pill-muted">Modified: ${modifiedGrouped.length}</span></p>
+                       <p style="margin:0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                       <span style="color:#64748b;">批量操作：</span>
+                       <button type="button" id="btn-upgrade-select-all" style="padding:6px 14px;font-size:13px;border-radius:8px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;cursor:pointer;font-weight:500;">全选</button>
+                       <button type="button" id="btn-upgrade-deselect-all" style="padding:6px 14px;font-size:13px;border-radius:8px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;cursor:pointer;font-weight:500;">全不选</button>
+                       <button type="button" id="btn-batch-upgrade" style="padding:6px 14px;font-size:13px;border-radius:8px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;border:none;cursor:pointer;font-weight:500;">批量生成升级脚本</button>
+                       </p></div>`;
 
             // Added
             let addedForRender = added.slice();
@@ -515,9 +730,12 @@
                              <table class="diff-table">
                                <thead>
                                  <tr>
+                                   <th style="width:50px;">勾选</th>
                                    <th>Object</th>
                                    <th>Field</th>
                                    <th>Title / Type</th>
+                                   <th>Trigger / WriteBack</th>
+                                   <th>升级脚本</th>
                                  </tr>
                                </thead>
                                <tbody>`;
@@ -526,10 +744,28 @@
                     const field = (f.apiName || f.name || '') || '';
                     const title = f.title || '';
                     const type = f.type || '';
+                    const canUpgrade = isUpgradeByTriggerOrWriteBack_Added(f);
+                    const key = obj + '::' + field;
+                    const checked = window.__upgradeCheckedSet.has(key);
+                    const checkboxHtml = canUpgrade
+                        ? `<input type="checkbox" class="upgrade-checkbox" data-key="${key}" data-obj="${obj}" data-field="${field}" ${checked ? ' checked' : ''}>`
+                        : '';
+                    // badge：区分 Trigger / WriteBack
+                    const t1 = f.triggerExpr || f.trigger_expression;
+                    const w1 = f.writeBackExpr || f.write_back_expr;
+                    const hasTrigger = t1 != null && String(t1).trim() !== '';
+                    const hasWriteBack = w1 != null && String(w1).trim() !== '';
+                    let badgeText = '';
+                    if (hasTrigger && hasWriteBack) badgeText = 'Trigger + WriteBack';
+                    else if (hasTrigger) badgeText = 'Trigger';
+                    else if (hasWriteBack) badgeText = 'WriteBack';
                     html += `<tr data-kind="added" data-idx="${idx}">
+                               <td>${checkboxHtml}</td>
                                <td>${obj}</td>
                                <td style="color:#2563eb;">${field}</td>
                                <td>${title ? title + ' · ' : ''}${type}</td>
+                               <td>${canUpgrade ? `<span class="pill" style="background:#fef3c7;color:#b45309;">${badgeText}</span>` : '-'}</td>
+                               <td>${canUpgrade ? `<button type="button" class="btn-upgrade" data-obj="${obj}" data-field="${field}" style="padding:4px 10px;font-size:12px;border-radius:6px;background:#2563eb;color:#fff;border:none;cursor:pointer;">生成</button>` : ''}</td>
                              </tr>`;
                 });
                 html += `      </tbody>
@@ -611,22 +847,39 @@
                              <table class="diff-table">
                                <thead>
                                  <tr>
+                                   <th style="width:50px;">勾选</th>
                                    <th>Object</th>
                                    <th>Field</th>
                                    <th>Property</th>
                                    <th>Changes</th>
+                                   <th>Trigger / WriteBack</th>
+                                   <th>升级脚本</th>
                                  </tr>
                                </thead>
                                <tbody>`;
                 modifiedGrouped.forEach((g, idx) => {
                     const obj = g.objectType || '';
                     const field = g.fieldName || '';
+                    const canUpgrade = isUpgradeByTriggerOrWriteBack_Modified(g);
+                    const key = obj + '::' + field;
+                    const checked = window.__upgradeCheckedSet.has(key);
+                    const checkboxHtml = canUpgrade
+                        ? `<input type="checkbox" class="upgrade-checkbox" data-key="${key}" data-obj="${obj}" data-field="${field}" ${checked ? ' checked' : ''}>`
+                        : '';
                     const propNames = Array.from(new Set(
                         (g.changes || [])
                             .map(c => c.property || '')
                             .filter(p => p)
                     ));
+                    const lowerProps = propNames.map(p => (p || '').toLowerCase());
+                    const hasTriggerProp = lowerProps.some(p => p.includes('trigger'));
+                    const hasWriteBackProp = lowerProps.some(p => p.includes('writeback') || p.includes('write_back'));
+                    let badgeText = '';
+                    if (hasTriggerProp && hasWriteBackProp) badgeText = 'Trigger + WriteBack';
+                    else if (hasTriggerProp) badgeText = 'Trigger';
+                    else if (hasWriteBackProp) badgeText = 'WriteBack';
                     html += `<tr data-kind="modified" data-idx="${idx}">
+                               <td>${checkboxHtml}</td>
                                <td>${obj}</td>
                                <td style="color:#2563eb;">${field}</td>
                                <td>
@@ -667,6 +920,8 @@
                                      `;
                                  }).join('')}
                                </td>
+                               <td>${canUpgrade ? `<span class="pill" style="background:#fef3c7;color:#b45309;">${badgeText}</span>` : '-'}</td>
+                               <td>${canUpgrade ? `<button type="button" class="btn-upgrade" data-obj="${obj}" data-field="${field}" style="padding:4px 10px;font-size:12px;border-radius:6px;background:#2563eb;color:#fff;border:none;cursor:pointer;">生成</button>` : ''}</td>
                              </tr>`;
                 });
                 html += `      </tbody>
@@ -676,6 +931,52 @@
             }
 
             resDiv.innerHTML = html;
+
+            // 绑定勾选：勾选/取消时更新 __upgradeCheckedSet
+            resDiv.querySelectorAll('.upgrade-checkbox').forEach(cb => {
+                cb.onclick = (e) => e.stopPropagation();
+                cb.onchange = function () {
+                    const k = this.getAttribute('data-key');
+                    if (this.checked) window.__upgradeCheckedSet.add(k);
+                    else window.__upgradeCheckedSet.delete(k);
+                };
+            });
+
+            // 绑定「全选」「全不选」「批量生成升级脚本」
+            const selectAllBtn = document.getElementById('btn-upgrade-select-all');
+            const deselectAllBtn = document.getElementById('btn-upgrade-deselect-all');
+            const batchBtn = document.getElementById('btn-batch-upgrade');
+            if (selectAllBtn) {
+                selectAllBtn.onclick = () => {
+                    resDiv.querySelectorAll('.upgrade-checkbox').forEach(cb => {
+                        cb.checked = true;
+                        const k = cb.getAttribute('data-key');
+                        if (k) window.__upgradeCheckedSet.add(k);
+                    });
+                };
+            }
+            if (deselectAllBtn) {
+                deselectAllBtn.onclick = () => {
+                    resDiv.querySelectorAll('.upgrade-checkbox').forEach(cb => {
+                        cb.checked = false;
+                        const k = cb.getAttribute('data-key');
+                        if (k) window.__upgradeCheckedSet.delete(k);
+                    });
+                };
+            }
+            if (batchBtn) {
+                batchBtn.onclick = () => batchGenerateUpgradeScripts(resDiv);
+            }
+
+            // 绑定所有单字段「生成」按钮
+            resDiv.querySelectorAll('.btn-upgrade').forEach(btn => {
+                btn.onclick = (e) => {
+                    e.stopPropagation();
+                    const o = btn.getAttribute('data-obj');
+                    const f = btn.getAttribute('data-field');
+                    if (o && f) openUpgradeScript(o, f);
+                };
+            });
 
             // 绑定 Modified 里的多选过滤标签（property）
             const propBar = document.getElementById('modifiedFilterBar');
@@ -803,6 +1104,26 @@
             });
         }
 
+        // 初始化页面上的交互组件
+        document.addEventListener('DOMContentLoaded', async () => {
+            initDbRoleSwitcher();
+            // 自动填充基准库连接信息（来自当前 Spring Boot 数据源）
+            try {
+                const res = await fetch('/api/impact/meta/datasource');
+                if (res.ok) {
+                    const info = await res.json();
+                    const baseUrlEl = document.getElementById('baseUrl');
+                    const baseUserEl = document.getElementById('baseUser');
+                    const basePassEl = document.getElementById('basePass');
+                    if (baseUrlEl && info.url) baseUrlEl.value = info.url;
+                    if (baseUserEl && info.username) baseUserEl.value = info.username;
+                    if (basePassEl && info.password) basePassEl.value = info.password;
+                }
+            } catch (e) {
+                // 不影响页面功能，静默处理
+            }
+        });
+
         async function compareRemote() {
             const btn = document.getElementById('btn-compare');
             const resDiv = document.getElementById('diff-result');
@@ -812,14 +1133,22 @@
             resDiv.innerHTML = '';
 
             const payload = {
-                url: document.getElementById('remoteUrl').value,
-                username: document.getElementById('remoteUser').value,
-                password: document.getElementById('remotePass').value,
-                appName: document.getElementById('diffAppName').value.trim()
+                base: {
+                    url: document.getElementById('baseUrl').value,
+                    username: document.getElementById('baseUser').value,
+                    password: document.getElementById('basePass').value,
+                    appName: document.getElementById('baseAppName').value.trim()
+                },
+                compare: {
+                    url: document.getElementById('compareUrl').value,
+                    username: document.getElementById('compareUser').value,
+                    password: document.getElementById('comparePass').value,
+                    appName: document.getElementById('compareAppName').value.trim()
+                }
             };
 
             try {
-                const response = await fetch('/api/impact/snapshot/diff/remote', {
+                const response = await fetch('/api/impact/snapshot/diff/jdbcPair', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
