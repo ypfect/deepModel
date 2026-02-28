@@ -926,8 +926,9 @@ public class ImpactAnalyzerService {
      * 递归直到无新节点，得到完整 DAG 用于拓扑排序生成脚本顺序。
      */
     public GraphModels.Graph buildMultiRootClosedGraph(List<Map.Entry<String, String>> roots, int depth, int relType) {
-        boolean includeWriteBack = (relType == 0 || relType == 1);
-        boolean includeIntra = (relType == 0 || relType == 2);
+        // relType 4 = intra+writeBack only (exclude view)
+        boolean includeWriteBack = (relType == 0 || relType == 1 || relType == 4);
+        boolean includeIntra = (relType == 0 || relType == 2 || relType == 4);
 
         GraphModels.Graph merged = new GraphModels.Graph();
         Set<String> nodeIds = new HashSet<>();
@@ -1050,9 +1051,10 @@ public class ImpactAnalyzerService {
      */
     private GraphModels.Graph analyzeInternal(String objectType, String fieldCamel, int depth, int relType,
             boolean includeUpstream) {
-        boolean includeWriteBack = (relType == 0 || relType == 1);
-        boolean includeIntra = (relType == 0 || relType == 2);
-        boolean includeView = (relType == 0 || relType == 3);
+        // relType: 0=全部, 1=writeBack, 2=intra, 3=view, 4=intra+writeBack(不含view)
+        boolean includeWriteBack = (relType == 0 || relType == 1 || relType == 4);
+        boolean includeIntra = (relType == 0 || relType == 2 || relType == 4);
+        boolean includeView = (relType == 0 || relType == 3);  // 4 排除 view
 
         // log.info("analyze start object={}, field={}, depth={}, includeWB={},
         // includeIntra={}, includeView={}", objectType, fieldCamel, depth,

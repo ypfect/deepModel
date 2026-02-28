@@ -543,6 +543,26 @@ public class ImpactController {
         }
     }
 
+    /**
+     * 多根合并影响图（字段明细视图），供前端 Cytoscape.js 可视化展示。
+     * 请求体与 upgradeScript/batch 完全一致，只返回 Graph JSON 而不生成 SQL。
+     */
+    @PostMapping("/api/impact/graph/multiRoot")
+    public GraphModels.Graph multiRootGraph(@RequestBody UpgradeScriptBatchRequest req) {
+        List<Map.Entry<String, String>> roots = new ArrayList<>();
+        if (req.roots != null) {
+            for (UpgradeScriptBatchRequest.RootItem r : req.roots) {
+                if (r != null && r.objectType != null && r.field != null) {
+                    roots.add(new AbstractMap.SimpleEntry<>(r.objectType.trim(), r.field.trim()));
+                }
+            }
+        }
+        if (roots.isEmpty()) return new GraphModels.Graph();
+        int depth = req.depth != null && req.depth > 0 ? req.depth : 3;
+        int relType = 4; // intra + writeBack only，排除 view
+        return analyzerService.buildMultiRootClosedGraph(roots, depth, relType);
+    }
+
     // ===== 解释接口 =====
     @GetMapping("/api/impact/explain")
     public GraphModels.ExplainResponse explain(@RequestParam("objectType") String objectType,

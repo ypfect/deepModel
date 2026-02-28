@@ -265,6 +265,14 @@
             color: #333;
         }
     </style>
+    <!-- Cytoscape.js（影响分析预览用） -->
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.28.0/dist/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/layout-base@1.0.2/layout-base.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cose-base@1.0.2/cose-base.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape-fcose@2.2.0/cytoscape-fcose.min.js"></script>
+    <script>
+      try{ if(window.cytoscape && window.cytoscapeFcose) window.cytoscape.use(window.cytoscapeFcose); }catch(e){}
+    </script>
 </head>
 
 <body>
@@ -301,6 +309,11 @@
                 <button type="button" onclick="compareRemote()" id="btn-compare"
                     style="padding:8px 14px;font-size:13px;border-radius:8px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;border:none;cursor:pointer;font-weight:500;white-space:nowrap;">
                     开始对比
+                </button>
+                <button type="button" onclick="compareRemote(true)" id="btn-compare-refresh"
+                    title="强制重新查询（忽略缓存）"
+                    style="padding:6px 10px;font-size:12px;border-radius:8px;background:#f1f5f9;color:#475569;border:1px solid #d1d5db;cursor:pointer;white-space:nowrap;">
+                    🔄 刷新
                 </button>
             </div>
 
@@ -349,6 +362,50 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- ===== 影响分析预览弹窗 ===== -->
+    <div id="impact-preview-dialog" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.5); z-index:1200; justify-content:center; align-items:center;">
+      <div style="width:92%; max-width:1200px; height:88vh; background:#fff; border-radius:12px; box-shadow:0 20px 50px rgba(15,23,42,0.3); display:flex; flex-direction:column; overflow:hidden;">
+        <!-- 标题栏 -->
+        <div style="padding:10px 16px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:space-between; background:#f9fafb; flex-shrink:0;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <span style="font-weight:600; font-size:14px;">影响分析预览</span>
+            <span id="impact-preview-summary" style="font-size:12px; color:#64748b;"></span>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; font-size:12px;">
+            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+              <input type="checkbox" id="imp-chk-intra" checked> <span style="color:#eb256a; font-weight:600;">触发(intra)</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+              <input type="checkbox" id="imp-chk-wb" checked> <span style="color:#16a34a; font-weight:600;">回写(writeBack)</span>
+            </label>
+            <select id="imp-layout" style="font-size:12px; padding:3px 6px; border-radius:4px; border:1px solid #d1d5db;">
+              <option value="fcose" selected>防重叠</option>
+              <option value="breadthfirst">层次</option>
+              <option value="cose">力导</option>
+              <option value="grid">网格</option>
+            </select>
+            <button type="button" id="imp-btn-layout" style="padding:4px 10px; font-size:12px; border-radius:4px; background:#f1f5f9; border:1px solid #d1d5db; cursor:pointer;">重新布局</button>
+            <button type="button" id="imp-btn-fit" style="padding:4px 10px; font-size:12px; border-radius:4px; background:#f1f5f9; border:1px solid #d1d5db; cursor:pointer;">适应画面</button>
+            <span id="impact-preview-close" style="cursor:pointer; font-size:20px; color:#64748b; padding:0 4px;">&times;</span>
+          </div>
+        </div>
+        <!-- 图例 -->
+        <div style="padding:6px 16px; font-size:11px; color:#64748b; background:#fafafa; border-bottom:1px solid #f1f5f9; flex-shrink:0; display:flex; gap:16px; align-items:center;">
+          <span>图例：</span>
+          <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:28px; height:2px; background:#eb256a;"></span> 触发依赖（intra）</span>
+          <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:28px; height:2px; background:#16a34a;"></span> 跨对象回写（writeBack）</span>
+          <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#fde68a; border:2px solid #f59e0b;"></span> 根字段</span>
+          <span style="margin-left:auto; font-size:11px; color:#94a3b8;">鼠标悬停节点查看详情 · 滚轮缩放</span>
+        </div>
+        <!-- 对象筛选栏 -->
+        <div id="imp-obj-filters" style="padding:6px 16px; font-size:12px; background:#f8fafc; border-bottom:1px solid #f1f5f9; flex-shrink:0; display:flex; flex-wrap:wrap; gap:8px; align-items:center; min-height:32px;"></div>
+        <!-- Cytoscape 容器 -->
+        <div id="impact-preview-cy" style="flex:1; width:100%;"></div>
+        <!-- tooltip -->
+        <div id="imp-tooltip" style="position:fixed; pointer-events:none; background:rgba(17,24,39,0.95); color:#fff; padding:8px 10px; border-radius:6px; font-size:12px; line-height:1.5; display:none; max-width:380px; z-index:9999; white-space:pre-wrap;"></div>
+      </div>
     </div>
 
     <script>
@@ -519,6 +576,227 @@
             const closeEl = document.getElementById('upgrade-script-close');
             if (closeEl) closeEl.onclick = () => { dialog.style.display = 'none'; };
             dialog.onclick = (e) => { if (e.target === dialog) dialog.style.display = 'none'; };
+        }
+
+        // ===== 影响分析预览（Cytoscape.js 可视化）=====
+        let _impCy = null; // Cytoscape 实例（单例，弹窗复用）
+
+        function _impColorForObject(obj) {
+            if (!obj) return '#e5e7eb';
+            let h = 0; for (let i = 0; i < obj.length; i++) h = (h * 31 + obj.charCodeAt(i)) >>> 0;
+            return `hsl(${h % 360},65%,72%)`;
+        }
+
+        function _impToElements(graph, rootIds) {
+            const es = [];
+            const seenNode = new Set(), seenEdge = new Set();
+            const objects = new Set();
+            (graph.nodes || []).forEach(n => objects.add(n.object));
+            objects.forEach(obj => {
+                const gid = 'grp:' + obj;
+                if (!seenNode.has(gid)) { seenNode.add(gid); es.push({ data: { id: gid, label: obj, isGroup: true } }); }
+            });
+            (graph.nodes || []).forEach(n => {
+                const nid = n.id || (n.object + '.' + n.field);
+                if (seenNode.has(nid)) return; seenNode.add(nid);
+                const isRoot = rootIds.has(nid);
+                es.push({ data: {
+                    id: nid, parent: 'grp:' + n.object, object: n.object, field: n.field,
+                    label: n.apiName || n.field || '',
+                    isRoot,
+                    meta: { title: n.title||'', type: n.type||'', bizType: n.bizType||'',
+                            apiName: n.apiName||'', triggerExpr: n.triggerExpr||'',
+                            virtualExpr: n.virtualExpr||'', writeBackExpr: n.writeBackExpr||'' }
+                }});
+            });
+            let seq = 0;
+            (graph.edges || []).forEach(e => {
+                const eid = e.source + '->' + e.target + '#' + (seq++);
+                if (!seenEdge.has(eid)) { seenEdge.add(eid); es.push({ data: { id: eid, source: e.source, target: e.target, type: e.type } }); }
+            });
+            return es;
+        }
+
+        function _impApplyLayout(name) {
+            if (!_impCy) return;
+            try {
+                let opt;
+                if (name === 'fcose') opt = { name, quality: 'proof', randomize: false, animate: false,
+                    idealEdgeLength: 130, nodeRepulsion: 6000, nodeSeparation: 80, gravity: 0.25, packComponents: true };
+                else if (name === 'breadthfirst') opt = { name, directed: true, padding: 30, spacingFactor: 1.2 };
+                else opt = { name };
+                _impCy.layout(opt).run();
+            } catch (e) {
+                try { _impCy.layout({ name: 'breadthfirst', directed: true, padding: 20 }).run(); } catch (_) {}
+            }
+        }
+
+        function _impApplyEdgeFilter() {
+            if (!_impCy) return;
+            const showIntra = document.getElementById('imp-chk-intra').checked;
+            const showWB = document.getElementById('imp-chk-wb').checked;
+            _impCy.edges().forEach(e => {
+                const t = e.data('type');
+                const show = (t === 'intra' && showIntra) || (t === 'writeBack' && showWB);
+                show ? e.removeClass('impHiddenEdge') : e.addClass('impHiddenEdge');
+            });
+        }
+
+        function _impBuildObjFilter() {
+            const bar = document.getElementById('imp-obj-filters');
+            if (!bar || !_impCy) return;
+            const objs = new Set();
+            _impCy.nodes('node[field]').forEach(n => objs.add(n.data('object')));
+            const arr = Array.from(objs).sort();
+            bar.innerHTML = '<span style="color:#94a3b8;font-size:11px;">对象筛选：</span>';
+            arr.forEach(obj => {
+                const lbl = document.createElement('label');
+                lbl.style.cssText = 'display:inline-flex;align-items:center;gap:3px;cursor:pointer;font-size:11px;background:#f1f5f9;padding:2px 8px;border-radius:10px;border:1px solid #e2e8f0;';
+                const ck = document.createElement('input'); ck.type = 'checkbox'; ck.checked = true; ck.value = obj;
+                const dot = document.createElement('span');
+                dot.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:50%;background:${_impColorForObject(obj)};`;
+                ck.onchange = () => {
+                    _impCy.batch(() => {
+                        const allowed = new Set();
+                        bar.querySelectorAll('input[type=checkbox]').forEach(c => { if (c.checked) allowed.add(c.value); });
+                        _impCy.nodes('node:parent').forEach(n => { const o = n.data('label'); allowed.has(o) ? n.removeClass('impHiddenObj') : n.addClass('impHiddenObj'); });
+                        _impCy.nodes('node[field]').forEach(n => { const o = n.data('object'); allowed.has(o) ? n.removeClass('impHiddenObj') : n.addClass('impHiddenObj'); });
+                        _impCy.edges().forEach(e => {
+                            const h = e.source().hasClass('impHiddenObj') || e.target().hasClass('impHiddenObj');
+                            h ? e.addClass('impHiddenObj') : e.removeClass('impHiddenObj');
+                        });
+                    });
+                };
+                lbl.appendChild(ck); lbl.appendChild(dot); lbl.appendChild(document.createTextNode(' ' + obj));
+                bar.appendChild(lbl);
+            });
+        }
+
+        /**
+         * 从图中计算"下游可达节点集合"：从根字段出发，沿边方向 BFS，只保留可到达的节点。
+         * 上游 source 节点（由 enrichGraphWithLatestEdges 拉进来的回写来源）不展示。
+         */
+        function _impComputeDownstreamIds(graph, rootIds) {
+            const adj = {};
+            (graph.edges || []).forEach(e => {
+                if (!adj[e.source]) adj[e.source] = [];
+                adj[e.source].push(e.target);
+            });
+            const visited = new Set(rootIds);
+            const queue = Array.from(rootIds);
+            let i = 0;
+            while (i < queue.length) {
+                const cur = queue[i++];
+                (adj[cur] || []).forEach(nxt => { if (!visited.has(nxt)) { visited.add(nxt); queue.push(nxt); } });
+            }
+            return visited;
+        }
+
+        async function showImpactPreview(container) {
+            if (typeof cytoscape === 'undefined') {
+                alert('图形库 Cytoscape.js 未加载，请检查网络连接后刷新页面');
+                return;
+            }
+            const checkboxes = container ? container.querySelectorAll('.upgrade-checkbox:checked') : [];
+            const items = [];
+            checkboxes.forEach(cb => {
+                const obj = cb.getAttribute('data-obj');
+                const field = cb.getAttribute('data-field');
+                if (obj && field) items.push({ objectType: obj, field: field });
+            });
+            if (items.length === 0) { alert('请先勾选需要分析的字段'); return; }
+
+            const dialog = document.getElementById('impact-preview-dialog');
+            const cyDiv = document.getElementById('impact-preview-cy');
+            const summaryEl = document.getElementById('impact-preview-summary');
+            dialog.style.display = 'flex';
+            summaryEl.textContent = '加载中…';
+            document.getElementById('imp-obj-filters').innerHTML = '';
+
+            // 先 fetch 数据，等浏览器完成 flex 重排后再初始化/刷新 Cytoscape
+            try {
+                const rootIds = new Set(items.map(i => i.objectType + '.' + i.field));
+                const resp = await fetch('/api/impact/graph/multiRoot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ roots: items, depth: 3, relTypes: 'intra,writeBack' })
+                });
+                if (!resp.ok) throw new Error(`请求失败 ${resp.status}`);
+                const graph = await resp.json();
+
+                // 只保留从根字段出发沿下游可达的节点（过滤上游来源节点）
+                const activeIds = _impComputeDownstreamIds(graph, rootIds);
+                const filteredGraph = {
+                    nodes: (graph.nodes || []).filter(n => activeIds.has(n.id || (n.object + '.' + n.field))),
+                    edges: (graph.edges || []).filter(e => activeIds.has(e.source) && activeIds.has(e.target))
+                };
+
+                const nodeCount = filteredGraph.nodes.length;
+                const edgeCount = filteredGraph.edges.length;
+                const objSet = new Set(filteredGraph.nodes.map(n => n.object));
+
+                // 使用 requestAnimationFrame 确保 flex 布局完成后再初始化/刷新 Cytoscape
+                requestAnimationFrame(() => {
+                    if (!_impCy) {
+                        _impCy = cytoscape({
+                            container: cyDiv,
+                            elements: [],
+                            style: [
+                                { selector: 'node:parent', style: { shape:'round-rectangle','background-color':'#f0f9ff','border-color':'#0ea5e9','border-width':1,label:'data(label)',color:'#0284c7','font-weight':'bold','text-valign':'top','text-halign':'center','text-margin-y':-6,padding:14,events:'no' }},
+                                { selector: 'node[field]', style: { 'background-color': ele=>_impColorForObject(ele.data('object')||''),label:'data(label)','font-size':12,'text-valign':'center','text-halign':'center',color:'#111','text-wrap':'wrap','text-max-width':130,'border-width':1,'border-color':'#64748b',width:120,height:36 }},
+                                { selector: 'node[field][?isRoot]', style: { 'border-width':3,'border-color':'#f59e0b','background-color':'#fef3c7' }},
+                                { selector: 'node[field]:selected', style: { 'border-width':3,'border-color':'#2563eb','background-color':'#dbeafe' }},
+                                { selector: 'edge', style: { width:2,'curve-style':'bezier','target-arrow-shape':'triangle','line-color':'#94a3b8','target-arrow-color':'#94a3b8',label:ele=>ele.data('type')==='writeBack'?'WB':'intra','font-size':9,'text-rotation':'autorotate','text-margin-y':-6,color:'#555' }},
+                                { selector: 'edge[type="intra"]',     style: { 'line-color':'#eb256a','target-arrow-color':'#eb256a' }},
+                                { selector: 'edge[type="writeBack"]', style: { 'line-color':'#16a34a','target-arrow-color':'#16a34a' }},
+                                { selector: '.impHiddenEdge', style: { display:'none' }},
+                                { selector: '.impHiddenObj',  style: { display:'none' }}
+                            ],
+                            layout: { name:'preset' },
+                            wheelSensitivity: 0.2
+                        });
+                        const tip = document.getElementById('imp-tooltip');
+                        _impCy.on('mouseover','node[field]', evt => {
+                            const n=evt.target; const m=n.data('meta')||{};
+                            let s=`${n.data('object')}.${n.data('field')}`;
+                            if(m.title) s+=`\n标题：${m.title}`;
+                            if(m.type) s+=`\n类型：${m.type}`;
+                            if(m.triggerExpr) s+=`\nTrigger：${m.triggerExpr.substring(0,120)}${m.triggerExpr.length>120?'…':''}`;
+                            if(m.writeBackExpr) s+=`\nWriteBack：${m.writeBackExpr.substring(0,100)}${m.writeBackExpr.length>100?'…':''}`;
+                            if(n.data('isRoot')) s+='\n⭐ 根字段（本次升级选中）';
+                            tip.textContent=s; tip.style.display='block';
+                            const r=cyDiv.getBoundingClientRect();
+                            tip.style.left=(r.left+evt.renderedPosition.x+14)+'px';
+                            tip.style.top=(r.top+evt.renderedPosition.y+14)+'px';
+                        });
+                        _impCy.on('mousemove','node[field]', evt=>{
+                            const r=cyDiv.getBoundingClientRect();
+                            tip.style.left=(r.left+evt.renderedPosition.x+14)+'px';
+                            tip.style.top=(r.top+evt.renderedPosition.y+14)+'px';
+                        });
+                        _impCy.on('mouseout','node[field]', ()=>{ tip.style.display='none'; });
+                        document.getElementById('imp-chk-intra').onchange = _impApplyEdgeFilter;
+                        document.getElementById('imp-chk-wb').onchange    = _impApplyEdgeFilter;
+                        document.getElementById('imp-btn-layout').onclick = ()=>_impApplyLayout(document.getElementById('imp-layout').value);
+                        document.getElementById('imp-btn-fit').onclick    = ()=>_impCy&&_impCy.fit(_impCy.elements(':visible'),40);
+                        document.getElementById('impact-preview-close').onclick = ()=>{ dialog.style.display='none'; tip.style.display='none'; };
+                        dialog.onclick = e=>{ if(e.target===dialog){ dialog.style.display='none'; tip.style.display='none'; } };
+                    } else {
+                        _impCy.elements().remove();
+                        _impCy.resize();
+                    }
+                    _impCy.add(_impToElements(filteredGraph, rootIds));
+                    _impCy.nodes('[field]').grabify();
+                    _impCy.nodes(':parent').ungrabify().unselectify();
+                    _impApplyLayout(document.getElementById('imp-layout').value);
+                    _impApplyEdgeFilter();
+                    _impBuildObjFilter();
+                    _impCy.fit(_impCy.elements(),40);
+                    summaryEl.textContent = `${items.length} 个根字段 · 影响 ${nodeCount} 个字段 · ${objSet.size} 个对象 · ${edgeCount} 条依赖边`;
+                });
+            } catch (e) {
+                summaryEl.textContent = '加载失败：' + e.message;
+            }
         }
 
         async function checkHealth(type) {
@@ -706,6 +984,7 @@
                        <button type="button" id="btn-upgrade-select-all" style="padding:6px 14px;font-size:13px;border-radius:8px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;cursor:pointer;font-weight:500;">全选</button>
                        <button type="button" id="btn-upgrade-deselect-all" style="padding:6px 14px;font-size:13px;border-radius:8px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;cursor:pointer;font-weight:500;">全不选</button>
                        <button type="button" id="btn-batch-upgrade" style="padding:6px 14px;font-size:13px;border-radius:8px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;border:none;cursor:pointer;font-weight:500;">批量生成升级脚本</button>
+                       <button type="button" id="btn-impact-preview" style="padding:6px 14px;font-size:13px;border-radius:8px;background:linear-gradient(135deg,#059669,#0284c7);color:#fff;border:none;cursor:pointer;font-weight:500;">影响分析预览</button>
                        </p></div>`;
 
             // Added
@@ -967,6 +1246,10 @@
             if (batchBtn) {
                 batchBtn.onclick = () => batchGenerateUpgradeScripts(resDiv);
             }
+            const impactPreviewBtn = document.getElementById('btn-impact-preview');
+            if (impactPreviewBtn) {
+                impactPreviewBtn.onclick = () => showImpactPreview(resDiv);
+            }
 
             // 绑定所有单字段「生成」按钮
             resDiv.querySelectorAll('.btn-upgrade').forEach(btn => {
@@ -1124,28 +1407,46 @@
             }
         });
 
-        async function compareRemote() {
+        // 对比结果缓存，避免相同参数重复查询数据库
+        const _compareCache = new Map();
+
+        async function compareRemote(forceRefresh) {
             const btn = document.getElementById('btn-compare');
             const resDiv = document.getElementById('diff-result');
+
+            const payload = {
+                base: {
+                    url: (document.getElementById('baseUrl')||{}).value||'',
+                    username: (document.getElementById('baseUser')||{}).value||'',
+                    password: (document.getElementById('basePass')||{}).value||'',
+                    appName: ((document.getElementById('baseAppName')||{}).value||'').trim()
+                },
+                compare: {
+                    url: (document.getElementById('compareUrl')||{}).value||'',
+                    username: (document.getElementById('compareUser')||{}).value||'',
+                    password: (document.getElementById('comparePass')||{}).value||'',
+                    appName: ((document.getElementById('compareAppName')||{}).value||'').trim()
+                }
+            };
+            const cacheKey = JSON.stringify(payload);
+
+            // 命中缓存直接渲染，无需重新查询
+            if (!forceRefresh && _compareCache.has(cacheKey)) {
+                const cached = _compareCache.get(cacheKey);
+                window.__lastDiff = cached;
+                renderDiff(cached);
+                // 在标题旁提示缓存命中
+                const resDiv2 = document.getElementById('diff-result');
+                const cacheHint = document.createElement('div');
+                cacheHint.style.cssText = 'font-size:11px;color:#16a34a;margin-bottom:6px;';
+                cacheHint.textContent = '⚡ 已使用缓存结果（参数未变化）— 如需重新查询请点击「刷新对比」';
+                resDiv2.insertBefore(cacheHint, resDiv2.firstChild);
+                return;
+            }
 
             btn.disabled = true;
             showProgress('Connecting to remote database & Comparing...');
             resDiv.innerHTML = '';
-
-            const payload = {
-                base: {
-                    url: document.getElementById('baseUrl').value,
-                    username: document.getElementById('baseUser').value,
-                    password: document.getElementById('basePass').value,
-                    appName: document.getElementById('baseAppName').value.trim()
-                },
-                compare: {
-                    url: document.getElementById('compareUrl').value,
-                    username: document.getElementById('compareUser').value,
-                    password: document.getElementById('comparePass').value,
-                    appName: document.getElementById('compareAppName').value.trim()
-                }
-            };
 
             try {
                 const response = await fetch('/api/impact/snapshot/diff/jdbcPair', {
@@ -1154,6 +1455,7 @@
                     body: JSON.stringify(payload)
                 });
                 const data = await response.json();
+                _compareCache.set(cacheKey, data); // 缓存结果
                 window.__lastDiff = data;
                 renderDiff(data);
             } catch (e) {

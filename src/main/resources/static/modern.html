@@ -1054,6 +1054,8 @@
 
                 // 统计信息
                 const graphStats = ref(null);
+                // 图谱是否已加载（renderGraph 完成时设为 true，过滤不会重置）
+                const _graphLoaded = ref(false);
 
                 // GraphQL 导出
                 const graphQLDialogVisible = ref(false);
@@ -1596,6 +1598,7 @@
 
                         renderGraph(gData);
                         calculateStats(gData);
+                        _graphLoaded.value = gData.nodes.length > 0;
 
                         if (gData.nodes.length === 0) ElMessage.info('未找到相关路径');
                         else {
@@ -1699,7 +1702,8 @@
                     }
                 };
 
-                const hasGraphData = computed(() => graphStats.value && graphStats.value.fieldCount > 0);
+                // 图谱已加载即可导出，与过滤无关（导出时 exportGraphQL 会按可见节点生成）
+                const hasGraphData = computed(() => _graphLoaded.value);
 
                 // 计算统计信息
                 const calculateStats = (data) => {
@@ -1798,14 +1802,18 @@
                     const graph = {};
                     const inDegree = {};
 
-                    // 统计可见节点
+                    // 统计可见节点（字段节点用 type='field' 标识）
                     visibleNodes.forEach(node => {
                         const nodeData = node.data();
-                        if (nodeData.group === 'field') {
-                            objectSet.add(nodeData.object);
-                            fieldSet.add(nodeData.id);
-                            graph[nodeData.id] = [];
-                            inDegree[nodeData.id] = 0;
+                        if (nodeData.type === 'field') {
+                            const parentId = nodeData.parent;
+                            const objName = parentId && typeof parentId === 'string' ? parentId.replace(/^grp_/, '') : null;
+                            if (objName) objectSet.add(objName);
+                            if (nodeData.id) {
+                                fieldSet.add(nodeData.id);
+                                graph[nodeData.id] = [];
+                                inDegree[nodeData.id] = 0;
+                            }
                         }
                     });
 
@@ -1848,7 +1856,7 @@
                     let pathCount = 0;
                     visibleNodes.forEach(node => {
                         const nodeData = node.data();
-                        if (nodeData.group === 'field') {
+                        if (nodeData.type === 'field') {
                             const outEdges = visibleEdges.filter(e => e.data('source') === nodeData.id);
                             if (outEdges.length === 0) {
                                 pathCount++;
