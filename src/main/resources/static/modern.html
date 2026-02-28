@@ -196,15 +196,25 @@
             position: absolute;
             top: 16px;
             right: 16px;
-            background: rgba(255, 255, 255, 0.9);
-            padding: 8px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 6px;
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
             display: flex;
-            gap: 8px;
+            gap: 6px;
             z-index: 10;
+            border: 1px solid #e2e8f0;
         }
-        .floating-toolbar .el-button--primary,
+        .floating-toolbar .el-button {
+            color: #334155 !important;
+            border-color: #cbd5e1 !important;
+            background: #fff !important;
+        }
+        .floating-toolbar .el-button:hover {
+            color: #0284c7 !important;
+            border-color: #0284c7 !important;
+            background: #f0f9ff !important;
+        }
         .config-panel .el-button--primary {
             border-radius: 999px;
             padding: 7px 16px;
@@ -440,6 +450,9 @@
             opacity: 0.9;
         }
 
+        .rel-types-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+        .rel-types-row .el-checkbox { margin-right:0; }
+        .rel-types-row .el-checkbox .el-checkbox__label { padding-left:6px; }
         /* 左侧「开始分析」「生成升级脚本」对齐 */
         .action-buttons {
             margin-top: 20px;
@@ -453,7 +466,10 @@
             margin: 0 !important;
             min-height: 40px;
             box-sizing: border-box;
+            font-weight: 500;
         }
+        .action-buttons .el-button--primary { --el-button-bg-color: #0284c7; --el-button-border-color: #0284c7; }
+        .action-buttons .el-button--primary:hover { --el-button-hover-bg-color: #0369a1; --el-button-hover-border-color: #0369a1; }
     </style>
     <!-- Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.js"></script>
@@ -567,11 +583,10 @@
 
                         <div class="config-item">
                             <div class="config-label">包含关系</div>
-                            <div style="display:flex;flex-direction:column;gap:8px">
-                                <el-checkbox v-model="params.relTypes" label="intra" border>内部触发 (Intra)</el-checkbox>
-                                <el-checkbox v-model="params.relTypes" label="writeBack" border>回写汇总
-                                    (WriteBack)</el-checkbox>
-                                <el-checkbox v-model="params.relTypes" label="view" border>视图映射 (View)</el-checkbox>
+                            <div class="rel-types-row">
+                                <el-checkbox v-model="params.relTypes" label="intra">intra</el-checkbox>
+                                <el-checkbox v-model="params.relTypes" label="writeBack">writeBack</el-checkbox>
+                                <el-checkbox v-model="params.relTypes" label="view">view</el-checkbox>
                             </div>
                         </div>
 
@@ -706,15 +721,11 @@
                     </div>
 
                     <div class="floating-toolbar">
-                        <el-button circle @click="fitGraph" title="适应屏幕">📐</el-button>
-                        <el-button circle @click="layoutGraph" title="重新布局">🔄</el-button>
-                        <el-button v-if="selectedNode" circle @click="fitToRelatedNodes" title="聚焦关联节点">🎯</el-button>
-                        <el-button v-if="searchQuery" circle @click="highlightPath" title="高亮路径">🔍</el-button>
-                        <el-button v-if="hasGraphData" circle @click="downloadGraph" title="导出图片">
-                            <el-icon>
-                                <Camera />
-                            </el-icon>
-                        </el-button>
+                        <el-button plain size="small" @click="fitGraph" title="适应屏幕">适应屏幕</el-button>
+                        <el-button plain size="small" @click="layoutGraph" title="重新布局">重新布局</el-button>
+                        <el-button v-if="selectedNode" plain size="small" @click="fitToRelatedNodes" title="聚焦关联节点">聚焦节点</el-button>
+                        <el-button v-if="searchQuery" plain size="small" @click="highlightPath" title="高亮路径">高亮路径</el-button>
+                        <el-button v-if="hasGraphData" plain size="small" @click="downloadGraph" title="导出图片">导出图片</el-button>
                     </div>
                     <!-- Detail Drawer -->
                     <div class="detail-drawer" :class="{ visible: selectedNode }">

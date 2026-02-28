@@ -264,6 +264,8 @@
             font-weight: bold;
             color: #333;
         }
+        #imp-header label { gap: 2px !important; }
+        #imp-header label input[type=checkbox] { margin: 0 !important; padding: 0 !important; }
     </style>
     <!-- Cytoscape.js（影响分析预览用） -->
     <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.28.0/dist/cytoscape.min.js"></script>
@@ -367,37 +369,33 @@
     <!-- ===== 影响分析预览弹窗 ===== -->
     <div id="impact-preview-dialog" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.5); z-index:1200; justify-content:center; align-items:center;">
       <div style="width:92%; max-width:1200px; height:88vh; background:#fff; border-radius:12px; box-shadow:0 20px 50px rgba(15,23,42,0.3); display:flex; flex-direction:column; overflow:hidden;">
-        <!-- 标题栏 -->
-        <div style="padding:10px 16px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:space-between; background:#f9fafb; flex-shrink:0;">
+        <!-- 标题栏：影响分析预览弹窗头部 -->
+        <div id="imp-header" style="padding:10px 16px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:space-between; background:#fff; flex-shrink:0; flex-wrap:wrap; gap:12px;">
           <div style="display:flex; align-items:center; gap:12px;">
-            <span style="font-weight:600; font-size:14px;">影响分析预览</span>
-            <span id="impact-preview-summary" style="font-size:12px; color:#64748b;"></span>
+            <span style="font-weight:600; font-size:15px; color:#0f172a;">影响分析预览</span>
+            <span id="impact-preview-summary" style="font-size:12px; color:#64748b; line-height:1.4;"></span>
           </div>
           <div style="display:flex; align-items:center; gap:10px; font-size:12px;">
-            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-              <input type="checkbox" id="imp-chk-intra" checked> <span style="color:#eb256a; font-weight:600;">触发(intra)</span>
-            </label>
-            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-              <input type="checkbox" id="imp-chk-wb" checked> <span style="color:#16a34a; font-weight:600;">回写(writeBack)</span>
-            </label>
-            <select id="imp-layout" style="font-size:12px; padding:3px 6px; border-radius:4px; border:1px solid #d1d5db;">
+            <label style="display:inline-flex; align-items:center; gap:2px; cursor:pointer; margin:0;"><input type="checkbox" id="imp-chk-intra" checked style="margin:0; width:14px; height:14px; flex-shrink:0;"><span style="color:#c2410c; font-weight:500;">intra</span></label>
+            <label style="display:inline-flex; align-items:center; gap:2px; cursor:pointer; margin:0;"><input type="checkbox" id="imp-chk-wb" checked style="margin:0; width:14px; height:14px; flex-shrink:0;"><span style="color:#15803d; font-weight:500;">writeBack</span></label>
+            <select id="imp-layout" style="font-size:12px; padding:5px 10px; border-radius:6px; border:1px solid #d1d5db; background:#fff; color:#334155;">
               <option value="fcose" selected>防重叠</option>
               <option value="breadthfirst">层次</option>
               <option value="cose">力导</option>
               <option value="grid">网格</option>
             </select>
-            <button type="button" id="imp-btn-layout" style="padding:4px 10px; font-size:12px; border-radius:4px; background:#f1f5f9; border:1px solid #d1d5db; cursor:pointer;">重新布局</button>
-            <button type="button" id="imp-btn-fit" style="padding:4px 10px; font-size:12px; border-radius:4px; background:#f1f5f9; border:1px solid #d1d5db; cursor:pointer;">适应画面</button>
-            <span id="impact-preview-close" style="cursor:pointer; font-size:20px; color:#64748b; padding:0 4px;">&times;</span>
+            <button type="button" id="imp-btn-layout" style="padding:5px 12px; font-size:12px; border-radius:6px; background:#f1f5f9; border:1px solid #d1d5db; color:#334155 !important; cursor:pointer; font-weight:500;">重新布局</button>
+            <button type="button" id="imp-btn-fit" style="padding:5px 12px; font-size:12px; border-radius:6px; background:#334155; border:1px solid #334155; color:#fff !important; cursor:pointer; font-weight:500;">适应画面</button>
+            <button type="button" id="impact-preview-close" style="width:28px;height:28px;padding:0;border:none;background:#f1f5f9;border-radius:6px;cursor:pointer;font-size:18px;color:#64748b !important;line-height:1;display:flex;align-items:center;justify-content:center;" title="关闭">&times;</button>
           </div>
         </div>
         <!-- 图例 -->
-        <div style="padding:6px 16px; font-size:11px; color:#64748b; background:#fafafa; border-bottom:1px solid #f1f5f9; flex-shrink:0; display:flex; gap:16px; align-items:center;">
-          <span>图例：</span>
-          <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:28px; height:2px; background:#eb256a;"></span> 触发依赖（intra）</span>
-          <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:28px; height:2px; background:#16a34a;"></span> 跨对象回写（writeBack）</span>
-          <span style="display:inline-flex; align-items:center; gap:4px;"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#fde68a; border:2px solid #f59e0b;"></span> 根字段</span>
-          <span style="margin-left:auto; font-size:11px; color:#94a3b8;">鼠标悬停节点查看详情 · 滚轮缩放</span>
+        <div style="padding:8px 16px; font-size:12px; color:#64748b; background:#f8fafc; border-bottom:1px solid #e2e8f0; flex-shrink:0; display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
+          <span style="color:#94a3b8;">图例</span>
+          <span style="display:inline-flex; align-items:center; gap:6px;"><span style="display:inline-block; width:24px; height:2px; background:#c2410c; border-radius:1px;"></span> intra</span>
+          <span style="display:inline-flex; align-items:center; gap:6px;"><span style="display:inline-block; width:24px; height:2px; background:#15803d; border-radius:1px;"></span> writeBack</span>
+          <span style="display:inline-flex; align-items:center; gap:6px;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#fef3c7; border:2px solid #f59e0b;"></span> 根字段</span>
+          <span style="margin-left:auto; font-size:11px; color:#94a3b8;">鼠标悬停查看详情 · 滚轮缩放</span>
         </div>
         <!-- 对象筛选栏 -->
         <div id="imp-obj-filters" style="padding:6px 16px; font-size:12px; background:#f8fafc; border-bottom:1px solid #f1f5f9; flex-shrink:0; display:flex; flex-wrap:wrap; gap:8px; align-items:center; min-height:32px;"></div>
