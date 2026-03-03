@@ -578,6 +578,7 @@
 
         // ===== 影响分析预览（Cytoscape.js 可视化）=====
         let _impCy = null; // Cytoscape 实例（单例，弹窗复用）
+        let _impFocusedNodeId = null; // 当前聚焦的字段节点（用于隐藏不相关字段）
 
         function _impColorForObject(obj) {
             if (!obj) return '#e5e7eb';
@@ -637,6 +638,51 @@
                 const t = e.data('type');
                 const show = (t === 'intra' && showIntra) || (t === 'writeBack' && showWB);
                 show ? e.removeClass('impHiddenEdge') : e.addClass('impHiddenEdge');
+            });
+        }
+
+        // 根据当前选中的字段节点，隐藏与其无关的字段，便于局部查看（不隐藏对象分组节点）
+        function _impApplyFocus(node) {
+            if (!_impCy) return;
+            _impCy.batch(() => {
+                // 先清除之前的聚焦隐藏
+                _impCy.elements('.impFocusHidden').removeClass('impFocusHidden');
+                if (!node) {
+                    // 取消聚焦时，恢复所有元素可见，并适配当前视图
+                    try {
+                        _impCy.fit(_impCy.elements(':visible'), 40);
+                    } catch (e) {}
+                    return;
+                }
+                // 取该节点的闭合邻域（自身 + 所有关联边 + 邻居节点）
+                const neighborhood = node.closedNeighborhood();
+                const keepNodes = neighborhood.nodes('[field]');
+                const keepEdges = neighborhood.edges();
+                const keepNodeIds = new Set();
+                const keepEdgeIds = new Set();
+                keepNodes.forEach(n => keepNodeIds.add(n.id()));
+                keepEdges.forEach(e => keepEdgeIds.add(e.id()));
+
+                // 仅对字段节点做隐藏处理，不动对象分组节点（node:parent）
+                _impCy.nodes('node[field]').forEach(n => {
+                    if (!keepNodeIds.has(n.id())) {
+                        n.addClass('impFocusHidden');
+                    }
+                });
+                _impCy.edges().forEach(e => {
+                    if (!keepEdgeIds.has(e.id())) {
+                        e.addClass('impFocusHidden');
+                    }
+                });
+                // 视图自动聚焦到当前节点及其邻域
+                try {
+                    const focusSet = keepNodes.union(keepEdges);
+                    if (focusSet && focusSet.length > 0) {
+                        _impCy.fit(focusSet, 60);
+                    } else {
+                        _impCy.fit(_impCy.elements(':visible'), 40);
+                    }
+                } catch (e) {}
             });
         }
 
@@ -748,7 +794,8 @@
                                 { selector: 'edge[type="intra"]',     style: { 'line-color':'#eb256a','target-arrow-color':'#eb256a' }},
                                 { selector: 'edge[type="writeBack"]', style: { 'line-color':'#16a34a','target-arrow-color':'#16a34a' }},
                                 { selector: '.impHiddenEdge', style: { display:'none' }},
-                                { selector: '.impHiddenObj',  style: { display:'none' }}
+                                { selector: '.impHiddenObj',  style: { display:'none' }},
+                                { selector: '.impFocusHidden', style: { display:'none' } }
                             ],
                             layout: { name:'preset' },
                             wheelSensitivity: 0.2
@@ -773,6 +820,25 @@
                             tip.style.top=(r.top+evt.renderedPosition.y+14)+'px';
                         });
                         _impCy.on('mouseout','node[field]', ()=>{ tip.style.display='none'; });
+                        // 点击字段节点：只保留与该节点有直接关系的字段，隐藏其他字段/对象；再次点击或点空白区域恢复
+                        _impCy.on('tap','node[field]', evt => {
+                            const node = evt.target;
+                            if (_impFocusedNodeId && _impFocusedNodeId === node.id()) {
+                                // 再次点击同一个节点，取消聚焦
+                                _impFocusedNodeId = null;
+                                _impApplyFocus(null);
+                            } else {
+                                _impFocusedNodeId = node.id();
+                                _impApplyFocus(node);
+                            }
+                        });
+                        _impCy.on('tap', evt => {
+                            if (evt.target === _impCy) {
+                                // 点击画布空白处，取消聚焦
+                                _impFocusedNodeId = null;
+                                _impApplyFocus(null);
+                            }
+                        });
                         document.getElementById('imp-chk-intra').onchange = _impApplyEdgeFilter;
                         document.getElementById('imp-chk-wb').onchange    = _impApplyEdgeFilter;
                         document.getElementById('imp-btn-layout').onclick = ()=>_impApplyLayout(document.getElementById('imp-layout').value);
@@ -1360,10 +1426,12 @@
                     const idxStr = row.getAttribute('data-idx');
                     const idx = idxStr ? parseInt(idxStr, 10) : -1;
                     let payload = null;
-                    if (kind === 'added' && idx >= 0 && idx < added.length) {
-                        payload = added[idx];
-                    } else if (kind === 'removed' && idx >= 0 && idx < removed.length) {
-                        payload = removed[idx];
+                    // 注意：这里要使用渲染后的数组（addedForRender / removedForRender / modifiedGrouped），
+                    // 否则在应用“对象过滤”等筛选后，索引会与原始数组不一致，导致详情不准确。
+                    if (kind === 'added' && idx >= 0 && idx < addedForRender.length) {
+                        payload = addedForRender[idx];
+                    } else if (kind === 'removed' && idx >= 0 && idx < removedForRender.length) {
+                        payload = removedForRender[idx];
                     } else if (kind === 'modified' && idx >= 0 && idx < modifiedGrouped.length) {
                         payload = modifiedGrouped[idx];
                     }

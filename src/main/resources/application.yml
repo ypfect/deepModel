@@ -8,10 +8,10 @@ writeback-sql:
 #连接数据库
 spring:
   datasource:
-#    url: jdbc:postgresql://localhost:5432/testapp
-    url: jdbc:postgresql://postgres.test-tx-16.e7link.com:5432/tenant-public
-    password: stet44{czars
-#    password: 123
+    url: jdbc:postgresql://localhost:5432/testapp
+#    url: jdbc:postgresql://postgres.test-tx-16.e7link.com:5432/tenant-public
+#    password: stet44{czars
+    password: 123
     username: postgres
     driver-class-name: org.postgresql.Driver
   jackson:
