@@ -12,6 +12,8 @@ import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
@@ -21,6 +23,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
+import com.huaban.analysis.jieba.JiebaSegmenter;
+import com.huaban.analysis.jieba.JiebaSegmenter.SegMode;
 
 @Service
 public class ImpactAnalyzerService {
@@ -44,6 +48,21 @@ public class ImpactAnalyzerService {
     // bill 类型对象集合（来自 baseapp_object_type.type='bill'）
     private volatile Set<String> billObjectTypes = Collections.emptySet();
 
+    // 业务黑话截断后缀与同义词映射库 (实际应该配置在 DB 或 Nacos)
+    private static final Set<String> GLOBAL_STOP_WORDS = new HashSet<>(Arrays.asList(
+            "的", "地", "得", "了", "啊", "和", "这", "那", "中", "上", "下", "对应的", "并", "所有", "等",
+            "行", "列表", "明细", "子表", "详情", "信息", "数据", "合计", "汇总", "编号",
+            "对应", "相关", "获取", "得到", "返回", "尴展"));
+
+    private static final Map<String, List<String>> GLOBAL_SYNONYMS = new HashMap<>();
+    static {
+        GLOBAL_SYNONYMS.put("User", Arrays.asList("人员", "员工", "操作人", "经办人"));
+        GLOBAL_SYNONYMS.put("Org", Arrays.asList("部门", "组织", "机构", "科室"));
+        GLOBAL_SYNONYMS.put("ArContract", Arrays.asList("合同", "应收合同", "销售合同", "收款协议"));
+        GLOBAL_SYNONYMS.put("Project", Arrays.asList("项目", "工程"));
+        GLOBAL_SYNONYMS.put("Customer", Arrays.asList("客户", "甲方", "付款方"));
+    }
+
     // 视图依赖反向索引: SourceObject.field -> Set<ViewName.field> (用于下游分析)
     private final Map<String, Set<String>> viewReverseDeps = new ConcurrentHashMap<>();
     // 视图依赖正向索引: ViewName.field -> Set<SourceObject.field> (用于上游溯源)
@@ -60,6 +79,12 @@ public class ImpactAnalyzerService {
             .build();
 
     private final FormulaParserService formulaParserService;
+
+    // @Lazy 避免与 SkillsService 循环依赖：SkillsService 注入 ImpactAnalyzerService，
+    // ImpactAnalyzerService 仅在 clearAnalysisCache 时通知 SkillsService 清缓存。
+    @Lazy
+    @Autowired
+    private SkillsService skillsService;
 
     public ImpactAnalyzerService(BaseappObjectFieldMapper mapper, FormulaParserService formulaParserService) {
         this.mapper = mapper;
@@ -150,7 +175,14 @@ public class ImpactAnalyzerService {
     public void clearAnalysisCache() {
         graphCache.invalidateAll();
         explainCache.invalidateAll();
-        log.info("已清除分析结果缓存");
+        // 联动清除 SkillsService 缓存（@Lazy，首次 reload 前可能为 null）
+        if (skillsService != null) {
+            try {
+                skillsService.clearCache();
+            } catch (Exception ignored) {
+            }
+        }
+        log.info("已清除分析结果缓存（含 SkillsService 缓存）");
     }
 
     /**
@@ -638,6 +670,244 @@ public class ImpactAnalyzerService {
         return h;
     }
 
+    // ===== Neo4j 风格对象-字段图谱 =====
+
+    public static class Neo4jGraph {
+        public List<Neo4jNode> nodes = new ArrayList<>();
+        public List<Neo4jEdge> edges = new ArrayList<>();
+        public Neo4jStats stats = new Neo4jStats();
+    }
+
+    public static class Neo4jNode {
+        public String id; // 全局唯一，如 "obj::Contract" 或 "fld::Contract::amount"
+        public String label;
+        public String kind; // "ObjectType", "ObjectField", "EnumType"
+        public String objectType;
+        public String title;
+        public String type;
+        public String bizType;
+        public String appName;
+        public String expression;
+        public String triggerExpr;
+        public String writeBackExpr;
+        public boolean hasFormula;
+        // Enumeration specificity
+        public String enumTypeName;
+    }
+
+    public static class Neo4jEdge {
+        public String source;
+        public String target;
+        public String type; // "HAS_FIELD" | "REFERS_TO"
+    }
+
+    public static class Neo4jStats {
+        public int objectCount;
+        public int fieldCount;
+        public int edgeCount;
+    }
+
+    /**
+     * 构建 Neo4j 风格的对象-字段图谱。
+     * 节点类型：ObjectType（对象）、ObjectField（字段）
+     * 关系类型：HAS_FIELD（对象拥有字段）、REFERS_TO（writeBack 跨对象引用）
+     *
+     * @param appNameFilter 按 appName 过滤，null/空 = 不过滤
+     * @param objectFilter  只展示指定对象（及其关联），null/空 = 全部
+     * @param maxFields     最多包含的字段节点数（0 = 不限制）
+     */
+    public Neo4jGraph buildObjectFieldGraph(String appNameFilter, String objectFilter, int maxFields) {
+        Neo4jGraph graph = new Neo4jGraph();
+        Set<String> objNodeIds = new LinkedHashSet<>();
+        int fieldCount = 0;
+        int maxF = maxFields > 0 ? maxFields : Integer.MAX_VALUE;
+
+        // 决定要遍历的对象集合
+        Set<String> targetObjects;
+        if (objectFilter != null && !objectFilter.trim().isEmpty()) {
+            // 只加载指定对象（可能多个，逗号分隔）
+            targetObjects = new LinkedHashSet<>();
+            for (String s : objectFilter.split(",")) {
+                String t = s.trim();
+                if (!t.isEmpty())
+                    targetObjects.add(t);
+            }
+        } else {
+            targetObjects = new TreeSet<>(rowsByObject.keySet());
+        }
+
+        // appName 小写集合用于过滤
+        Set<String> appNameSet = new HashSet<>();
+        if (appNameFilter != null && !appNameFilter.trim().isEmpty()) {
+            for (String a : appNameFilter.split(",")) {
+                String t = a.trim().toLowerCase(Locale.ROOT);
+                if (!t.isEmpty())
+                    appNameSet.add(t);
+            }
+        }
+
+        // 第一轮：创建 ObjectType 节点 + ObjectField 节点
+        for (String objType : targetObjects) {
+            List<BaseappObjectField> fields = rowsByObject.getOrDefault(objType, Collections.emptyList());
+
+            // appName 过滤：objectFilter 已指定具体对象时跳过
+            String objAppName = null;
+            if (!fields.isEmpty()) {
+                objAppName = fields.get(0).getAppName();
+            }
+            boolean skipAppFilter = (objectFilter != null && !objectFilter.trim().isEmpty());
+            if (!skipAppFilter && !appNameSet.isEmpty()) {
+                if (objAppName == null)
+                    continue;
+                String low = objAppName.toLowerCase(Locale.ROOT);
+                boolean match = appNameSet.stream()
+                        .anyMatch(a -> low.equals(a) || low.startsWith(a) || low.contains(a));
+                if (!match)
+                    continue;
+            }
+
+            // 创建对象节点
+            String objNodeId = "obj::" + objType;
+            if (objNodeIds.add(objNodeId)) {
+                Neo4jNode objNode = new Neo4jNode();
+                objNode.id = objNodeId;
+                objNode.label = objType;
+                objNode.kind = "ObjectType";
+                objNode.title = objectTitles.getOrDefault(objType, objType);
+                objNode.appName = objAppName;
+                graph.nodes.add(objNode);
+            }
+
+            // 创建字段节点
+            for (BaseappObjectField f : fields) {
+                if (fieldCount >= maxF)
+                    break;
+                String camel = canonicalFieldName(f);
+                if (camel == null || camel.isEmpty())
+                    continue;
+
+                String fldNodeId = "fld::" + objType + "::" + camel;
+                Neo4jNode fldNode = new Neo4jNode();
+                fldNode.id = fldNodeId;
+                fldNode.label = camel;
+                fldNode.kind = "ObjectField";
+                fldNode.objectType = objType;
+                fldNode.title = f.getTitle();
+                fldNode.type = f.getType();
+                fldNode.bizType = f.getBizType();
+                fldNode.appName = f.getAppName();
+                fldNode.expression = f.getExpression();
+                fldNode.triggerExpr = f.getTriggerExpr();
+                fldNode.writeBackExpr = f.getWriteBackExpr();
+                fldNode.hasFormula = (f.getExpression() != null && !f.getExpression().isEmpty())
+                        || (f.getTriggerExpr() != null && !f.getTriggerExpr().isEmpty())
+                        || (f.getVirtualExpr() != null && !f.getVirtualExpr().isEmpty())
+                        || (f.getWriteBackExpr() != null && !f.getWriteBackExpr().isEmpty());
+                graph.nodes.add(fldNode);
+
+                // HAS_FIELD 边
+                Neo4jEdge hasField = new Neo4jEdge();
+                hasField.source = objNodeId;
+                hasField.target = fldNodeId;
+                hasField.type = "HAS_FIELD";
+                graph.edges.add(hasField);
+
+                // 追加解析枚举字典关联 (USES_ENUM)
+                String enumType = null;
+                if ("ENUM".equalsIgnoreCase(f.getType()) || "enum".equalsIgnoreCase(f.getBizType())) {
+                    // Try get enum type name, usually bizType or ext props, fallback to generic
+                    enumType = (f.getBizType() != null && f.getBizType().startsWith("enum_")) ? f.getBizType()
+                            : "EnumDict";
+                }
+                // (Optional) if there is an explicit field in your BaseappObjectField that
+                // tells the actual EnumName
+                if (enumType != null) {
+                    String enumNodeId = "enum::" + enumType;
+                    if (objNodeIds.add(enumNodeId)) {
+                        Neo4jNode enumNode = new Neo4jNode();
+                        enumNode.id = enumNodeId;
+                        enumNode.label = enumType;
+                        enumNode.kind = "EnumType";
+                        enumNode.title = enumType;
+                        graph.nodes.add(enumNode);
+                    }
+                    Neo4jEdge usesEnum = new Neo4jEdge();
+                    usesEnum.source = fldNodeId;
+                    usesEnum.target = enumNodeId;
+                    usesEnum.type = "USES_ENUM";
+                    graph.edges.add(usesEnum);
+                }
+
+                // HAS_LIST 推导：如果字段的 writeBackExpr 里包含 srcObjectType，说明该对象是由外对象写回的，建立反向主子表关联
+                if (f.getWriteBackExpr() != null && !f.getWriteBackExpr().isEmpty()) {
+                    WriteBackExpr wb = parseWriteBack(f.getWriteBackExpr());
+                    if (wb != null && wb.getSrcObjectType() != null) {
+                        String refObj = wb.getSrcObjectType();
+                        String refObjNodeId = "obj::" + refObj;
+                        if (objNodeIds.add(refObjNodeId)) {
+                            Neo4jNode refNode = new Neo4jNode();
+                            refNode.id = refObjNodeId;
+                            refNode.label = refObj;
+                            refNode.kind = "ObjectType";
+                            refNode.title = objectTitles.getOrDefault(refObj, refObj);
+                            graph.nodes.add(refNode);
+                        }
+                        // wb 对象“拥有” (HAS_LIST) 当前对象的明细字段
+                        Neo4jEdge hasListEdge = new Neo4jEdge();
+                        hasListEdge.source = refObjNodeId;
+                        hasListEdge.target = objNodeId;
+                        hasListEdge.type = "HAS_LIST";
+                        graph.edges.add(hasListEdge);
+                    }
+                }
+
+                fieldCount++;
+            }
+        }
+
+        // 第二轮：解析 writeBackExpr，创建 REFERS_TO 边（跨对象引用）
+        Set<String> existingNodeIds = new HashSet<>();
+        for (Neo4jNode n : graph.nodes)
+            existingNodeIds.add(n.id);
+
+        for (Neo4jNode n : new ArrayList<>(graph.nodes)) {
+            if (!"ObjectField".equals(n.kind))
+                continue;
+            if (n.writeBackExpr == null || n.writeBackExpr.isEmpty())
+                continue;
+            WriteBackExpr wb = parseWriteBack(n.writeBackExpr);
+            if (wb == null || wb.getSrcObjectType() == null)
+                continue;
+            String srcObj = wb.getSrcObjectType();
+            String srcObjNodeId = "obj::" + srcObj;
+            // 如果来源对象节点不在图中，酌情创建（仅创建对象节点，不展开其字段）
+            if (!existingNodeIds.contains(srcObjNodeId)) {
+                Neo4jNode srcObjNode = new Neo4jNode();
+                srcObjNode.id = srcObjNodeId;
+                srcObjNode.label = srcObj;
+                srcObjNode.kind = "ObjectType";
+                srcObjNode.title = objectTitles.getOrDefault(srcObj, srcObj);
+                graph.nodes.add(srcObjNode);
+                existingNodeIds.add(srcObjNodeId);
+            }
+            // REFERS_TO 边：srcObj → 目标字段
+            Neo4jEdge refEdge = new Neo4jEdge();
+            refEdge.source = srcObjNodeId;
+            refEdge.target = n.id;
+            refEdge.type = "REFERS_TO";
+            graph.edges.add(refEdge);
+        }
+
+        // 统计
+        long objCnt = graph.nodes.stream().filter(n -> "ObjectType".equals(n.kind)).count();
+        long fldCnt = graph.nodes.stream().filter(n -> "ObjectField".equals(n.kind)).count();
+        graph.stats.objectCount = (int) objCnt;
+        graph.stats.fieldCount = (int) fldCnt;
+        graph.stats.edgeCount = graph.edges.size();
+
+        return graph;
+    }
+
     private void fillNodeMeta(GraphModels.Node node) {
         BaseappObjectField info = getFieldInfo(node.object, node.field);
         if (info != null) {
@@ -811,7 +1081,7 @@ public class ImpactAnalyzerService {
      *
      * <p>
      * 特殊处理 trigger 聚合字段：如果 sourceFieldCamel 恰好是一个 trigger 聚合字段，
-     * 那么凡是引用了其组成字段（例如 make_invoice_amount_blue 等）的字段，也会被认为
+     * 那么凡是引用了其组成字段（例如 make_invoice_amount_blue 等）的公式，也会被认为
      * 是由 sourceFieldCamel 触发，从而补上「等价关系」这层语义。
      */
     private List<Map.Entry<String, String>> buildIntraDependencies(String objectType, String sourceFieldCamel) {
@@ -937,7 +1207,8 @@ public class ImpactAnalyzerService {
         for (Map.Entry<String, String> root : roots) {
             String obj = root.getKey();
             String fld = root.getValue();
-            if (obj == null || fld == null) continue;
+            if (obj == null || fld == null)
+                continue;
             GraphModels.Graph g = analyzeInternal(obj, fld, depth, relType, false);
             for (GraphModels.Node n : g.nodes) {
                 String id = n.id != null ? n.id : (n.object + "." + n.field);
@@ -960,7 +1231,8 @@ public class ImpactAnalyzerService {
             int added = 0;
             for (String nodeId : toProcess) {
                 int dot = nodeId.indexOf('.');
-                if (dot <= 0) continue;
+                if (dot <= 0)
+                    continue;
                 String obj = nodeId.substring(0, dot);
                 String fld = nodeId.substring(dot + 1);
                 for (GraphModels.Edge e : getDirectUpstreamEdges(obj, fld, includeIntra, includeWriteBack)) {
@@ -979,7 +1251,8 @@ public class ImpactAnalyzerService {
                     }
                 }
             }
-            if (added == 0) break;
+            if (added == 0)
+                break;
         }
 
         return merged;
@@ -1054,7 +1327,7 @@ public class ImpactAnalyzerService {
         // relType: 0=全部, 1=writeBack, 2=intra, 3=view, 4=intra+writeBack(不含view)
         boolean includeWriteBack = (relType == 0 || relType == 1 || relType == 4);
         boolean includeIntra = (relType == 0 || relType == 2 || relType == 4);
-        boolean includeView = (relType == 0 || relType == 3);  // 4 排除 view
+        boolean includeView = (relType == 0 || relType == 3); // 4 排除 view
 
         // log.info("analyze start object={}, field={}, depth={}, includeWB={},
         // includeIntra={}, includeView={}", objectType, fieldCamel, depth,
@@ -1157,12 +1430,12 @@ public class ImpactAnalyzerService {
                 if (includeIntra) {
                     for (Map.Entry<String, String> e : buildIntraDependencies(obj, fld)) {
                         String nid = e.getKey() + "." + e.getValue();
-                    addEdgeIfAbsent(edges, edgeSet, cur, nid, "intra");
+                        addEdgeIfAbsent(edges, edgeSet, cur, nid, "intra");
                         if (!nodeSet.contains(nid)) {
-                        nodeSet.add(nid);
-                        GraphModels.Node n = new GraphModels.Node(e.getKey(), e.getValue());
-                        fillNodeMeta(n);
-                        g.nodes.add(n);
+                            nodeSet.add(nid);
+                            GraphModels.Node n = new GraphModels.Node(e.getKey(), e.getValue());
+                            fillNodeMeta(n);
+                            g.nodes.add(n);
                             q.offer(nid);
                             level.put(nid, d + 1);
                         }
@@ -1171,12 +1444,12 @@ public class ImpactAnalyzerService {
                 if (includeWriteBack) {
                     for (Map.Entry<String, String> e : buildCrossObjectDependencies(obj, fld)) {
                         String nid = e.getKey() + "." + e.getValue();
-                    addEdgeIfAbsent(edges, edgeSet, cur, nid, "writeBack");
+                        addEdgeIfAbsent(edges, edgeSet, cur, nid, "writeBack");
                         if (!nodeSet.contains(nid)) {
-                        nodeSet.add(nid);
-                        GraphModels.Node n = new GraphModels.Node(e.getKey(), e.getValue());
-                        fillNodeMeta(n);
-                        g.nodes.add(n);
+                            nodeSet.add(nid);
+                            GraphModels.Node n = new GraphModels.Node(e.getKey(), e.getValue());
+                            fillNodeMeta(n);
+                            g.nodes.add(n);
                             q.offer(nid);
                             level.put(nid, d + 1);
                         }
@@ -1193,8 +1466,8 @@ public class ImpactAnalyzerService {
                                 int dotV = viewId.indexOf('.');
                                 GraphModels.Node n = new GraphModels.Node(viewId.substring(0, dotV),
                                         viewId.substring(dotV + 1));
-                            fillNodeMeta(n);
-                            g.nodes.add(n);
+                                fillNodeMeta(n);
+                                g.nodes.add(n);
                                 q.offer(viewId);
                                 level.put(viewId, d + 1);
                             }
@@ -1474,4 +1747,236 @@ public class ImpactAnalyzerService {
     public List<BaseappObjectField> getAllFields() {
         return allRows;
     }
+
+    // ===== NL2MVEL 自然语言到 MVEL 推演引擎 =====
+
+    // ==========================================
+    // NL2MVEL 智能表达式推演引擎核心实现区
+    // ==========================================
+
+    public static class DeduceResult {
+        public boolean success;
+        public String expression; // MVEL
+        public String message;
+        public List<String> pathNodes; // 返回图路径用于高亮
+        public String baseObject; // 记录最终系统定准的起点对象（Global情况会有用）
+    }
+
+    static class PathState {
+        String currentObj;
+        String mvelPath;
+        String titlesStr; // 用于保存累积中文含义
+        List<String> nodeIds; // 路径上经过的 graph node ID 集合
+        int depth;
+
+        public PathState(String currentObj, String mvelPath, String titlesStr, List<String> nodeIds, int depth) {
+            this.currentObj = currentObj;
+            this.mvelPath = mvelPath;
+            this.titlesStr = titlesStr;
+            this.nodeIds = new ArrayList<>(nodeIds);
+            this.depth = depth;
+        }
+    }
+
+    /**
+     * 【Global NL2MVEL】无需指定起点，全局自适应推演
+     */
+    public DeduceResult globalDeduceExpressionPath(String keyword, int maxDepth) {
+        // 第一步：全局寻起点
+        String bestBaseObject = findBestBaseObject(keyword);
+        if (bestBaseObject == null) {
+            DeduceResult fail = new DeduceResult();
+            fail.success = false;
+            fail.message = "无法从知识图谱中根据词组 [" + keyword + "] 定准任何业务对象，请尝试更换关键词。";
+            return fail;
+        }
+
+        // 第二步：拿着起点去执行标准的下钻推演
+        DeduceResult res = deduceExpressionPath(bestBaseObject, keyword, maxDepth);
+        res.baseObject = bestBaseObject;
+        if (res.success) {
+            res.message = "【全局推断起点为: " + objectTitles.getOrDefault(bestBaseObject, bestBaseObject) + " ("
+                    + bestBaseObject + ")】 " + res.message;
+        }
+        return res;
+    }
+
+    /**
+     * 在全图中扫描，找到与自然语言关键词关联度最高的对象作为起点
+     */
+    private String findBestBaseObject(String keyword) {
+        JiebaSegmenter segmenter = new JiebaSegmenter();
+        List<String> tokens = segmenter.sentenceProcess(keyword.trim());
+        Set<String> kwTokens = new LinkedHashSet<>();
+        for (String t : tokens) {
+            if (t.length() > 1 && !GLOBAL_STOP_WORDS.contains(t))
+                kwTokens.add(t);
+        }
+        if (kwTokens.isEmpty())
+            kwTokens.add(keyword.trim());
+
+        String bestObj = null;
+        double bestScore = -1;
+
+        // 遍历所有有数据的对象
+        for (String objName : rowsByObject.keySet()) {
+            String title = objectTitles.getOrDefault(objName, objName);
+
+            // 实体名称本身打分
+            double score = 0;
+            for (String kw : kwTokens) {
+                if (title.contains(kw) || objName.toLowerCase().contains(kw.toLowerCase())) {
+                    score += 50;
+                }
+            }
+
+            // 同义词/别名聚合打分（极大地提升跨系统命中的概率）
+            List<String> synonyms = GLOBAL_SYNONYMS.getOrDefault(objName, Collections.emptyList());
+            for (String syn : synonyms) {
+                for (String kw : kwTokens) {
+                    if (syn.contains(kw) || kw.contains(syn)) {
+                        score += 80; // 同义词权重很高
+                    }
+                }
+            }
+
+            if (score > bestScore && score > 0) {
+                bestScore = score;
+                bestObj = objName;
+            }
+        }
+        return bestObj;
+    }
+
+    /**
+     * 根据基础对象和自然语言关键词，自动在业务图中推演最短级联路径 (BFS)。
+     * 返回组装好的 MVEL 表达式（例如 project.category.name）及推演经过的节点链路。
+     * 中文分词层使用 Jieba，匹配精度远高于单字符覆盖率。
+     */
+    public DeduceResult deduceExpressionPath(String baseObject, String keyword, int maxDepth) {
+        DeduceResult res = new DeduceResult();
+        if (baseObject == null || keyword == null || keyword.trim().isEmpty()) {
+            res.success = false;
+            res.message = "起点对象或关键词不可为空";
+            return res;
+        }
+
+        // 1. Jieba 分词，提取核心词
+        JiebaSegmenter segmenter = new JiebaSegmenter();
+        // 常見业务停用词
+        Set<String> stopWords = new HashSet<>(Arrays.asList(
+                "的", "地", "得", "了", "啊", "啊", "和", "这", "那",
+                "中", "上", "下", "对应的", "并", "所有", "等", "列表",
+                "信息", "详情", "标题", "数据", "汇总", "合计",
+                "对应", "相关", "获取", "得到", "返回", "尴展"));
+        List<String> tokens = segmenter.sentenceProcess(keyword.trim());
+        // 脱水：过滤停用词 + 单字运算符
+        Set<String> kwTokens = new LinkedHashSet<>();
+        for (String t : tokens) {
+            if (t.length() > 1 && !stopWords.contains(t)) {
+                kwTokens.add(t);
+            }
+        }
+        // 如果分词后全没了，回退到原内容整体当一个词
+        if (kwTokens.isEmpty()) {
+            kwTokens.add(keyword.trim());
+        }
+        String tokensDesc = String.join("|", kwTokens);
+
+        // 同时保留字符集用于边祖匹配（部分列标题简短无法分词时管用）
+        Set<Character> kwChars = new HashSet<>();
+        for (String t : kwTokens) {
+            for (char c : t.toCharArray())
+                kwChars.add(c);
+        }
+
+        // 2. BFS 最短跟数图寻径
+        Queue<PathState> q = new LinkedList<>();
+        List<String> startNodes = new ArrayList<>();
+        startNodes.add("obj::" + baseObject);
+        q.add(new PathState(baseObject, "", objectTitles.getOrDefault(baseObject, baseObject), startNodes, 0));
+
+        double bestScore = -999;
+        PathState bestPath = null;
+        int maxIterations = 50000;
+        int iterations = 0;
+
+        while (!q.isEmpty() && iterations < maxIterations) {
+            iterations++;
+            PathState curr = q.poll();
+
+            List<BaseappObjectField> fields = rowsByObject.getOrDefault(curr.currentObj, Collections.emptyList());
+            for (BaseappObjectField f : fields) {
+                String camel = canonicalFieldName(f);
+                if (camel == null || camel.isEmpty())
+                    continue;
+
+                String newMvel = curr.mvelPath.isEmpty() ? camel : curr.mvelPath + "." + camel;
+                String fTitle = f.getTitle() != null ? f.getTitle() : camel;
+                String newTitles = curr.titlesStr + fTitle;
+
+                List<String> newNodes = new ArrayList<>(curr.nodeIds);
+                String fldNodeId = "fld::" + curr.currentObj + "::" + camel;
+                newNodes.add(fldNodeId);
+
+                // ==== Jieba 词级相似度打分 ====
+                // 3a. 对当前字段标题做分词
+                List<String> titleTokens = segmenter.sentenceProcess(fTitle);
+                Set<String> titleTokenSet = new HashSet<>();
+                for (String t : titleTokens) {
+                    if (t.length() > 1 && !stopWords.contains(t))
+                        titleTokenSet.add(t);
+                }
+
+                // 3b. 词级交集 (Jieba 分词得到)
+                Set<String> wordIntersect = new HashSet<>(kwTokens);
+                wordIntersect.retainAll(titleTokenSet);
+
+                // 3c. 字符级覆盖率备用（当 Jieba 词匹配为 0 时冬己）
+                Set<Character> titleChars = new HashSet<>();
+                for (char c : fTitle.toCharArray())
+                    titleChars.add(c);
+                Set<Character> charIntersect = new HashSet<>(kwChars);
+                charIntersect.retainAll(titleChars);
+                double charCoverage = !kwChars.isEmpty() ? (double) charIntersect.size() / kwChars.size() : 0;
+
+                // 3d. 评分：词级匹配优先（每个匹中词加 40 分），字符级备用加分，路径长度和深度惩罚
+                double wordScore = wordIntersect.size() * 40.0;
+                double charBonus = charCoverage * 20.0; // 字符覆盖率少量加分避免词分词漏匹
+                double score = wordScore + charBonus - newMvel.length() * 0.3 - curr.depth * 2.0;
+
+                if ((wordIntersect.size() > 0 || charCoverage > 0.3) && score > bestScore) {
+                    bestScore = score;
+                    bestPath = new PathState(curr.currentObj, newMvel, newTitles, newNodes, curr.depth);
+                }
+
+                // 如果有 writeBackExpr 引用跨对象，继续深层探索
+                if (curr.depth < maxDepth && f.getWriteBackExpr() != null) {
+                    WriteBackExpr wb = parseWriteBack(f.getWriteBackExpr());
+                    if (wb != null && wb.getSrcObjectType() != null && !wb.getSrcObjectType().equals(curr.currentObj)) {
+                        String refObj = wb.getSrcObjectType();
+                        List<String> nextNodes = new ArrayList<>(newNodes);
+                        nextNodes.add("obj::" + refObj);
+                        q.add(new PathState(refObj, newMvel, newTitles + objectTitles.getOrDefault(refObj, refObj),
+                                nextNodes, curr.depth + 1));
+                    }
+                }
+            }
+        }
+
+        // 3. 构建推演输出
+        if (bestPath != null && bestScore > 0) {
+            res.success = true;
+            res.expression = bestPath.mvelPath;
+            res.message = "推演成功。Jieba分词词组: [" + tokensDesc + "], 高亮链路语义: [" + bestPath.titlesStr + "], 综合得分: "
+                    + String.format("%.2f", bestScore);
+            res.pathNodes = bestPath.nodeIds;
+        } else {
+            res.success = false;
+            res.message = "未能匹配到合理路径 (Jieba词组: [" + tokensDesc + "], 深度: " + maxDepth + ")";
+        }
+
+        return res;
+    }
+
 }

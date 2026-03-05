@@ -13,6 +13,9 @@ public class BaseappObjectField {
     private String virtualExpr;
     private String writeBackExpr;
 
+    // Reference relation
+    private String refObjectType;
+
     // Extension
     private String appName; // jsonb as text
 
@@ -110,5 +113,13 @@ public class BaseappObjectField {
 
     public void setAppName(String appName) {
         this.appName = appName;
+    }
+
+    public String getRefObjectType() {
+        return refObjectType;
+    }
+
+    public void setRefObjectType(String refObjectType) {
+        this.refObjectType = refObjectType;
     }
 }

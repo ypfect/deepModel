@@ -715,11 +715,31 @@ public class UpgradeScriptService {
     }
 
     /**
-     * 批量模式下的根字段占位说明：区分公式字段与基础字段，只提醒需要人工补充口径。
+     * 批量模式下的根字段占位说明：区分公式字段 / 虚拟字段 / 基础字段，只提醒需要人工补充口径。
      */
     private void appendRootFieldPlaceholderShort(StringBuilder sb, String rootObject, String rootField) {
         BaseappObjectField def = getLatestFieldInfo(rootObject, rootField);
-        String formula = def != null ? firstNonEmpty(def.getTriggerExpr(), def.getExpression(), def.getVirtualExpr()) : null;
+        String triggerExpr = def != null ? def.getTriggerExpr() : null;
+        String expr = def != null ? def.getExpression() : null;
+        String virtualExpr = def != null ? def.getVirtualExpr() : null;
+
+        boolean hasTriggerOrExpr = def != null
+                && ((triggerExpr != null && !triggerExpr.trim().isEmpty())
+                    || (expr != null && !expr.trim().isEmpty()));
+        boolean hasVirtualOnly = def != null
+                && !hasTriggerOrExpr
+                && virtualExpr != null
+                && !virtualExpr.trim().isEmpty();
+
+        // 根字段是纯虚拟字段：数据库没有物理列，不需要生成任何 SQL，只给出说明
+        if (hasVirtualOnly) {
+            sb.append("-- ROOT 虚拟字段(virtualExpr)，数据库无物理列：")
+              .append(rootObject).append(".").append(rootField)
+              .append("  本次升级无需对该字段生成 SQL\n\n");
+            return;
+        }
+
+        String formula = def != null ? firstNonEmpty(triggerExpr, expr, virtualExpr) : null;
         boolean isBaseField = formula == null || formula.trim().isEmpty();
 
         if (isBaseField) {
@@ -854,7 +874,25 @@ public class UpgradeScriptService {
             sb.append("-- [SKIP] 未找到字段定义: ").append(step.objectType).append(".").append(step.field).append("\n\n");
             return;
         }
-        String formula = firstNonEmpty(def.getTriggerExpr(), def.getExpression(), def.getVirtualExpr());
+
+        String triggerExpr = def.getTriggerExpr();
+        String expr = def.getExpression();
+        String virtualExpr = def.getVirtualExpr();
+
+        // 仅有 virtualExpr（虚拟字段，没有物理列）的场景：不生成实际 UPDATE SQL，避免对不存在的列执行更新
+        boolean hasTriggerOrExpr = (triggerExpr != null && !triggerExpr.trim().isEmpty())
+                                   || (expr != null && !expr.trim().isEmpty());
+        boolean hasVirtualOnly = !hasTriggerOrExpr
+                                 && virtualExpr != null
+                                 && !virtualExpr.trim().isEmpty();
+        if (hasVirtualOnly) {
+            sb.append("-- [SKIP] 虚拟字段(virtualExpr)，数据库无物理列，无需生成 SQL: ")
+              .append(step.objectType).append(".").append(step.field).append("\n\n");
+            return;
+        }
+
+        // 非纯虚拟字段：优先使用 trigger / expression，最后才回退到 virtualExpr
+        String formula = firstNonEmpty(triggerExpr, expr, virtualExpr);
         if (formula == null || formula.trim().isEmpty()) {
             sb.append("-- [SKIP] 字段无公式: ").append(step.objectType).append(".").append(step.field).append("\n\n");
             return;
@@ -906,7 +944,7 @@ public class UpgradeScriptService {
         String sql = callWriteBackSqlApi(fieldPath);
         
         if (sql != null && !sql.trim().isEmpty()) {
-            sb.append(sql.trim()).append("\n\n");
+            sb.append(ensureSqlEndsWithSemicolon(sql.trim())).append("\n\n");
         } else {
             sb.append("-- [WARN] 接口调用失败，无法生成 SQL: ").append(fieldPath).append("\n\n");
         }
@@ -947,6 +985,14 @@ public class UpgradeScriptService {
             log.error("[UpgradeScript] 调用回写 SQL 接口失败: fieldPath={}, error={}", fieldPath, ex.getMessage(), ex);
             return null;
         }
+    }
+
+    /** 确保 SQL 语句以分号结尾（便于按语句批量执行） */
+    private String ensureSqlEndsWithSemicolon(String sql) {
+        if (sql == null) return null;
+        String s = sql.trim();
+        if (s.isEmpty()) return s;
+        return s.endsWith(";") ? s : s + ";";
     }
 
     /**

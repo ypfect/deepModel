@@ -1,0 +1,1755 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="DeepModel Neo4j 对象-字段图谱，展示业务对象与字段的结构关系">
+    <title>DeepModel - Neo4j 对象图谱</title>
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2360a5fa'><circle cx='12' cy='12' r='10'/><circle cx='6' cy='6' r='3' fill='%231e40af'/><circle cx='18' cy='6' r='3' fill='%231e40af'/><circle cx='12' cy='20' r='3' fill='%231e40af'/><line x1='6' y1='6' x2='12' y2='12' stroke='%2393c5fd' stroke-width='1.5'/><line x1='18' y1='6' x2='12' y2='12' stroke='%2393c5fd' stroke-width='1.5'/><line x1='12' y1='12' x2='12' y2='20' stroke='%2393c5fd' stroke-width='1.5'/></svg>">
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
+    <style>
+        :root {
+            --el-color-primary: #3b82f6;
+            --sidebar-width: 300px;
+            --bg-dark: #0b1120;
+            --bg-panel: #111827;
+            --bg-card: #1a2236;
+            --border-color: #1e3a5f;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #4b6280;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-purple: #8b5cf6;
+            --accent-amber: #f59e0b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #app {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ===== Header ===== */
+        .header {
+            background: var(--bg-panel);
+            height: 56px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            gap: 16px;
+            flex-shrink: 0;
+            box-shadow: 0 1px 0 rgba(59, 130, 246, 0.15), 0 4px 20px rgba(0, 0, 0, 0.4);
+            z-index: 50;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 17px;
+            font-weight: 700;
+            color: #f1f5f9;
+            white-space: nowrap;
+        }
+
+        .logo-icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #1d4ed8, #0ea5e9 50%, #6366f1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.5);
+        }
+
+        .logo-icon svg {
+            width: 17px;
+            height: 17px;
+        }
+
+        .page-badge {
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #60a5fa;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 4px;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+
+        .header-nav {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: auto;
+        }
+
+        .nav-link {
+            color: var(--text-secondary);
+            font-size: 13px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .nav-link:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        /* ===== Layout ===== */
+        .main-container {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            position: relative;
+            /* 核心：作为 toggle-btn 的定位父级 */
+        }
+
+        /* ===== Sidebar ===== */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            overflow: hidden;
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            z-index: 20;
+        }
+
+        .sidebar.collapsed {
+            width: 0;
+            border-right: none;
+        }
+
+        .sidebar-inner {
+            width: var(--sidebar-width);
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-header {
+            padding: 16px 20px 12px;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+
+        .sidebar-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--accent-blue);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .sidebar-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .sidebar-body::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .sidebar-body::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .sidebar-body::-webkit-scrollbar-thumb {
+            background: #1e3a5f;
+            border-radius: 4px;
+        }
+
+        .field-group {
+            margin-bottom: 18px;
+        }
+
+        .field-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        /* Element Plus dark overrides */
+        .sidebar .el-select {
+            --el-bg-color: #1a2236;
+            --el-text-color-regular: #e2e8f0;
+            --el-border-color: #1e3a5f;
+        }
+
+        .sidebar .el-input {
+            --el-bg-color: #1a2236;
+            --el-text-color-regular: #e2e8f0;
+            --el-border-color: #1e3a5f;
+        }
+
+        .sidebar .el-slider {
+            --el-color-primary: #3b82f6;
+        }
+
+        .slider-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .slider-value {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--accent-blue);
+        }
+
+        .action-btn {
+            width: 100%;
+            margin-top: 0 !important;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+
+        .divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 14px 0;
+        }
+
+        /* Legend */
+        .legend {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .legend-line {
+            width: 24px;
+            height: 2px;
+            flex-shrink: 0;
+            border-radius: 1px;
+        }
+
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .stat-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .stat-val {
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--text-primary);
+        }
+
+        .stat-lbl {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* Toggle button */
+        .toggle-btn {
+            position: absolute;
+            left: var(--sidebar-width);
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 100;
+            /* 提升层级，确保在最上层 */
+            transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            pointer-events: none;
+        }
+
+        .sidebar.collapsed~.toggle-btn {
+            left: 0;
+        }
+
+        .toggle-inner {
+            pointer-events: auto;
+            position: absolute;
+            left: 0;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-left: none;
+            padding: 16px 4px;
+            /* 加高一点方便点击 */
+            border-radius: 0 8px 8px 0;
+            cursor: pointer;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            transition: color 0.2s;
+            box-shadow: 4px 0 12px rgba(0, 0, 0, 0.3);
+        }
+
+        /* ===== Content ===== */
+        .content {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            background: var(--bg-dark);
+            display: flex;
+            flex-direction: column;
+            /* 纵向排列工具栏与图谱 */
+        }
+
+        #cy-container {
+            width: 100%;
+            flex: 1;
+            /* 占据剩余所有空间 */
+            height: auto;
+        }
+
+        /* ===== Floating toolbar ===== */
+        .floating-toolbar {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: rgba(17, 24, 39, 0.92);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--border-color);
+            padding: 6px;
+            border-radius: 10px;
+            display: flex;
+            gap: 6px;
+            z-index: 10;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        }
+
+        .toolbar-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-size: 12px;
+            padding: 5px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .toolbar-btn:hover {
+            color: var(--accent-blue);
+            border-color: var(--accent-blue);
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        /* ===== Search box ===== */
+        .search-box {
+            position: absolute;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(17, 24, 39, 0.92);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--border-color);
+            padding: 8px 14px;
+            border-radius: 24px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 280px;
+            z-index: 10;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        }
+
+        .search-box input {
+            background: none;
+            border: none;
+            outline: none;
+            color: var(--text-primary);
+            font-size: 13px;
+            flex: 1;
+        }
+
+        .search-box input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search-icon {
+            color: var(--text-muted);
+        }
+
+        /* ===== Detail Drawer ===== */
+        .detail-drawer {
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 320px;
+            background: var(--bg-panel);
+            border-left: 1px solid var(--border-color);
+            transform: translateX(100%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 40;
+            display: flex;
+            flex-direction: column;
+            box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
+        }
+
+        .detail-drawer.visible {
+            transform: translateX(0);
+        }
+
+        .drawer-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .drawer-title {
+            font-weight: 700;
+            font-size: 15px;
+            color: var(--text-primary);
+        }
+
+        .drawer-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 20px;
+        }
+
+        .drawer-body::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .drawer-body::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        .detail-section {
+            margin-bottom: 18px;
+        }
+
+        .detail-section-title {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            margin-bottom: 8px;
+        }
+
+        .detail-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 6px;
+            align-items: flex-start;
+        }
+
+        .detail-key {
+            font-size: 12px;
+            color: var(--text-secondary);
+            min-width: 70px;
+            flex-shrink: 0;
+        }
+
+        .detail-val {
+            font-size: 12px;
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+
+        .code-block {
+            background: #0d1b2a;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 11px;
+            color: #7dd3fc;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin-top: 4px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .kind-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .kind-badge.object-type {
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+
+        .kind-badge.object-field {
+            background: rgba(16, 185, 129, 0.1);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+
+        .kind-badge.has-formula {
+            background: rgba(245, 158, 11, 0.1);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.25);
+        }
+
+        /* ===== Empty state ===== */
+        .empty-state {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            gap: 12px;
+        }
+
+        .empty-icon {
+            font-size: 48px;
+            opacity: 0.4;
+        }
+
+        .empty-text {
+            font-size: 14px;
+        }
+
+        /* ===== Loading ===== */
+        .loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(11, 17, 32, 0.85);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .loading-text {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        /* ===== El overrides for dark mode ===== */
+        .el-select-dropdown {
+            background: #1a2236 !important;
+            border-color: #1e3a5f !important;
+        }
+
+        .el-select-dropdown__item {
+            color: #e2e8f0 !important;
+        }
+
+        .el-select-dropdown__item.hover,
+        .el-select-dropdown__item:hover {
+            background: #243046 !important;
+        }
+
+        /* checkbox */
+        .rel-check-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .rel-check-row .el-checkbox {
+            margin: 0;
+        }
+
+        .rel-check-row .el-checkbox__label {
+            color: var(--text-secondary) !important;
+            font-size: 12px;
+        }
+
+        /* radio */
+        .layout-radio .el-radio-button__inner {
+            background: var(--bg-card) !important;
+            border-color: var(--border-color) !important;
+            color: var(--text-secondary) !important;
+            font-size: 12px;
+        }
+
+        .layout-radio .el-radio-button__original-radio:checked+.el-radio-button__inner {
+            background: var(--accent-blue) !important;
+            border-color: var(--accent-blue) !important;
+            color: #fff !important;
+        }
+
+        /* 修复所有输入框字体颜色，确保不再是“看不见的白色” */
+        .el-input__inner {
+            color: #e2e8f0 !important;
+            /* 浅灰色字体适合深色背景 */
+        }
+
+        .el-input__inner::placeholder {
+            color: #64748b !important;
+        }
+
+        /* 专门针对全局智能推演区域的特殊处理 */
+        .global-deduce-box .el-input__inner {
+            color: #60a5fa !important;
+            /* 蓝色字体增加辨识度 */
+            font-weight: 600;
+        }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/element-plus@2.4.4/dist/index.full.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.28.0/dist/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
+</head>
+
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="12" cy="5" r="2.5" fill="#60a5fa" />
+                        <circle cx="5" cy="17" r="2.5" fill="#34d399" />
+                        <circle cx="19" cy="17" r="2.5" fill="#818cf8" />
+                        <line x1="12" y1="5" x2="5" y2="17" stroke="#3b82f6" stroke-width="1.5" />
+                        <line x1="12" y1="5" x2="19" y2="17" stroke="#3b82f6" stroke-width="1.5" />
+                        <line x1="5" y1="17" x2="19" y2="17" stroke="#3b82f6" stroke-width="1.5" />
+                    </svg>
+                </div>
+                <span>DeepModel</span>
+            </div>
+            <span class="page-badge">NEO4J 对象图谱</span>
+
+            <div class="header-nav">
+                <a href="/modern.html" class="nav-link">字段影响分析</a>
+                <a href="/cross.html" class="nav-link">跨对象视图</a>
+            </div>
+        </header>
+
+        <!-- Main -->
+        <div class="main-container">
+            <!-- Sidebar -->
+            <aside class="sidebar" :class="{ collapsed: isSidebarCollapsed }">
+                <div class="sidebar-inner">
+                    <div class="sidebar-header">
+                        <div class="sidebar-title">🔍 图谱过滤</div>
+                    </div>
+                    <div class="sidebar-body">
+
+                        <!-- App Name Filter -->
+                        <div class="field-group">
+                            <label class="field-label">应用 AppName</label>
+                            <el-input v-model="filterAppName" placeholder="如 ar, arap, baseapp..." clearable
+                                size="small">
+                                <template #prefix>
+                                    <el-icon>
+                                        <Search />
+                                    </el-icon>
+                                </template>
+                            </el-input>
+                        </div>
+
+                        <!-- Object Filter -->
+                        <div class="field-group">
+                            <label class="field-label">指定对象</label>
+                            <el-input v-model="filterObjectName" placeholder="如 ArReceipt（空=全部）" clearable size="small">
+                            </el-input>
+                        </div>
+
+                        <!-- Max Fields Slider -->
+                        <div class="field-group">
+                            <label class="field-label">
+                                <div class="slider-row">
+                                    <span>最大字段节点数</span>
+                                    <span class="slider-value">{{ maxFields }}</span>
+                                </div>
+                            </label>
+                            <el-slider v-model="maxFields" :min="50" :max="2000" :step="50" size="small"
+                                :marks="{ 200: '200', 500: '500', 1000: '1000' }" />
+                        </div>
+
+                        <!-- Layout -->
+                        <div class="field-group">
+                            <label class="field-label">图布局</label>
+                            <el-radio-group v-model="layoutMode" size="small" class="layout-radio" style="width:100%">
+                                <el-radio-button label="cose" style="width:50%">力导向</el-radio-button>
+                                <el-radio-button label="dagre" style="width:50%">层次流</el-radio-button>
+                            </el-radio-group>
+                        </div>
+
+                        <!-- Relations -->
+                        <div class="field-group">
+                            <label class="field-label">显示关系</label>
+                            <div class="rel-check-row">
+                                <el-checkbox v-model="showHasField" size="small">HAS_FIELD</el-checkbox>
+                                <el-checkbox v-model="showRefersTo" size="small">REFERS_TO</el-checkbox>
+                                <el-checkbox v-model="showHasList" size="small">HAS_LIST</el-checkbox>
+                                <el-checkbox v-model="showUsesEnum" size="small">USES_ENUM</el-checkbox>
+                            </div>
+                        </div>
+
+                        <!-- Node types -->
+                        <div class="field-group">
+                            <label class="field-label">节点类型</label>
+                            <div class="rel-check-row">
+                                <el-checkbox v-model="showObjectType" size="small">对象</el-checkbox>
+                                <el-checkbox v-model="showObjectField" size="small">字段</el-checkbox>
+                                <el-checkbox v-model="showEnumType" size="small">枚举字典</el-checkbox>
+                            </div>
+                        </div>
+
+                        <div class="divider"></div>
+
+                        <!-- Load btn -->
+                        <el-button type="primary" id="loadGraphBtn" class="action-btn" :loading="loading"
+                            @click="loadGraph">
+                            <el-icon v-if="!loading">
+                                <Connection />
+                            </el-icon>
+                            {{ loading ? '加载中...' : '加载图谱' }}
+                        </el-button>
+                        <el-button class="action-btn" style="margin-top:8px;" :disabled="!hasData" @click="fitGraph"
+                            size="small">
+                            适应屏幕
+                        </el-button>
+                        <el-button class="action-btn" style="margin-top:8px;" :disabled="!hasData"
+                            @click="applyVisibility" size="small">
+                            刷新显示
+                        </el-button>
+
+                        <div class="divider"></div>
+
+                        <!-- Stats -->
+                        <div v-if="stats" class="field-group">
+                            <label class="field-label">📊 图谱统计</label>
+                            <div class="stats-grid">
+                                <div class="stat-box">
+                                    <div class="stat-val" style="color:#60a5fa">{{ stats.objectCount }}</div>
+                                    <div class="stat-lbl">对象节点</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-val" style="color:#34d399">{{ stats.fieldCount }}</div>
+                                    <div class="stat-lbl">字段节点</div>
+                                </div>
+                                <div class="stat-box" style="grid-column:span 2">
+                                    <div class="stat-val" style="color:#a78bfa">{{ stats.edgeCount }}</div>
+                                    <div class="stat-lbl">关系边数</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="divider"></div>
+
+                        <!-- Legend -->
+                        <div class="field-group">
+                            <label class="field-label">图例</label>
+                            <div class="legend">
+                                <div class="legend-item">
+                                    <div class="legend-dot" style="background:#1d4ed8; border:2px solid #60a5fa;"></div>
+                                    ObjectType（业务对象）
+                                </div>
+                                <div class="legend-item">
+                                    <div class="legend-dot" style="background:#064e3b; border:2px solid #34d399;"></div>
+                                    ObjectField（字段）
+                                </div>
+                                <div class="legend-item">
+                                    <div class="legend-dot" style="background:#92400e; border:2px solid #fbbf24;"></div>
+                                    有公式的字段
+                                </div>
+                                <div class="legend-item">
+                                    <div class="legend-dot" style="background:#5b21b6; border:2px solid #8b5cf6;"></div>
+                                    EnumType（字典）
+                                </div>
+                                <div class="legend-item">
+                                    <div class="legend-line" style="background:#4b5563;"></div>
+                                    HAS_FIELD 关系
+                                </div>
+                                <div class="legend-item">
+                                    <div class="legend-line" style="background:#10b981;"></div>
+                                    REFERS_TO 跨对象引用
+                                </div>
+                                <div class="legend-item">
+                                    <div class="legend-line" style="background:#f43f5e;"></div>
+                                    HAS_LIST 主子表
+                                </div>
+                                <div class="legend-item">
+                                    <div class="legend-line" style="background:#8b5cf6; stroke-dasharray: 4 4;"></div>
+                                    USES_ENUM 绑字典
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Toggle Button -->
+            <div class="toggle-btn">
+                <div class="toggle-inner" @click="isSidebarCollapsed = !isSidebarCollapsed">
+                    <el-icon>
+                        <component :is="isSidebarCollapsed ? 'ArrowRight' : 'ArrowLeft'" />
+                    </el-icon>
+                </div>
+            </div>
+
+            <!-- Content area -->
+            <main class="content">
+                <!-- Top Actions Bar -->
+                <div
+                    style="display: flex; gap: 16px; padding: 12px 24px; border-bottom: 1px solid var(--border-color); background: rgba(30, 41, 59, 1); align-items: center; z-index: 110; flex-shrink: 0;">
+
+                    <!-- Search box -->
+                    <div class="search-box" style="margin: 0;">
+                        <el-icon class="search-icon">
+                            <Search />
+                        </el-icon>
+                        <input id="searchInput" v-model="searchQuery" @input="handleSearch" @keyup.enter="handleSearch"
+                            placeholder="图内模糊搜索节点...">
+                        <el-button v-if="searchQuery" link size="small" @click="clearSearch">
+                            <el-icon>
+                                <Close />
+                            </el-icon>
+                        </el-button>
+                    </div>
+
+                    <div style="width: 1px; height: 24px; background: var(--border-color); margin: 0 8px;"></div>
+
+                    <!-- Global NL2MVEL Input -->
+                    <div class="global-deduce-box"
+                        style="flex: 1; display: flex; align-items: center; gap: 12px; background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; border-radius: 8px; padding: 4px 12px; box-shadow: 0 0 10px rgba(59,130,246,0.15); position: relative; z-index: 100;">
+                        <span style="font-size: 13px; font-weight: 600; color: #60a5fa; white-space: nowrap;">✨
+                            全局智能推演</span>
+                        <el-input v-model="globalDeduceKeyword" placeholder="输入自然语言业务意图，如：应收明细金额..." size="small"
+                            @keyup.enter="runGlobalDeduce" clearable style="flex: 1;">
+                        </el-input>
+                        <el-button type="primary" size="small" :loading="globalDeducing" @click="runGlobalDeduce">
+                            图谱寻径
+                        </el-button>
+                    </div>
+
+                    <div style="width: 1px; height: 24px; background: var(--border-color); margin: 0 8px;"></div>
+
+                    <!-- Graph Actions (Previously floating) -->
+                    <div style="display: flex; gap: 8px;">
+                        <el-button size="small" plain @click="fitGraph" :disabled="!hasData">适应屏幕</el-button>
+                        <el-button size="small" plain @click="relayout" :disabled="!hasData">重新布局</el-button>
+                        <el-button size="small" plain @click="downloadGraph" :disabled="!hasData">
+                            <el-icon style="margin-right: 4px;">
+                                <Download />
+                            </el-icon>导出图片
+                        </el-button>
+                    </div>
+                </div>
+
+                <!-- Global Deduce Result Banner -->
+                <div v-if="globalDeduceResult"
+                    style="padding: 12px 24px; background: #0f172a; border-bottom: 1px dashed #3b82f6; display: flex; flex-direction: column; gap: 8px; z-index: 9;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                        <div style="flex:1;">
+                            <template v-if="globalDeduceResult.success">
+                                <div style="color: #34d399; font-weight: bold; margin-bottom: 6px; font-size: 13px;">✅
+                                    {{ globalDeduceResult.message }}</div>
+                                <div class="code-block"
+                                    style="border-left-color: #34d399; font-size: 14px; padding: 8px 12px;">
+                                    {{ globalDeduceResult.expression }}
+                                </div>
+                            </template>
+                            <template v-else>
+                                <div style="color: #f87171; font-weight: bold; margin-bottom: 6px; font-size: 13px;">❌
+                                    推演失败</div>
+                                <div style="color: #94a3b8; font-size: 12px;">{{ globalDeduceResult.message }}</div>
+                            </template>
+                        </div>
+                        <el-button size="small" plain @click="globalDeduceResult = null">关闭</el-button>
+                    </div>
+                </div>
+
+
+                <!-- Cytoscape container -->
+                <div id="cy-container"></div>
+
+                <!-- Empty state -->
+                <div v-if="!hasData && !loading" class="empty-state">
+                    <div class="empty-icon">🕸️</div>
+                    <div class="empty-text">请在左侧设置过滤条件后，点击「加载图谱」</div>
+                </div>
+
+                <!-- Loading overlay -->
+                <div v-if="loading" class="loading-overlay">
+                    <el-icon class="is-loading" style="font-size:32px;color:#3b82f6;">
+                        <Loading />
+                    </el-icon>
+                    <div class="loading-text">正在加载对象-字段图谱...</div>
+                </div>
+
+                <!-- Detail Drawer -->
+                <div class="detail-drawer" :class="{ visible: selectedNode }">
+                    <div class="drawer-header">
+                        <div class="drawer-title">节点详情</div>
+                        <el-button link @click="selectedNode = null">
+                            <el-icon>
+                                <Close />
+                            </el-icon>
+                        </el-button>
+                    </div>
+                    <div class="drawer-body" v-if="selectedNode">
+                        <div class="detail-section">
+                            <div class="detail-section-title">基本信息</div>
+                            <div style="margin-bottom:10px; display:flex; gap:6px; flex-wrap:wrap;">
+                                <span class="kind-badge"
+                                    :class="selectedNode.kind === 'ObjectType' ? 'object-type' : 'object-field'">
+                                    {{ selectedNode.kind === 'ObjectType' ? '🏛 对象' : '🔖 字段' }}
+                                </span>
+                                <span v-if="selectedNode.hasFormula" class="kind-badge has-formula">⚡ 有公式</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-key">名称</span>
+                                <span class="detail-val" style="font-weight:700;color:#e2e8f0;">{{ selectedNode.label
+                                    }}</span>
+                            </div>
+                            <div class="detail-row"
+                                v-if="selectedNode.title && selectedNode.title !== selectedNode.label">
+                                <span class="detail-key">标题</span>
+                                <span class="detail-val">{{ selectedNode.title }}</span>
+                            </div>
+                            <div class="detail-row" v-if="selectedNode.objectType">
+                                <span class="detail-key">所属对象</span>
+                                <span class="detail-val" style="color:#60a5fa;cursor:pointer;"
+                                    @click="focusObject(selectedNode.objectType)">{{ selectedNode.objectType }}</span>
+                            </div>
+                            <div class="detail-row" v-if="selectedNode.type">
+                                <span class="detail-key">数据类型</span>
+                                <span class="detail-val">{{ selectedNode.type }}</span>
+                            </div>
+                            <div class="detail-row" v-if="selectedNode.bizType">
+                                <span class="detail-key">业务类型</span>
+                                <span class="detail-val">{{ selectedNode.bizType }}</span>
+                            </div>
+                            <div class="detail-row" v-if="selectedNode.appName">
+                                <span class="detail-key">AppName</span>
+                                <span class="detail-val" style="color:#a78bfa;">{{ selectedNode.appName }}</span>
+                            </div>
+                        </div>
+
+                        <!-- 公式 -->
+                        <div v-if="selectedNode.expression || selectedNode.triggerExpr || selectedNode.writeBackExpr"
+                            class="detail-section">
+                            <div class="detail-section-title">关联表达式</div>
+                            <div v-if="selectedNode.expression">
+                                <div class="detail-key" style="margin-bottom:4px;">Expression</div>
+                                <div class="code-block">{{ selectedNode.expression }}</div>
+                            </div>
+                            <div v-if="selectedNode.triggerExpr" style="margin-top:10px;">
+                                <div class="detail-key" style="margin-bottom:4px;">TriggerExpr</div>
+                                <div class="code-block">{{ selectedNode.triggerExpr }}</div>
+                            </div>
+                            <div v-if="selectedNode.writeBackExpr" style="margin-top:10px;">
+                                <div class="detail-key" style="margin-bottom:4px;">WriteBackExpr</div>
+                                <div class="code-block">{{ selectedNode.writeBackExpr }}</div>
+                            </div>
+                        </div>
+
+                        <!-- 快捷操作 -->
+                        <div class="detail-section">
+                            <div class="detail-section-title">快捷操作</div>
+                            <el-button v-if="selectedNode.kind === 'ObjectType'" size="small" type="primary" plain
+                                style="width:100%;margin-bottom:8px;" @click="collapseExpandObject(selectedNode.label)">
+                                折叠/展开字段
+                            </el-button>
+                            <el-button size="small" plain style="width:100%" @click="focusNode(selectedNode.id)">
+                                居中定位
+                            </el-button>
+                        </div>
+
+                        <!-- NL2MVEL 智能推演 -->
+                        <div v-if="selectedNode.kind === 'ObjectType'" class="detail-section"
+                            style="background: rgba(30, 41, 59, 0.5); border: 1px dashed #3b82f6; padding: 12px; border-radius: 8px;">
+                            <div class="detail-section-title"
+                                style="color: #60a5fa; display:flex; align-items:center; gap:6px;">
+                                <span>✨ 智能表达式推演</span>
+                            </div>
+                            <div style="font-size:11px; color:#94a3b8; margin-bottom:8px;">
+                                输入自然语言关键词，自动寻径生成 MVEL 公式。起点: <b>{{ selectedNode.label }}</b>
+                            </div>
+                            <div style="display:flex; gap:8px; margin-bottom:10px;">
+                                <el-input v-model="deduceKeyword" placeholder="如：项目分类名称" size="small"
+                                    @keyup.enter="runDeduce" clearable>
+                                </el-input>
+                                <el-button type="primary" size="small" :loading="deducing"
+                                    @click="runDeduce">推演</el-button>
+                            </div>
+
+                            <!-- 推演结果 -->
+                            <div v-if="deduceResult"
+                                style="margin-top: 10px; background: #0f172a; padding: 10px; border-radius: 6px;">
+                                <template v-if="deduceResult.success">
+                                    <div style="color: #34d399; font-weight: bold; margin-bottom:6px; font-size:12px;">✅
+                                        推演成功</div>
+                                    <div class="code-block" style="border-left-color: #34d399; margin-bottom: 8px;">
+                                        {{ deduceResult.expression }}
+                                    </div>
+                                    <div style="font-size:11px; color: #94a3b8; line-height: 1.4;">
+                                        {{ deduceResult.message }}
+                                    </div>
+                                </template>
+                                <template v-else>
+                                    <div style="color: #f87171; font-weight: bold; margin-bottom:6px; font-size:12px;">❌
+                                        推演失败</div>
+                                    <div style="font-size:11px; color: #94a3b8;">
+                                        {{ deduceResult.message }}
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
+        const { ElMessage } = ElementPlus;
+
+        // Cytoscape 样式定义
+        const CY_STYLE = [
+            // ObjectType 节点
+            {
+                selector: 'node[kind="ObjectType"]',
+                style: {
+                    'shape': 'round-rectangle',
+                    'width': 'label',
+                    'height': 'label',
+                    'padding': '12px',
+                    'background-color': '#0f2744',
+                    'border-width': 2,
+                    'border-color': '#2563eb',
+                    'label': 'data(label)',
+                    'color': '#93c5fd',
+                    'font-size': '12px',
+                    'font-weight': 'bold',
+                    'text-valign': 'center',
+                    'text-halign': 'center',
+                    'text-wrap': 'wrap',
+                    'text-max-width': '120px',
+                    'box-shadow': '0 0 8px rgba(37,99,235,0.5)',
+                }
+            },
+            // ObjectField 节点（普通）
+            {
+                selector: 'node[kind="ObjectField"]',
+                style: {
+                    'shape': 'ellipse',
+                    'width': 'label',
+                    'height': 'label',
+                    'padding': '6px',
+                    'background-color': '#052e16',
+                    'border-width': 1.5,
+                    'border-color': '#059669',
+                    'label': 'data(label)',
+                    'color': '#6ee7b7',
+                    'font-size': '9px',
+                    'text-valign': 'center',
+                    'text-halign': 'center',
+                    'text-wrap': 'wrap',
+                    'text-max-width': '90px',
+                }
+            },
+            // ObjectField 有公式的节点
+            {
+                selector: 'node[kind="ObjectField"][hasFormula="true"]',
+                style: {
+                    'background-color': '#1c1002',
+                    'border-color': '#d97706',
+                    'color': '#fcd34d',
+                }
+            },
+            // HAS_FIELD 边
+            {
+                selector: 'edge[type="HAS_FIELD"]',
+                style: {
+                    'width': 1,
+                    'curve-style': 'bezier',
+                    'line-color': '#1e3a5f',
+                    'target-arrow-shape': 'triangle',
+                    'target-arrow-color': '#1e3a5f',
+                    'arrow-scale': 0.8,
+                    'opacity': 0.7,
+                }
+            },
+            // REFERS_TO 边
+            {
+                selector: 'edge[type="REFERS_TO"]',
+                style: {
+                    'width': 2,
+                    'curve-style': 'bezier',
+                    'line-color': '#059669',
+                    'target-arrow-shape': 'triangle',
+                    'target-arrow-color': '#059669',
+                    'arrow-scale': 1,
+                    'label': 'REFERS_TO',
+                    'font-size': '9px',
+                    'color': '#6ee7b7',
+                    'text-rotation': 'autorotate',
+                    'text-margin-y': -8,
+                    'opacity': 0.85,
+                }
+            },
+            // EnumType 节点
+            {
+                selector: 'node[kind="EnumType"]',
+                style: {
+                    'shape': 'hexagon',
+                    'width': 'label',
+                    'height': 'label',
+                    'padding': '10px',
+                    'background-color': '#2e1065',
+                    'border-width': 2,
+                    'border-color': '#8b5cf6',
+                    'label': 'data(label)',
+                    'color': '#ddd6fe',
+                    'font-size': '11px',
+                    'font-weight': 'bold',
+                    'text-valign': 'center',
+                    'text-halign': 'center',
+                    'box-shadow': '0 0 8px rgba(139,92,246,0.3)',
+                }
+            },
+            // HAS_LIST 边
+            {
+                selector: 'edge[type="HAS_LIST"]',
+                style: {
+                    'width': 3,
+                    'curve-style': 'bezier',
+                    'line-color': '#f43f5e',
+                    'target-arrow-shape': 'triangle',
+                    'target-arrow-color': '#f43f5e',
+                    'arrow-scale': 1.2,
+                    'label': 'HAS_LIST',
+                    'font-size': '10px',
+                    'font-weight': 'bold',
+                    'color': '#fecdd3',
+                    'text-rotation': 'autorotate',
+                    'text-margin-y': -10,
+                    'opacity': 0.9,
+                }
+            },
+            // USES_ENUM 边
+            {
+                selector: 'edge[type="USES_ENUM"]',
+                style: {
+                    'width': 1.5,
+                    'curve-style': 'bezier',
+                    'line-style': 'dashed',
+                    'line-dash-pattern': [4, 4],
+                    'line-color': '#8b5cf6',
+                    'target-arrow-shape': 'triangle',
+                    'target-arrow-color': '#8b5cf6',
+                    'arrow-scale': 0.9,
+                    'opacity': 0.8,
+                }
+            },
+            // Hover state
+            {
+                selector: 'node:active',
+                style: { 'overlay-opacity': 0.1 }
+            },
+            // Selected
+            {
+                selector: 'node:selected',
+                style: {
+                    'border-width': 3,
+                    'border-color': '#f59e0b',
+                    'background-color': '#1c1002',
+                }
+            },
+            // Search highlight
+            {
+                selector: '.search-highlight',
+                style: {
+                    'border-width': 3,
+                    'border-color': '#f59e0b',
+                    'background-color': '#3b1c02',
+                    'color': '#fbbf24',
+                    'z-index': 100,
+                }
+            },
+            // Hidden nodes
+            {
+                selector: '.hidden',
+                style: { 'display': 'none' }
+            },
+        ];
+
+        createApp({
+            setup() {
+                // ===== State =====
+                const isSidebarCollapsed = ref(false);
+                const filterAppName = ref('');
+                const filterObjectName = ref('');
+                const maxFields = ref(500);
+                const layoutMode = ref('cose');
+                const showHasField = ref(true);
+                const showRefersTo = ref(true);
+                const showHasList = ref(true);
+                const showUsesEnum = ref(false); // 默认隐藏字典，避免太乱
+                const showObjectType = ref(true);
+                const showObjectField = ref(true);
+                const showEnumType = ref(true);
+                const loading = ref(false);
+                const hasData = ref(false);
+                const stats = ref(null);
+                const selectedNode = ref(null);
+                const searchQuery = ref('');
+                const collapsedObjects = ref(new Set());
+
+                // 单节点推演
+                const deduceKeyword = ref('');
+                const deducing = ref(false);
+                const deduceResult = ref(null);
+
+                // 全局推演
+                const globalDeduceKeyword = ref('');
+                const globalDeducing = ref(false);
+                const globalDeduceResult = ref(null);
+
+                let cy = null;
+                let rawData = null;
+
+                // ===== Init Cytoscape =====
+                function initCy() {
+                    cy = cytoscape({
+                        container: document.getElementById('cy-container'),
+                        elements: [],
+                        style: CY_STYLE,
+                        layout: { name: 'preset' },
+                        minZoom: 0.05,
+                        maxZoom: 4,
+                    });
+
+                    // Click node
+                    cy.on('tap', 'node', (evt) => {
+                        const node = evt.target;
+                        const data = node.data();
+                        selectedNode.value = {
+                            id: data.id,
+                            label: data.label,
+                            kind: data.kind,
+                            objectType: data.objectType,
+                            title: data.title,
+                            type: data.type,
+                            bizType: data.bizType,
+                            appName: data.appName,
+                            hasFormula: data.hasFormula === 'true',
+                            expression: data.expression,
+                            triggerExpr: data.triggerExpr,
+                            writeBackExpr: data.writeBackExpr,
+                        };
+                        // Clear global deduction result when a node is selected
+                        globalDeduceResult.value = null;
+                    });
+
+                    // Double click object => collapse/expand
+                    cy.on('dbltap', 'node[kind="ObjectType"]', (evt) => {
+                        const label = evt.target.data('label');
+                        toggleCollapseObject(label);
+                    });
+
+                    // Click canvas: deselect
+                    cy.on('tap', (evt) => {
+                        if (evt.target === cy) {
+                            selectedNode.value = null;
+                            cy.elements().removeClass('search-highlight deduce-path-node deduce-path-edge');
+                            deduceResult.value = null;
+                            globalDeduceResult.value = null;
+                        }
+                    });
+                }
+
+                // ===== Load graph data =====
+                async function loadGraph() {
+                    if (!cy) { initCy(); }
+                    loading.value = true;
+                    hasData.value = false;
+                    selectedNode.value = null;
+                    deduceResult.value = null;
+                    globalDeduceResult.value = null;
+                    try {
+                        const params = new URLSearchParams();
+                        if (filterAppName.value.trim()) params.append('appName', filterAppName.value.trim());
+                        if (filterObjectName.value.trim()) params.append('objectName', filterObjectName.value.trim());
+                        params.append('maxFields', String(maxFields.value));
+
+                        const resp = await fetch('/api/neo4j/graph?' + params.toString());
+                        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                        rawData = await resp.json();
+
+                        stats.value = rawData.stats;
+                        renderGraph(rawData);
+                        hasData.value = true;
+                    } catch (e) {
+                        ElMessage.error('加载图谱失败: ' + e.message);
+                        console.error(e);
+                    } finally {
+                        loading.value = false;
+                    }
+                }
+
+                // ===== Render graph =====
+                function renderGraph(data) {
+                    if (!cy) return;
+                    cy.startBatch();
+                    cy.elements().remove();
+
+                    const elements = [];
+
+                    // Nodes
+                    (data.nodes || []).forEach(n => {
+                        elements.push({
+                            data: {
+                                id: n.id,
+                                label: n.label,
+                                kind: n.kind,
+                                objectType: n.objectType || '',
+                                title: n.title || '',
+                                type: n.type || '',
+                                bizType: n.bizType || '',
+                                appName: n.appName || '',
+                                hasFormula: n.hasFormula ? 'true' : 'false',
+                                expression: n.expression || '',
+                                triggerExpr: n.triggerExpr || '',
+                                writeBackExpr: n.writeBackExpr || '',
+                            }
+                        });
+                    });
+
+                    // Edges
+                    (data.edges || []).forEach(e => {
+                        elements.push({
+                            data: {
+                                id: `edge::${e.source}::${e.target}::${e.type}`,
+                                source: e.source,
+                                target: e.target,
+                                type: e.type,
+                            }
+                        });
+                    });
+
+                    cy.add(elements);
+                    cy.endBatch();
+
+                    // Apply visibility based on toggle
+                    applyVisibility();
+                    runLayout();
+                }
+
+                // ===== Apply visibility =====
+                function applyVisibility() {
+                    if (!cy) return;
+                    cy.startBatch();
+                    cy.elements().removeClass('hidden');
+
+                    // Node kinds
+                    if (!showObjectType.value) {
+                        cy.nodes('[kind="ObjectType"]').addClass('hidden');
+                    }
+                    if (!showObjectField.value) {
+                        cy.nodes('[kind="ObjectField"]').addClass('hidden');
+                    }
+                    if (!showEnumType.value) {
+                        cy.nodes('[kind="EnumType"]').addClass('hidden');
+                    }
+
+                    // Edge types
+                    if (!showHasField.value) {
+                        cy.edges('[type="HAS_FIELD"]').addClass('hidden');
+                    }
+                    if (!showRefersTo.value) {
+                        cy.edges('[type="REFERS_TO"]').addClass('hidden');
+                    }
+                    if (!showHasList.value) {
+                        cy.edges('[type="HAS_LIST"]').addClass('hidden');
+                    }
+                    if (!showUsesEnum.value) {
+                        cy.edges('[type="USES_ENUM"]').addClass('hidden');
+                    }
+
+                    // Collapsed objects
+                    collapsedObjects.value.forEach(objLabel => {
+                        cy.nodes(`[kind="ObjectField"][objectType="${objLabel}"]`).addClass('hidden');
+                        cy.edges(`[type="HAS_FIELD"][source="obj::${objLabel}"]`).addClass('hidden');
+                    });
+
+                    // Edges where both endpoints are hidden
+                    cy.edges().forEach(e => {
+                        if (e.source().hasClass('hidden') || e.target().hasClass('hidden')) {
+                            e.addClass('hidden');
+                        }
+                    });
+                    cy.endBatch();
+                }
+
+                // ===== Run layout =====
+                function runLayout() {
+                    if (!cy) return;
+                    const visibleNodes = cy.nodes(':visible');
+                    if (visibleNodes.length === 0) return;
+
+                    let layoutConfig;
+                    if (layoutMode.value === 'dagre') {
+                        layoutConfig = {
+                            name: 'dagre',
+                            rankDir: 'LR',
+                            rankSep: 60,
+                            nodeSep: 20,
+                            padding: 40,
+                            animate: true,
+                            animationDuration: 600,
+                        };
+                    } else {
+                        layoutConfig = {
+                            name: 'cose',
+                            animate: true,
+                            animationDuration: 800,
+                            nodeRepulsion: () => 8000,
+                            idealEdgeLength: () => 80,
+                            edgeElasticity: () => 0.4,
+                            gravity: 1,
+                            numIter: 1000,
+                            coolingFactor: 0.99,
+                            padding: 40,
+                            componentSpacing: 80,
+                        };
+                    }
+
+                    cy.layout(layoutConfig).run();
+                    setTimeout(() => cy.fit(cy.elements(':visible'), 60), layoutMode.value === 'cose' ? 1000 : 700);
+                }
+
+                // ===== Fit / relayout =====
+                function fitGraph() {
+                    if (!cy) return;
+                    cy.animate({ fit: { eles: cy.elements(':visible'), padding: 60 } }, { duration: 400 });
+                }
+
+                function relayout() {
+                    runLayout();
+                }
+
+                // ===== Search =====
+                let searchTimer = null;
+                function handleSearch() {
+                    clearTimeout(searchTimer);
+                    searchTimer = setTimeout(doSearch, 300);
+                }
+
+                function doSearch() {
+                    if (!cy) return;
+                    cy.elements().removeClass('search-highlight deduce-path-node deduce-path-edge');
+                    const q = searchQuery.value.trim().toLowerCase();
+                    if (!q) return;
+                    cy.nodes().forEach(n => {
+                        const label = (n.data('label') || '').toLowerCase();
+                        const title = (n.data('title') || '').toLowerCase();
+                        if (label.includes(q) || title.includes(q)) {
+                            n.addClass('search-highlight');
+                        }
+                    });
+                    const matched = cy.nodes('.search-highlight');
+                    if (matched.length > 0) {
+                        cy.animate({ fit: { eles: matched, padding: 80 } }, { duration: 500 });
+                    }
+                }
+
+                function clearSearch() {
+                    searchQuery.value = '';
+                    if (cy) cy.elements().removeClass('search-highlight deduce-path-node deduce-path-edge');
+                }
+
+                // ===== Collapse / expand object =====
+                function toggleCollapseObject(objLabel) {
+                    if (collapsedObjects.value.has(objLabel)) {
+                        collapsedObjects.value.delete(objLabel);
+                    } else {
+                        collapsedObjects.value.add(objLabel);
+                    }
+                    applyVisibility();
+                }
+
+                function collapseExpandObject(objLabel) {
+                    toggleCollapseObject(objLabel);
+                }
+
+                // ===== Focus node =====
+                function focusNode(nodeId) {
+                    if (!cy) return;
+                    const node = cy.getElementById(nodeId);
+                    if (node && node.length > 0) {
+                        cy.animate({ center: { eles: node }, zoom: 1.5 }, { duration: 400 });
+                    }
+                }
+
+                function focusObject(objLabel) {
+                    focusNode('obj::' + objLabel);
+                }
+
+                // ===== Download =====
+                function downloadGraph() {
+                    if (!cy) return;
+                    const png64 = cy.png({ bg: '#0b1120', full: true, scale: 2 });
+                    const a = document.createElement('a');
+                    a.href = png64;
+                    a.download = 'neo4j_graph.png';
+                    a.click();
+                }
+
+                // ===== NL2MVEL Deduce =====
+                watch(selectedNode, (newVal, oldVal) => {
+                    if (!newVal || !oldVal || newVal.id !== oldVal.id) {
+                        deduceResult.value = null;
+                        // 可选：也可清空 deduuceKeyword.value = ''
+                    }
+                });
+
+                watch(searchQuery, newVal => {
+                    if (newVal) {
+                        globalDeduceResult.value = null; // 搜索图节点时隐藏全局推演框
+                    }
+                });
+
+                async function runDeduce() {
+                    if (!selectedNode.value || selectedNode.value.kind !== 'ObjectType') return;
+                    if (!deduceKeyword.value.trim()) {
+                        ElMessage.warning('请输入推演搜索关键词');
+                        return;
+                    }
+                    deducing.value = true;
+                    deduceResult.value = null;
+
+                    // Reset highlights
+                    if (cy) cy.elements().removeClass('search-highlight deduce-path-node deduce-path-edge');
+                    globalDeduceResult.value = null;
+
+                    try {
+                        const obj = selectedNode.value.label;
+                        const resp = await fetch(`/api/neo4j/deducePath?baseObject=${encodeURIComponent(obj)}&keyword=${encodeURIComponent(deduceKeyword.value.trim())}&maxDepth=3`);
+                        if (!resp.ok) throw new Error('推演请求失败 HTTP ' + resp.status);
+
+                        const data = await resp.json();
+                        deduceResult.value = data;
+
+                        // 高亮路径
+                        if (data.success && data.pathNodes && data.pathNodes.length > 0) {
+                            highlightPath(data.pathNodes);
+                        }
+                    } catch (e) {
+                        deduceResult.value = { success: false, message: e.message };
+                    } finally {
+                        deducing.value = false;
+                    }
+                }
+
+                // Global Deduce
+                async function runGlobalDeduce() {
+                    const kw = globalDeduceKeyword.value.trim();
+                    if (!kw) {
+                        ElMessage.warning('请输入智能推演业务意图');
+                        return;
+                    }
+                    globalDeducing.value = true;
+                    globalDeduceResult.value = null;
+
+                    if (cy) {
+                        cy.elements().removeClass('search-highlight deduce-path-node deduce-path-edge');
+                    }
+                    deduceResult.value = null;
+                    selectedNode.value = null;
+
+                    try {
+                        const resp = await fetch(`/api/neo4j/deducePath?keyword=${encodeURIComponent(kw)}&maxDepth=3`);
+                        if (!resp.ok) throw new Error('全局推演失败 HTTP ' + resp.status);
+
+                        const data = await resp.json();
+                        globalDeduceResult.value = data;
+
+                        if (data.success && data.pathNodes && data.pathNodes.length > 0) {
+                            // ----- 关键：自动加载以 baseObject 为中心的图谱 -----
+                            const anchorObj = data.baseObject || '';  // 后端返回的锚定起点对象名
+
+                            // 先用推演出的 baseObject 来加载局部图
+                            ElMessage.info(`🔍 正在自动加载 [${anchorObj || '全局'}] 相关图谱…`);
+                            await loadGraphForObject(anchorObj);
+
+                            // 图谱加载完后高亮路径
+                            await nextTick();
+                            setTimeout(() => {
+                                highlightPath(data.pathNodes);
+                            }, 400); // 给 Cytoscape 布局留点时间
+                        }
+                    } catch (e) {
+                        globalDeduceResult.value = { success: false, message: e.message };
+                    } finally {
+                        globalDeducing.value = false;
+                    }
+                }
+
+                // 以某个对象为中心加载图谱（复用 loadGraph 逻辑，临时覆盖过滤条件）
+                async function loadGraphForObject(objectName) {
+                    if (!cy) { initCy(); }
+                    loading.value = true;
+                    hasData.value = false;
+                    try {
+                        const params = new URLSearchParams();
+                        if (objectName) params.append('objectName', objectName);
+                        // 其他过滤条件保持用户的设定
+                        if (filterAppName.value.trim()) params.append('appName', filterAppName.value.trim());
+                        params.append('maxFields', String(maxFields.value));
+
+                        const resp = await fetch('/api/neo4j/graph?' + params.toString());
+                        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                        rawData = await resp.json();
+
+                        stats.value = rawData.stats;
+                        renderGraph(rawData);
+                        hasData.value = true;
+                    } catch (e) {
+                        ElMessage.error('自动加载图谱失败: ' + e.message);
+                        console.error(e);
+                    } finally {
+                        loading.value = false;
+                    }
+                }
+
+                // 通用路径高亮与居中
+                function highlightPath(nodeIds) {
+                    if (!cy) return;
+                    cy.batch(() => {
+                        cy.elements().removeClass('deduce-path-node deduce-path-edge');
+                        const elesToFit = cy.collection();
+
+                        for (let i = 0; i < nodeIds.length; i++) {
+                            const nId = nodeIds[i];
+                            const nEle = cy.getElementById(nId);
+                            if (nEle.length > 0) {
+                                nEle.addClass('deduce-path-node');
+                                elesToFit.merge(nEle);
+                                // If not last node, find edge to next node
+                                if (i < nodeIds.length - 1) {
+                                    const nextId = nodeIds[i + 1];
+                                    const edges = nEle.edgesWith(cy.getElementById(nextId));
+                                    if (edges.length > 0) {
+                                        edges.addClass('deduce-path-edge');
+                                        elesToFit.merge(edges);
+                                    }
+                                }
+                                // Ensure parent object is not collapsed if this is an ObjectField
+                                if (nEle.data('kind') === 'ObjectField') {
+                                    const pObj = nEle.data('objectType');
+                                    if (collapsedObjects.value.has(pObj)) {
+                                        toggleCollapseObject(pObj);
+                                    }
+                                }
+                            }
+                        }
+                        if (elesToFit.length > 0) {
+                            setTimeout(() => {
+                                cy.animate({ fit: { eles: elesToFit, padding: 80 } }, { duration: 600 });
+                            }, 50);
+                        }
+                    });
+                }
+
+                // ===== Watch layout mode =====
+                watch(layoutMode, () => {
+                    if (hasData.value) runLayout();
+                });
+
+                onMounted(() => {
+                    initCy();
+                });
+
+                return {
+                    isSidebarCollapsed,
+                    filterAppName, filterObjectName,
+                    maxFields, layoutMode,
+                    showHasField, showRefersTo, showHasList, showUsesEnum,
+                    showObjectType, showObjectField, showEnumType,
+                    loading, hasData, stats,
+                    selectedNode, searchQuery,
+                    deduceKeyword, deducing, deduceResult, runDeduce,
+                    globalDeduceKeyword, globalDeducing, globalDeduceResult, runGlobalDeduce,
+                    loadGraph, fitGraph, relayout,
+                    handleSearch, clearSearch,
+                    applyVisibility,
+                    collapseExpandObject, focusNode, focusObject,
+                    downloadGraph,
+                };
+            }
+        })
+            .use(ElementPlus)
+            .use(ElementPlusIconsVue)
+            .mount('#app');
+    </script>
+</body>
+
+</html>

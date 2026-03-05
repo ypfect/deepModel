@@ -129,7 +129,8 @@ public class ImpactController {
         int count = 0;
         for (BaseappObjectField f : all) {
             String app = f.getAppName();
-            if (app == null) continue;
+            if (app == null)
+                continue;
             String a = app.toLowerCase(Locale.ROOT);
             if (a.equals(target) || a.startsWith(target) || a.contains(target)) {
                 count++;
@@ -170,11 +171,12 @@ public class ImpactController {
      * 后端从远程库加载 baseapp_object_field + object_type，再与本地当前定义做差异分析。
      *
      * 支持指定「基准库」：
-     * - localAsBase = true  => 基准库 = 本地 Spring Boot 数据源，比较库 = 远程
+     * - localAsBase = true => 基准库 = 本地 Spring Boot 数据源，比较库 = 远程
      * - localAsBase = false => 基准库 = 远程，比较库 = 本地（兼容原有语义）
      */
     @PostMapping("/api/impact/snapshot/diff/remote")
-    public SnapshotService.VersionDiff diffRemote(@org.springframework.web.bind.annotation.RequestBody RemoteRequest req)
+    public SnapshotService.VersionDiff diffRemote(
+            @org.springframework.web.bind.annotation.RequestBody RemoteRequest req)
             throws Exception {
         List<String> apps = parseAppNames(req.appName);
         boolean localAsBase = req.localAsBase == null ? false : req.localAsBase;
@@ -477,7 +479,8 @@ public class ImpactController {
 
     /**
      * 批量生成升级脚本：多根合并图 + 拓扑排序，一次请求返回整份脚本。
-     * POST body: { "roots": [ { "objectType", "field" }, ... ], "depth": 3, "relTypes": "intra,writeBack" }
+     * POST body: { "roots": [ { "objectType", "field" }, ... ], "depth": 3,
+     * "relTypes": "intra,writeBack" }
      */
     @PostMapping(value = "/api/impact/upgradeScript/batch", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<String> generateUpgradeScriptBatch(@RequestBody UpgradeScriptBatchRequest req) {
@@ -502,7 +505,8 @@ public class ImpactController {
                 latestFieldDefs = new LinkedHashMap<>();
                 for (BaseappObjectField f : compareFields) {
                     String obj = f.getObjectType();
-                    if (obj == null) continue;
+                    if (obj == null)
+                        continue;
                     // 以 apiName（camelCase）为主键，name（snake_case）为辅键，都存入，方便双格式查找
                     if (f.getApiName() != null && !f.getApiName().trim().isEmpty()) {
                         latestFieldDefs.put(obj + "." + f.getApiName().trim(), f);
@@ -557,7 +561,8 @@ public class ImpactController {
                 }
             }
         }
-        if (roots.isEmpty()) return new GraphModels.Graph();
+        if (roots.isEmpty())
+            return new GraphModels.Graph();
         int depth = req.depth != null && req.depth > 0 ? req.depth : 3;
         int relType = 4; // intra + writeBack only，排除 view
         return analyzerService.buildMultiRootClosedGraph(roots, depth, relType);
@@ -646,5 +651,40 @@ public class ImpactController {
                 "document.getElementById('btn').onclick=load; load();\n" +
                 "})();</script>" +
                 "</body></html>";
+    }
+
+    /**
+     * Neo4j 风格对象-字段图谱数据接口。
+     *
+     * @param appName    按 appName 过滤（支持逗号分隔多个），为空则不过滤
+     * @param objectName 只展示指定对象（逗号分隔），为空则全部
+     * @param maxFields  最多返回多少字段节点（默认 500）
+     */
+    @GetMapping("/api/neo4j/graph")
+    public ImpactAnalyzerService.Neo4jGraph neo4jGraph(
+            @RequestParam(required = false) String appName,
+            @RequestParam(required = false) String objectName,
+            @RequestParam(value = "maxFields", defaultValue = "500") int maxFields) {
+        return analyzerService.buildObjectFieldGraph(appName, objectName, maxFields);
+    }
+
+    /**
+     * NL2MVEL: 自然语言到级联表达式的图推演。
+     * 给定起点对象和自然语言关键词，自动分词并在图谱中寻找最短路径，
+     * 最终拼接成例如 project.category.name 这样的合法 MVEL 表达式。
+     * 
+     * [Global升级]: 如果 baseObject 为空，则触发全图自动选址算法。
+     */
+    @GetMapping("/api/neo4j/deducePath")
+    public ImpactAnalyzerService.DeduceResult deducePath(
+            @RequestParam(required = false) String baseObject,
+            @RequestParam String keyword,
+            @RequestParam(value = "maxDepth", defaultValue = "3") int maxDepth) {
+
+        if (baseObject == null || baseObject.trim().isEmpty()) {
+            return analyzerService.globalDeduceExpressionPath(keyword, maxDepth);
+        } else {
+            return analyzerService.deduceExpressionPath(baseObject, keyword, maxDepth);
+        }
     }
 }
