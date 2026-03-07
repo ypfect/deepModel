@@ -14,6 +14,7 @@
     <result property="triggerExpr" column="trigger_expr"/>
     <result property="virtualExpr" column="virtual_expr"/>
     <result property="writeBackExpr" column="write_back_expr" jdbcType="OTHER"/>
+    <result property="referInfo" column="refer_info" jdbcType="OTHER"/>
     <result property="appName" column="app_name"/>
   </resultMap>
 
@@ -29,6 +30,7 @@
            f.trigger_expr,
            f.virtual_expr,
            f.write_back_expr::text as write_back_expr,
+           f.refer_info::text as refer_info,
            t.app_name
     from baseapp_object_field f
     left join baseapp_object_type t on f.object_type = t.name
@@ -48,6 +50,7 @@
            f.trigger_expr,
            f.virtual_expr,
            f.write_back_expr::text as write_back_expr,
+           f.refer_info::text as refer_info,
            t.app_name
     from baseapp_object_field f
     left join baseapp_object_type t on f.object_type = t.name
@@ -66,6 +69,7 @@
            f.trigger_expr,
            f.virtual_expr,
            f.write_back_expr::text as write_back_expr,
+           f.refer_info::text as refer_info,
            t.app_name
     from baseapp_object_field f
     left join baseapp_object_type t on f.object_type = t.name

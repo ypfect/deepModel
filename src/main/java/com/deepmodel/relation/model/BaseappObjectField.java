@@ -12,6 +12,7 @@ public class BaseappObjectField {
     private String triggerExpr;
     private String virtualExpr;
     private String writeBackExpr;
+    private String referInfo;
 
     // Reference relation
     private String refObjectType;
@@ -121,5 +122,13 @@ public class BaseappObjectField {
 
     public void setRefObjectType(String refObjectType) {
         this.refObjectType = refObjectType;
+    }
+
+    public String getReferInfo() {
+        return referInfo;
+    }
+
+    public void setReferInfo(String referInfo) {
+        this.referInfo = referInfo;
     }
 }

@@ -1,0 +1,53 @@
+# Neo4j 图可视化界面实现任务
+
+## 目标
+在对象字段分析服务中，新增一个以 Neo4j 风格展示「对象-字段」关系图的独立界面。
+
+## 任务清单
+
+### 规划阶段
+- [x] 阅读参考文档（Analyzing Neo4j Data Sync.md）
+- [x] 分析现有项目结构：HTML页面、API接口、数据模型
+- [x] 制定实现计划并等待用户审批
+
+### 后端实现
+- [x] 在 [ImpactAnalyzerService](file:///Users/pengfyu/advance/deepModel/src/main/java/com/deepmodel/relation/service/ImpactAnalyzerService.java#29-2001) 中新增 [buildObjectFieldGraph()](file:///Users/pengfyu/advance/deepModel/src/main/java/com/deepmodel/relation/service/ImpactAnalyzerService.java#715-915) 方法
+  - Neo4jGraph / Neo4jNode / Neo4jEdge / Neo4jStats DTO
+  - HAS_FIELD 关系（对象→字段）
+  - REFERS_TO 关系（writeBack 跨对象引用）
+  - appName / objectName 过滤、maxFields 限制
+- [x] 在 `ImpactController` 中新增 `/api/neo4j/graph` 接口
+
+### 前端实现
+- [x] 新建 [neo4j.html](file:///Users/pengfyu/advance/deepModel/src/main/resources/static/neo4j.html) 页面（深色主题）
+  - Cytoscape.js 图谱（cose力导向 + dagre层次布局）
+  - ObjectType 蓝色节点、ObjectField 绿色节点、有公式字段金色节点
+  - HAS_FIELD 灰色边、REFERS_TO 绿色标注边
+  - 右侧详情抽屉（点击节点显示）
+  - 搜索高亮、AppName/对象过滤
+  - 折叠/展开对象字段、导出图片
+
+### 终极功能：基于自然语言的图寻址推演引擎
+- [x] 后端：新增枚举值与字典图关 (USES_ENUM)
+- [x] 后端：新增主子表结构关联 (HAS_LIST)
+- [x] 后端：基于目标词字符的脱水提取与核心相似度打分模块
+- [x] 后端：实体锚定与图边界探测算法
+- [x] 后端：多跳最短连通图寻径 (BFS) 与 MVEL 拼接逻辑
+- [x] API：新增 `/api/neo4j/deducePath` 智能推演端点
+- [x] 前端：侧边栏“智能表达式推演”测试面板
+- [x] 前端：推演结果展示、报错提示、动态高亮激光链路的展示效果
+
+### 全新阶段：集成真实 Neo4j 数据库与高级 NLP 检索
+- [x] 后端架构：在 [pom.xml](file:///Users/pengfyu/advance/deepModel/pom.xml) 中引入 `neo4j-java-driver`，应用配置 Neo4j 地址
+- [x] 核心查询重构：移植 `ai-server` 中的 [neo4j_impl.py](file:///Users/pengfyu/workspace/77ai/front/ai-server/apps/agents/src/qiqiai/agents/meta_retrieval/graph_db/implementations/neo4j_impl.py) 设计，使用 Cypher 进行自然语言检索
+  - 在 Cypher 中实现字词匹配 (`CONTAINS`) 和条件评分 (`CASE WHEN ... THEN 0.8`)
+  - 核心业务词（"行", "明细", "信息"）脱水提取
+- [x] 流程打通：让 [globalDeduceExpressionPath](file:///Users/pengfyu/advance/deepModel/src/main/java/com/deepmodel/relation/service/ImpactAnalyzerService.java#1805-1827) 使用外部图数据库检索出的最佳起步对象，并联动图谱展示
+- [x] 部署指引：协助启动 `ai-server` 的 Neo4j 容器 ([docker-compose-with-apoc.yml](file:///Users/pengfyu/workspace/77ai/front/ai-server/docker-compose-with-apoc.yml)) 并运行数据同步脚本
+- [x] 深度推演逻辑优化：解决跨表层级打分不足、路径被浅层匹配拦截的问题
+  - [x] 在 [PathState](file:///Users/pengfyu/advance/deepModel/src/main/java/com/deepmodel/relation/service/ImpactAnalyzerService.java#1784-1804) 中引入 `bonusScore` 机制，向下传递匹配红利
+  - [x] 集成 [refer_info](file:///Users/pengfyu/workspace/77ai/front/ai-server/apps/agents/src/qiqiai/agents/meta_retrieval/utils.py#75-89) 元数据，打通基于主外键引用的自动跨对象 JUMP 逻辑
+  - [x] 性能调优：引入 `PriorityQueue` 实现启发式搜索 (Best-First)，新增环路检测与 Iteration 上限 (10000)
+  - [x] 调优分词与打分权重系数，确保深度长路径的得分能超过浅层误匹配
+- [x] 验证：确认 “应收合同标的的项目分类” 能够准确推演出 `projectId.categoryId` 路径
+

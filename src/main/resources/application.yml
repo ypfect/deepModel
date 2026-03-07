@@ -7,6 +7,11 @@ writeback-sql:
   tenant-id: 711FNX50G6V0009
 #连接数据库
 spring:
+  neo4j:
+    uri: bolt://localhost:7687
+    authentication:
+      username: neo4j
+      password: ypfect93
   datasource:
     url: jdbc:postgresql://localhost:5432/testapp
 #    url: jdbc:postgresql://postgres.test-tx-16.e7link.com:5432/tenant-public
@@ -25,3 +30,6 @@ logging:
   level:
     root: INFO
     com.deepmodel.relation: DEBUG
+
+# 连接外部独立的 Neo4j 图数据库配置已合并至上方
+

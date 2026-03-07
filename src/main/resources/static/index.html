@@ -1,26 +1,32 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
   <title>DeepModel Insight</title>
   <link rel="icon" type="image/svg+xml"
-        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='0.5' stop-color='%236366f1'/%3E%3Cstop offset='1' stop-color='%23a855f7'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='18' height='18' rx='4' fill='url(%23g)'/%3E%3Cpath d='M8 15.5 10.8 9l2.4 6 1.8-3.5L17 15.5' fill='none' stroke='%23f9fafb' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='0.5' stop-color='%236366f1'/%3E%3Cstop offset='1' stop-color='%23a855f7'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='18' height='18' rx='4' fill='url(%23g)'/%3E%3Cpath d='M8 15.5 10.8 9l2.4 6 1.8-3.5L17 15.5' fill='none' stroke='%23f9fafb' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
   <style>
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
       padding: 0;
-      font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
       height: 100vh;
       overflow: hidden;
     }
+
     .app-shell {
       display: flex;
       height: 100%;
       position: relative;
     }
+
     .sidebar {
       width: 220px;
       background: #1f2933;
@@ -31,11 +37,13 @@
       overflow: hidden;
       transition: width 0.2s ease;
     }
+
     .app-shell.collapsed .sidebar {
       width: 0;
       padding-top: 0;
       border-right: none;
     }
+
     .sidebar-logo {
       padding: 14px 16px 10px;
       display: flex;
@@ -45,27 +53,31 @@
       font-weight: 650;
       color: #e5e7eb;
     }
+
     .sidebar-logo-icon {
       width: 26px;
       height: 26px;
       border-radius: 8px;
-      background: radial-gradient(circle at 0 0,#38bdf8,#6366f1 45%,#a855f7 100%);
-      box-shadow: 0 0 0 1px rgba(15,23,42,0.2), 0 8px 18px rgba(15,23,42,0.55);
+      background: radial-gradient(circle at 0 0, #38bdf8, #6366f1 45%, #a855f7 100%);
+      box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.2), 0 8px 18px rgba(15, 23, 42, 0.55);
       position: relative;
       overflow: hidden;
     }
+
     .sidebar-logo-icon::after {
       content: '';
       position: absolute;
       inset: 4px;
       border-radius: 6px;
-      border: 1px solid rgba(248,250,252,0.6);
-      box-shadow: inset 0 0 0 1px rgba(15,23,42,0.15);
+      border: 1px solid rgba(248, 250, 252, 0.6);
+      box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.15);
     }
+
     .menu {
       flex: 1;
       padding-top: 8px;
     }
+
     .menu-item {
       display: flex;
       align-items: center;
@@ -74,33 +86,39 @@
       font-size: 13px;
       color: #cbd5f5;
       cursor: pointer;
-      transition: background 0.15s,color 0.15s;
+      transition: background 0.15s, color 0.15s;
     }
+
     .menu-item-icon {
       width: 18px;
       text-align: center;
       font-size: 16px;
       opacity: 0.9;
     }
+
     .menu-item.active {
       background: #334155;
       color: #ffffff;
       box-shadow: inset 2px 0 0 #3b82f6;
     }
+
     .menu-item:hover {
       background: #273549;
     }
+
     .content {
       flex: 1;
       background: #f8fafc;
       border-left: 1px solid #e2e8f0;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
     }
+
     .content iframe {
       border: none;
       width: 100%;
       height: 100%;
     }
+
     .sidebar-toggle {
       position: absolute;
       top: 10px;
@@ -119,14 +137,16 @@
       padding: 0;
       font-size: 12px;
       color: #64748b;
-      box-shadow: 2px 0 6px rgba(15,23,42,0.12);
+      box-shadow: 2px 0 6px rgba(15, 23, 42, 0.12);
       transition: left 0.2s ease;
     }
+
     .app-shell.collapsed .sidebar-toggle {
       left: 0;
     }
   </style>
 </head>
+
 <body>
   <div class="app-shell">
     <button class="sidebar-toggle" id="sidebar-toggle" title="展开/折叠侧边菜单">«</button>
@@ -143,6 +163,10 @@
         <div class="menu-item" data-page="cross.html">
           <div class="menu-item-icon">🔁</div>
           <span>跨对象来源分析</span>
+        </div>
+        <div class="menu-item" data-page="neo4j.html">
+          <div class="menu-item-icon">🕸️</div>
+          <span>NEO4J 对象图谱</span>
         </div>
         <div class="menu-item" data-page="management.html">
           <div class="menu-item-icon">🛠️</div>
@@ -181,5 +205,5 @@
     }
   </script>
 </body>
-</html>
 
+</html>

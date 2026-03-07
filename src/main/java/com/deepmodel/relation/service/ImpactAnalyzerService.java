@@ -45,6 +45,11 @@ public class ImpactAnalyzerService {
     private final Map<String, List<BaseappObjectField>> rowsByObject = new ConcurrentHashMap<String, List<BaseappObjectField>>();
     // 缓存对象标题: objectType -> title
     private final Map<String, String> objectTitles = new ConcurrentHashMap<>();
+    private final Map<String, String> enumTypes = new HashMap<>();
+    private final Map<String, String> objectLabels = new HashMap<>(); // objectName -> 描述标签
+
+    @Autowired
+    private Neo4jSearchFacade neo4jSearchFacade;
     // bill 类型对象集合（来自 baseapp_object_type.type='bill'）
     private volatile Set<String> billObjectTypes = Collections.emptySet();
 
@@ -707,6 +712,340 @@ public class ImpactAnalyzerService {
         public int edgeCount;
     }
 
+    // ===== 预检索 DTO（对标 ai-server get_memory_message） =====
+
+    public static class PreRetrieveResult {
+        public List<String> words = new ArrayList<>();
+        public List<ObjectCandidate> objectCandidates = new ArrayList<>();
+        public List<RelationItem> relations = new ArrayList<>();
+        public List<FieldCandidate> fieldCandidates = new ArrayList<>();
+        /** Phase 3: 复杂关系模板（REFERENCE_FIELD、SUBTABLE_FIELD） */
+        public List<ComplexRelationItem> complexRelations = new ArrayList<>();
+    }
+
+    /** Phase 3: 复杂关系模板项，用于 REFERENCE_FIELD / SUBTABLE_FIELD 等多跳路径 */
+    public static class ComplexRelationItem {
+        public String templateType;      // "REFERENCE_FIELD" | "SUBTABLE_FIELD"
+        public String mainObjectType;
+        public String mainObjectTitle;
+        public String targetObjectType;
+        public String targetObjectTitle;
+        public String refFieldName;      // 外键/关联字段名（REFERENCE 时）
+        public String targetFieldName;
+        public String targetFieldTitle;
+        public double matchScore;
+    }
+
+    public static class ObjectCandidate {
+        public String name;
+        public String title;
+        public double similarity;
+    }
+
+    public static class RelationItem {
+        public String relationType; // "FIELD_REFERS_TO" | "HAS_LIST
+        public String sourceObjectType;
+        public String sourceObjectTitle;
+        public String targetObjectType;
+        public String targetObjectTitle;
+        public String fieldName;
+        public String fieldTitle;
+    }
+
+    public static class FieldCandidate {
+        public String objectType;
+        public String objectTypeTitle;
+        public String field;
+        public String title;
+        public double matchScore;
+    }
+
+    /**
+     * 预检索：返回与 ai-server get_memory_message 等价的结构化预检索结果，供 deducePath 或前端作为上下文使用。
+     *
+     * @param keyword          必填，自然语言关键词
+     * @param tenantId         可选，Neo4j 租户过滤（若 Neo4j 无此字段则忽略）
+     * @param appName          可选，按 appName 过滤
+     * @param maxObjectResults 对象候选最大数量
+     * @param maxRelationResults 关系最大数量
+     * @param maxFieldResults  字段候选最大数量
+     */
+    public PreRetrieveResult preRetrieve(String keyword, String tenantId, String appName,
+            int maxObjectResults, int maxRelationResults, int maxFieldResults) {
+        PreRetrieveResult result = new PreRetrieveResult();
+        if (keyword == null || keyword.trim().isEmpty()) {
+            return result;
+        }
+
+        // 1. 分词
+        com.huaban.analysis.jieba.JiebaSegmenter segmenter = com.deepmodel.relation.util.JiebaUtils.getSegmenter();
+        List<String> tokens = segmenter.sentenceProcess(keyword.trim());
+        Set<String> stopWords = new HashSet<>(GLOBAL_STOP_WORDS);
+        for (String t : tokens) {
+            String trimmed = t.trim();
+            if (trimmed.length() >= 1 && !stopWords.contains(trimmed)) {
+                result.words.add(trimmed);
+            }
+        }
+        if (result.words.isEmpty()) {
+            result.words.add(keyword.trim());
+        }
+
+        // 2. 对象候选：优先 Neo4j topK，失败则用 objectTitles + keyword 模糊匹配
+        try {
+            List<Map<String, Object>> neo4jObjs = neo4jSearchFacade.findTopKBaseObjectsByCypher(keyword, maxObjectResults);
+            if (!neo4jObjs.isEmpty()) {
+                for (Map<String, Object> m : neo4jObjs) {
+                    ObjectCandidate oc = new ObjectCandidate();
+                    oc.name = (String) m.get("name");
+                    oc.title = m.get("title") != null ? String.valueOf(m.get("title")) : oc.name;
+                    oc.similarity = m.get("similarity") != null ? ((Number) m.get("similarity")).doubleValue() : 0.8;
+                    result.objectCandidates.add(oc);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Neo4j 对象预检索失败，回退到内存匹配: {}", e.getMessage());
+        }
+        if (result.objectCandidates.isEmpty()) {
+            for (Map.Entry<String, String> e : objectTitles.entrySet()) {
+                String objName = e.getKey();
+                String objTitle = e.getValue();
+                if (objTitle == null) objTitle = objName;
+                double score = 0;
+                for (String w : result.words) {
+                    if (objTitle.contains(w) || objName.toLowerCase(Locale.ROOT).contains(w.toLowerCase(Locale.ROOT))) {
+                        score += 0.5;
+                    }
+                }
+                if (score > 0 && result.objectCandidates.size() < maxObjectResults) {
+                    ObjectCandidate oc = new ObjectCandidate();
+                    oc.name = objName;
+                    oc.title = objTitle;
+                    oc.similarity = Math.min(score, 1.0);
+                    result.objectCandidates.add(oc);
+                }
+            }
+            result.objectCandidates.sort((a, b) -> Double.compare(b.similarity, a.similarity));
+            if (result.objectCandidates.size() > maxObjectResults) {
+                result.objectCandidates = new ArrayList<>(result.objectCandidates.subList(0, maxObjectResults));
+            }
+        }
+
+        // 3. 对象间关系：从 rowsByObject 解析 writeBack / referInfo
+        Set<String> objSet = new HashSet<>();
+        for (ObjectCandidate oc : result.objectCandidates) {
+            objSet.add(oc.name);
+        }
+        if (objSet.isEmpty()) {
+            objSet.addAll(rowsByObject.keySet());
+        }
+        Set<String> relationKeys = new HashSet<>();
+        int relCount = 0;
+        for (String obj : rowsByObject.keySet()) {
+            if (relCount >= maxRelationResults) break;
+            List<BaseappObjectField> fields = rowsByObject.get(obj);
+            if (fields == null) continue;
+            String objTitle = objectTitles.getOrDefault(obj, obj);
+            for (BaseappObjectField f : fields) {
+                if (relCount >= maxRelationResults) break;
+                String camel = canonicalFieldName(f);
+                if (camel == null) continue;
+
+                // REFERS_TO
+                if (f.getReferInfo() != null) {
+                    String refObj = extractRefFromReferInfo(f.getReferInfo());
+                    if (refObj != null && !refObj.equals(obj)) {
+                        String key = obj + "|REFERS_TO|" + refObj + "|" + camel;
+                        if (!relationKeys.add(key)) continue;
+                        RelationItem ri = new RelationItem();
+                        ri.relationType = "FIELD_REFERS_TO";
+                        ri.sourceObjectType = obj;
+                        ri.sourceObjectTitle = objTitle;
+                        ri.targetObjectType = refObj;
+                        ri.targetObjectTitle = objectTitles.getOrDefault(refObj, refObj);
+                        ri.fieldName = camel;
+                        ri.fieldTitle = f.getTitle();
+                        result.relations.add(ri);
+                        relCount++;
+                    }
+                }
+                // HAS_LIST (from writeBack srcObjectType)
+                if (f.getWriteBackExpr() != null) {
+                    WriteBackExpr wb = parseWriteBack(f.getWriteBackExpr());
+                    if (wb != null && wb.getSrcObjectType() != null) {
+                        String srcObj = wb.getSrcObjectType();
+                        if (!srcObj.equals(obj)) {
+                            String key = srcObj + "|HAS_LIST|" + obj;
+                            if (!relationKeys.add(key)) continue;
+                            RelationItem ri = new RelationItem();
+                            ri.relationType = "HAS_LIST";
+                            ri.sourceObjectType = srcObj;
+                            ri.sourceObjectTitle = objectTitles.getOrDefault(srcObj, srcObj);
+                            ri.targetObjectType = obj;
+                            ri.targetObjectTitle = objTitle;
+                            ri.fieldName = camel;
+                            ri.fieldTitle = f.getTitle();
+                            result.relations.add(ri);
+                            relCount++;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. 字段候选：按 keyword 匹配 name/title，带 matchScore
+        List<FieldCandidate> fldList = new ArrayList<>();
+        for (Map.Entry<String, List<BaseappObjectField>> e : rowsByObject.entrySet()) {
+            String objType = e.getKey();
+            String objTitle = objectTitles.getOrDefault(objType, objType);
+            for (BaseappObjectField f : e.getValue()) {
+                String camel = canonicalFieldName(f);
+                if (camel == null) continue;
+                String fTitle = f.getTitle() != null ? f.getTitle() : camel;
+                double score = 0;
+                for (String w : result.words) {
+                    if (fTitle.equals(w)) score += 100;
+                    else if (fTitle.contains(w) || w.contains(fTitle)) score += 50;
+                    else if (camel.toLowerCase(Locale.ROOT).contains(w.toLowerCase(Locale.ROOT))) score += 30;
+                }
+                if (score > 0) {
+                    FieldCandidate fc = new FieldCandidate();
+                    fc.objectType = objType;
+                    fc.objectTypeTitle = objTitle;
+                    fc.field = camel;
+                    fc.title = fTitle;
+                    fc.matchScore = score;
+                    fldList.add(fc);
+                }
+            }
+        }
+        fldList.sort((a, b) -> Double.compare(b.matchScore, a.matchScore));
+        for (int i = 0; i < Math.min(fldList.size(), maxFieldResults); i++) {
+            result.fieldCandidates.add(fldList.get(i));
+        }
+
+        // 5. Phase 3: 复杂关系模板查询
+        List<String> objNames = result.objectCandidates.stream()
+                .map(oc -> oc.name)
+                .collect(Collectors.toList());
+        if (objNames.isEmpty()) {
+            objNames = new ArrayList<>(rowsByObject.keySet());
+        }
+        result.complexRelations = queryComplexRelations(objNames, result.words, 20);
+
+        return result;
+    }
+
+    /**
+     * Phase 3: 复杂关系模板查询。从 rowsByObject 构建 REFERENCE_FIELD / SUBTABLE_FIELD 等多跳路径。
+     *
+     * @param objectTypes 主表对象候选（来自 objectCandidates）
+     * @param fieldWords  字段意图词（来自 words）
+     * @param maxResults  最大返回数量
+     */
+    public List<ComplexRelationItem> queryComplexRelations(List<String> objectTypes, List<String> fieldWords,
+            int maxResults) {
+        List<ComplexRelationItem> out = new ArrayList<>();
+        if (objectTypes == null || objectTypes.isEmpty() || fieldWords == null || fieldWords.isEmpty()) {
+            return out;
+        }
+
+        Set<String> objSet = new HashSet<>(objectTypes);
+        Set<String> seen = new HashSet<>();
+        List<ComplexRelationItem> scored = new ArrayList<>();
+
+        // REFERENCE_FIELD: 主表 -[HAS_FIELD]-> 外键 -[REFERS_TO]-> 从表 -[HAS_FIELD]-> 目标字段
+        for (String mainObj : objSet) {
+            List<BaseappObjectField> fields = rowsByObject.getOrDefault(mainObj, Collections.emptyList());
+            if (fields == null) continue;
+            String mainTitle = objectTitles.getOrDefault(mainObj, mainObj);
+            for (BaseappObjectField f : fields) {
+                if (f.getReferInfo() == null) continue;
+                String refObj = extractRefFromReferInfo(f.getReferInfo());
+                if (refObj == null || refObj.equals(mainObj)) continue;
+                String refFieldCamel = canonicalFieldName(f);
+                if (refFieldCamel == null) continue;
+
+                List<BaseappObjectField> targetFields = rowsByObject.getOrDefault(refObj, Collections.emptyList());
+                for (BaseappObjectField tf : targetFields) {
+                    String targetCamel = canonicalFieldName(tf);
+                    if (targetCamel == null) continue;
+                    String targetTitle = tf.getTitle() != null ? tf.getTitle() : targetCamel;
+                    double score = 0;
+                    for (String w : fieldWords) {
+                        if (targetTitle.equals(w)) score += 100;
+                        else if (targetTitle.contains(w) || w.contains(targetTitle)) score += 50;
+                        else if (targetCamel.toLowerCase(Locale.ROOT).contains(w.toLowerCase(Locale.ROOT))) score += 30;
+                    }
+                    if (score > 0) {
+                        String key = "REF:" + mainObj + ":" + refFieldCamel + ":" + refObj + ":" + targetCamel;
+                        if (!seen.add(key)) continue;
+                        ComplexRelationItem cri = new ComplexRelationItem();
+                        cri.templateType = "REFERENCE_FIELD";
+                        cri.mainObjectType = mainObj;
+                        cri.mainObjectTitle = mainTitle;
+                        cri.targetObjectType = refObj;
+                        cri.targetObjectTitle = objectTitles.getOrDefault(refObj, refObj);
+                        cri.refFieldName = refFieldCamel;
+                        cri.targetFieldName = targetCamel;
+                        cri.targetFieldTitle = targetTitle;
+                        cri.matchScore = score;
+                        scored.add(cri);
+                    }
+                }
+            }
+        }
+
+        // SUBTABLE_FIELD: 主表 -[HAS_LIST]-> 明细 -[HAS_FIELD]-> 目标字段
+        for (String mainObj : objSet) {
+            List<BaseappObjectField> fields = rowsByObject.getOrDefault(mainObj, Collections.emptyList());
+            if (fields == null) continue;
+            String mainTitle = objectTitles.getOrDefault(mainObj, mainObj);
+            for (BaseappObjectField f : fields) {
+                WriteBackExpr wb = parseWriteBack(f.getWriteBackExpr());
+                if (wb == null || wb.getSrcObjectType() == null) continue;
+                String detailObj = wb.getSrcObjectType();
+                if (detailObj.equals(mainObj)) continue;
+                String refFieldCamel = canonicalFieldName(f);
+                if (refFieldCamel == null) continue;
+
+                List<BaseappObjectField> targetFields = rowsByObject.getOrDefault(detailObj, Collections.emptyList());
+                for (BaseappObjectField tf : targetFields) {
+                    String targetCamel = canonicalFieldName(tf);
+                    if (targetCamel == null) continue;
+                    String targetTitle = tf.getTitle() != null ? tf.getTitle() : targetCamel;
+                    double score = 0;
+                    for (String w : fieldWords) {
+                        if (targetTitle.equals(w)) score += 100;
+                        else if (targetTitle.contains(w) || w.contains(targetTitle)) score += 50;
+                        else if (targetCamel.toLowerCase(Locale.ROOT).contains(w.toLowerCase(Locale.ROOT))) score += 30;
+                    }
+                    if (score > 0) {
+                        String key = "SUB:" + mainObj + ":" + detailObj + ":" + targetCamel;
+                        if (!seen.add(key)) continue;
+                        ComplexRelationItem cri = new ComplexRelationItem();
+                        cri.templateType = "SUBTABLE_FIELD";
+                        cri.mainObjectType = mainObj;
+                        cri.mainObjectTitle = mainTitle;
+                        cri.targetObjectType = detailObj;
+                        cri.targetObjectTitle = objectTitles.getOrDefault(detailObj, detailObj);
+                        cri.refFieldName = refFieldCamel;
+                        cri.targetFieldName = targetCamel;
+                        cri.targetFieldTitle = targetTitle;
+                        cri.matchScore = score;
+                        scored.add(cri);
+                    }
+                }
+            }
+        }
+
+        scored.sort((a, b) -> Double.compare(b.matchScore, a.matchScore));
+        for (int i = 0; i < Math.min(scored.size(), maxResults); i++) {
+            out.add(scored.get(i));
+        }
+        return out;
+    }
+
     /**
      * 构建 Neo4j 风格的对象-字段图谱。
      * 节点类型：ObjectType（对象）、ObjectField（字段）
@@ -1011,6 +1350,20 @@ public class ImpactAnalyzerService {
             log.debug("writeBackExpr 解析失败，原始: {}", text);
             return null;
         }
+    }
+
+    private String extractRefFromReferInfo(String referInfo) {
+        if (referInfo == null || referInfo.trim().isEmpty())
+            return null;
+        try {
+            JsonNode node = objectMapper.readTree(referInfo);
+            JsonNode entities = node.get("referEntities");
+            if (entities != null && entities.isArray() && entities.size() > 0) {
+                return optText(entities.get(0), "referEntityName");
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     /**
@@ -1768,84 +2121,43 @@ public class ImpactAnalyzerService {
         String titlesStr; // 用于保存累积中文含义
         List<String> nodeIds; // 路径上经过的 graph node ID 集合
         int depth;
+        double bonusScore;
+        double pathScore; // 路径累积评分，用于 PriorityQueue 排序
 
-        public PathState(String currentObj, String mvelPath, String titlesStr, List<String> nodeIds, int depth) {
+        public PathState(String currentObj, String mvelPath, String titlesStr, List<String> nodeIds, int depth,
+                double bonusScore, double pathScore) {
             this.currentObj = currentObj;
             this.mvelPath = mvelPath;
             this.titlesStr = titlesStr;
             this.nodeIds = new ArrayList<>(nodeIds);
             this.depth = depth;
+            this.bonusScore = bonusScore;
+            this.pathScore = pathScore;
         }
     }
 
     /**
-     * 【Global NL2MVEL】无需指定起点，全局自适应推演
+     * 【Global NL2MVEL】对接独立 Neo4j 图数据库的全局自适应推演
+     * Phase 2: 支持 tenantId、appName 透传，用于 Neo4j 租户/app 过滤
      */
-    public DeduceResult globalDeduceExpressionPath(String keyword, int maxDepth) {
-        // 第一步：全局寻起点
-        String bestBaseObject = findBestBaseObject(keyword);
+    public DeduceResult globalDeduceExpressionPath(String keyword, int maxDepth, String tenantId, String appName) {
+        // 第一步：通过外部 Neo4j 高阶 NLP 查询定位最佳业务起点
+        String bestBaseObject = neo4jSearchFacade.findBestBaseObjectByCypher(keyword, tenantId, appName);
         if (bestBaseObject == null) {
             DeduceResult fail = new DeduceResult();
             fail.success = false;
-            fail.message = "无法从知识图谱中根据词组 [" + keyword + "] 定准任何业务对象，请尝试更换关键词。";
+            fail.message = "无法从 Neo4j 知识图谱中根据词组 [" + keyword + "] 定准任何业务对象，请尝试更换具有指向性的业务词。";
             return fail;
         }
 
-        // 第二步：拿着起点去执行标准的下钻推演
+        // 第二步：拿着准确定位的起点去执行内存连通图的多跳下钻推演寻找 MVEL
         DeduceResult res = deduceExpressionPath(bestBaseObject, keyword, maxDepth);
         res.baseObject = bestBaseObject;
         if (res.success) {
-            res.message = "【全局推断起点为: " + objectTitles.getOrDefault(bestBaseObject, bestBaseObject) + " ("
-                    + bestBaseObject + ")】 " + res.message;
+        } else {
+            res.message = "Neo4j 已定位起点为 [" + bestBaseObject + "]，但在 " + maxDepth + " 跳内未能找到可拼凑的具体字段路径。";
         }
         return res;
-    }
-
-    /**
-     * 在全图中扫描，找到与自然语言关键词关联度最高的对象作为起点
-     */
-    private String findBestBaseObject(String keyword) {
-        JiebaSegmenter segmenter = new JiebaSegmenter();
-        List<String> tokens = segmenter.sentenceProcess(keyword.trim());
-        Set<String> kwTokens = new LinkedHashSet<>();
-        for (String t : tokens) {
-            if (t.length() > 1 && !GLOBAL_STOP_WORDS.contains(t))
-                kwTokens.add(t);
-        }
-        if (kwTokens.isEmpty())
-            kwTokens.add(keyword.trim());
-
-        String bestObj = null;
-        double bestScore = -1;
-
-        // 遍历所有有数据的对象
-        for (String objName : rowsByObject.keySet()) {
-            String title = objectTitles.getOrDefault(objName, objName);
-
-            // 实体名称本身打分
-            double score = 0;
-            for (String kw : kwTokens) {
-                if (title.contains(kw) || objName.toLowerCase().contains(kw.toLowerCase())) {
-                    score += 50;
-                }
-            }
-
-            // 同义词/别名聚合打分（极大地提升跨系统命中的概率）
-            List<String> synonyms = GLOBAL_SYNONYMS.getOrDefault(objName, Collections.emptyList());
-            for (String syn : synonyms) {
-                for (String kw : kwTokens) {
-                    if (syn.contains(kw) || kw.contains(syn)) {
-                        score += 80; // 同义词权重很高
-                    }
-                }
-            }
-
-            if (score > bestScore && score > 0) {
-                bestScore = score;
-                bestObj = objName;
-            }
-        }
-        return bestObj;
     }
 
     /**
@@ -1860,26 +2172,52 @@ public class ImpactAnalyzerService {
             res.message = "起点对象或关键词不可为空";
             return res;
         }
+        // 0. 剥离基准对象名称，防止它对内部“寻找不同字段”的过程造成分歧和干扰
+        String baseTitle = objectTitles.getOrDefault(baseObject, baseObject);
+        String fieldSearchText = keyword.trim();
+        if (fieldSearchText.startsWith(baseTitle) && fieldSearchText.length() > baseTitle.length()) {
+            fieldSearchText = fieldSearchText.substring(baseTitle.length()).trim();
+        } else if (fieldSearchText.endsWith(baseTitle) && fieldSearchText.length() > baseTitle.length()) {
+            fieldSearchText = fieldSearchText.substring(0, fieldSearchText.length() - baseTitle.length()).trim();
+        } else {
+            // 尝试脱除“单”、“表”等后缀的匹配
+            String coreBase = baseTitle;
+            if (coreBase.endsWith("单") || coreBase.endsWith("表")) {
+                coreBase = coreBase.substring(0, coreBase.length() - 1);
+            }
+            if (fieldSearchText.startsWith(coreBase) && fieldSearchText.length() > coreBase.length()) {
+                fieldSearchText = fieldSearchText.substring(coreBase.length()).trim();
+            } else if (fieldSearchText.endsWith(coreBase) && fieldSearchText.length() > coreBase.length()) {
+                fieldSearchText = fieldSearchText.substring(0, fieldSearchText.length() - coreBase.length()).trim();
+            }
+        }
 
-        // 1. Jieba 分词，提取核心词
-        JiebaSegmenter segmenter = new JiebaSegmenter();
-        // 常見业务停用词
+        log.info(
+                "==== DEBUG DEDUCE ==== baseObject: {}, baseTitle: {}, originalKeyword: {}, strippedFieldSearchText: {}",
+                baseObject, baseTitle, keyword, fieldSearchText);
+
+        // 1. 意图解析：使用统一业务词库后的 Jieba 分词
+        com.huaban.analysis.jieba.JiebaSegmenter segmenter = com.deepmodel.relation.util.JiebaUtils.getSegmenter();
+        List<String> tokens = segmenter.sentenceProcess(fieldSearchText);
+
+        // 常用业务停用词
         Set<String> stopWords = new HashSet<>(Arrays.asList(
-                "的", "地", "得", "了", "啊", "啊", "和", "这", "那",
-                "中", "上", "下", "对应的", "并", "所有", "等", "列表",
-                "信息", "详情", "标题", "数据", "汇总", "合计",
+                "的", "地", "得", "了", "啊", "和", "这", "那", "中", "上", "下", "对应的", "并", "所有", "等",
+                "行", "列表", "明细", "子表", "详情", "信息", "数据", "合计", "汇总", "编号",
                 "对应", "相关", "获取", "得到", "返回", "尴展"));
-        List<String> tokens = segmenter.sentenceProcess(keyword.trim());
-        // 脱水：过滤停用词 + 单字运算符
+
+        // 脱水：过滤停用词 + 单字运算符 + 再次防漏剔除与基准对象重名的词
         Set<String> kwTokens = new LinkedHashSet<>();
         for (String t : tokens) {
-            if (t.length() > 1 && !stopWords.contains(t)) {
-                kwTokens.add(t);
+            String trimmed = t.trim();
+            if (trimmed.length() >= 1 && !stopWords.contains(trimmed)
+                    && !trimmed.equals(baseTitle) && !trimmed.equals(baseObject)) {
+                kwTokens.add(trimmed);
             }
         }
         // 如果分词后全没了，回退到原内容整体当一个词
         if (kwTokens.isEmpty()) {
-            kwTokens.add(keyword.trim());
+            kwTokens.add(fieldSearchText.trim());
         }
         String tokensDesc = String.join("|", kwTokens);
 
@@ -1890,15 +2228,16 @@ public class ImpactAnalyzerService {
                 kwChars.add(c);
         }
 
-        // 2. BFS 最短跟数图寻径
-        Queue<PathState> q = new LinkedList<>();
+        // 2. Best-First Search 启发式图寻径 (由 PriorityQueue 驱动，优先搜索得分最高的路径分支)
+        PriorityQueue<PathState> q = new PriorityQueue<>((a, b) -> Double.compare(b.pathScore, a.pathScore));
         List<String> startNodes = new ArrayList<>();
         startNodes.add("obj::" + baseObject);
-        q.add(new PathState(baseObject, "", objectTitles.getOrDefault(baseObject, baseObject), startNodes, 0));
+        q.add(new PathState(baseObject, "", objectTitles.getOrDefault(baseObject, baseObject), startNodes, 0, 0.0,
+                0.0));
 
         double bestScore = -999;
         PathState bestPath = null;
-        int maxIterations = 50000;
+        int maxIterations = 10000; // 下调 iteration 限制，保障 API 响应性能
         int iterations = 0;
 
         while (!q.isEmpty() && iterations < maxIterations) {
@@ -1919,46 +2258,64 @@ public class ImpactAnalyzerService {
                 String fldNodeId = "fld::" + curr.currentObj + "::" + camel;
                 newNodes.add(fldNodeId);
 
-                // ==== Jieba 词级相似度打分 ====
-                // 3a. 对当前字段标题做分词
-                List<String> titleTokens = segmenter.sentenceProcess(fTitle);
-                Set<String> titleTokenSet = new HashSet<>();
-                for (String t : titleTokens) {
-                    if (t.length() > 1 && !stopWords.contains(t))
-                        titleTokenSet.add(t);
+                // 3a. ==== 改用类似 ai-server 的双向 CONTAINS 评分体系 ====
+                double wordScore = 0;
+                for (String kt : kwTokens) {
+                    if (fTitle.equals(kt)) {
+                        wordScore += 60.0; // 核心词完美匹配，极高权重
+                    } else if (fTitle.contains(kt) || kt.contains(fTitle)) {
+                        wordScore += 40.0; // 业务短语模糊匹配（提高权重，让"本币XXX金额"更容易胜出）
+                    }
                 }
 
-                // 3b. 词级交集 (Jieba 分词得到)
-                Set<String> wordIntersect = new HashSet<>(kwTokens);
-                wordIntersect.retainAll(titleTokenSet);
-
-                // 3c. 字符级覆盖率备用（当 Jieba 词匹配为 0 时冬己）
+                // 3b. 字符级覆盖率辅助（处理分词不准的情况）
                 Set<Character> titleChars = new HashSet<>();
                 for (char c : fTitle.toCharArray())
                     titleChars.add(c);
                 Set<Character> charIntersect = new HashSet<>(kwChars);
                 charIntersect.retainAll(titleChars);
                 double charCoverage = !kwChars.isEmpty() ? (double) charIntersect.size() / kwChars.size() : 0;
+                double charBonus = charCoverage * 20.0;
+                double currentMatchScore = wordScore + charBonus;
+                // 3c. Phase 4: refer 字段加权，使「参照字段 -> 目标对象 -> 目标字段」路径更容易胜出
+                if (f.getReferInfo() != null && extractRefFromReferInfo(f.getReferInfo()) != null) {
+                    currentMatchScore += 15.0;
+                }
+                // 注意：这里 MVEL 的叠加在循环开始处已完成 (newMvel)
+                double score = currentMatchScore + curr.bonusScore - newMvel.length() * 0.5 - curr.depth * 30.0;
 
-                // 3d. 评分：词级匹配优先（每个匹中词加 40 分），字符级备用加分，路径长度和深度惩罚
-                double wordScore = wordIntersect.size() * 40.0;
-                double charBonus = charCoverage * 20.0; // 字符覆盖率少量加分避免词分词漏匹
-                double score = wordScore + charBonus - newMvel.length() * 0.3 - curr.depth * 2.0;
-
-                if ((wordIntersect.size() > 0 || charCoverage > 0.3) && score > bestScore) {
+                if ((wordScore > 0 || charCoverage > 0.4) && score > bestScore) {
                     bestScore = score;
-                    bestPath = new PathState(curr.currentObj, newMvel, newTitles, newNodes, curr.depth);
+                    bestPath = new PathState(curr.currentObj, newMvel, newTitles, newNodes, curr.depth, 0.0, score);
                 }
 
-                // 如果有 writeBackExpr 引用跨对象，继续深层探索
-                if (curr.depth < maxDepth && f.getWriteBackExpr() != null) {
-                    WriteBackExpr wb = parseWriteBack(f.getWriteBackExpr());
-                    if (wb != null && wb.getSrcObjectType() != null && !wb.getSrcObjectType().equals(curr.currentObj)) {
-                        String refObj = wb.getSrcObjectType();
+                // 3d. 如果有 writeBackExpr / referInfo 引用跨对象，继续深层探索 (保持 BFS
+                // 扩散)，并将本次命中产生的分值红利传承给下级以抵消跨表惩罚
+                if (curr.depth < maxDepth) {
+                    String refObj = null;
+                    if (f.getWriteBackExpr() != null) {
+                        WriteBackExpr wb = parseWriteBack(f.getWriteBackExpr());
+                        if (wb != null && wb.getSrcObjectType() != null
+                                && !wb.getSrcObjectType().equals(curr.currentObj)) {
+                            refObj = wb.getSrcObjectType();
+                        }
+                    }
+                    if (refObj == null && f.getReferInfo() != null) {
+                        String parsedRef = extractRefFromReferInfo(f.getReferInfo());
+                        if (parsedRef != null && !parsedRef.equals(curr.currentObj)) {
+                            refObj = parsedRef;
+                        }
+                    }
+
+                    // 只在当前字段有一定相关性匹配（词条命中）的情况下才允许跨对象跳转，防止搜索空间爆炸
+                    // 并且增加环路检测
+                    if (refObj != null && currentMatchScore > 0 && !newNodes.contains("obj::" + refObj)) {
                         List<String> nextNodes = new ArrayList<>(newNodes);
                         nextNodes.add("obj::" + refObj);
-                        q.add(new PathState(refObj, newMvel, newTitles + objectTitles.getOrDefault(refObj, refObj),
-                                nextNodes, curr.depth + 1));
+                        double nextBonus = curr.bonusScore + currentMatchScore; // 父级的词条匹配成功为下级跨表积攒了通行红利
+                        q.add(new PathState(refObj, newMvel,
+                                newTitles + " -> " + objectTitles.getOrDefault(refObj, refObj),
+                                nextNodes, curr.depth + 1, nextBonus, currentMatchScore + curr.bonusScore));
                     }
                 }
             }

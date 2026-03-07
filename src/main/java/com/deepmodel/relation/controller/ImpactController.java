@@ -654,6 +654,28 @@ public class ImpactController {
     }
 
     /**
+     * 预检索：返回与 ai-server get_memory_message 等价的结构化预检索结果，供 deducePath 或前端作为上下文使用。
+     *
+     * @param keyword           必填，自然语言关键词
+     * @param tenantId          可选，租户过滤（Phase 2 生效）
+     * @param appName           可选，按 appName 过滤
+     * @param maxObjectResults  对象候选最大数量（默认 10）
+     * @param maxRelationResults 关系最大数量（默认 30）
+     * @param maxFieldResults   字段候选最大数量（默认 30）
+     */
+    @GetMapping("/api/neo4j/preRetrieve")
+    public ImpactAnalyzerService.PreRetrieveResult preRetrieve(
+            @RequestParam String keyword,
+            @RequestParam(required = false) String tenantId,
+            @RequestParam(required = false) String appName,
+            @RequestParam(value = "maxObjectResults", defaultValue = "10") int maxObjectResults,
+            @RequestParam(value = "maxRelationResults", defaultValue = "30") int maxRelationResults,
+            @RequestParam(value = "maxFieldResults", defaultValue = "30") int maxFieldResults) {
+        return analyzerService.preRetrieve(keyword, tenantId, appName,
+                maxObjectResults, maxRelationResults, maxFieldResults);
+    }
+
+    /**
      * Neo4j 风格对象-字段图谱数据接口。
      *
      * @param appName    按 appName 过滤（支持逗号分隔多个），为空则不过滤
@@ -674,15 +696,18 @@ public class ImpactController {
      * 最终拼接成例如 project.category.name 这样的合法 MVEL 表达式。
      * 
      * [Global升级]: 如果 baseObject 为空，则触发全图自动选址算法。
+     * Phase 2: 支持 tenantId、appName 透传，用于 Neo4j 租户/app 过滤。
      */
     @GetMapping("/api/neo4j/deducePath")
     public ImpactAnalyzerService.DeduceResult deducePath(
             @RequestParam(required = false) String baseObject,
             @RequestParam String keyword,
-            @RequestParam(value = "maxDepth", defaultValue = "3") int maxDepth) {
+            @RequestParam(value = "maxDepth", defaultValue = "3") int maxDepth,
+            @RequestParam(required = false) String tenantId,
+            @RequestParam(required = false) String appName) {
 
         if (baseObject == null || baseObject.trim().isEmpty()) {
-            return analyzerService.globalDeduceExpressionPath(keyword, maxDepth);
+            return analyzerService.globalDeduceExpressionPath(keyword, maxDepth, tenantId, appName);
         } else {
             return analyzerService.deduceExpressionPath(baseObject, keyword, maxDepth);
         }
