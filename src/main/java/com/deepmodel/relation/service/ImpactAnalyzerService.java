@@ -2109,10 +2109,20 @@ public class ImpactAnalyzerService {
 
     public static class DeduceResult {
         public boolean success;
-        public String expression; // MVEL
+        public String expression; // 最佳 MVEL 表达式
         public String message;
-        public List<String> pathNodes; // 返回图路径用于高亮
-        public String baseObject; // 记录最终系统定准的起点对象（Global情况会有用）
+        public List<String> pathNodes; // 返回图路径用于高亮（最佳路径）
+        public String baseObject; // 记录最终系统定准的起点对象（Global 情况会有用）
+        // Phase X: 返回 Top-N 备选路径，供前端展示“候选字段列表”
+        public List<DeduceCandidate> candidates = new ArrayList<>();
+    }
+
+    public static class DeduceCandidate {
+        public String objectType;           // 起点对象（或当前所在对象）
+        public String expression;           // MVEL 表达式（如 obj.fieldA.fieldB）
+        public String titles;               // 累积中文含义链路
+        public List<String> pathNodes;      // 对应的图节点链路，用于前端高亮
+        public double score;                // 评分，用于排序
     }
 
     static class PathState {
@@ -2237,6 +2247,7 @@ public class ImpactAnalyzerService {
 
         double bestScore = -999;
         PathState bestPath = null;
+        List<DeduceCandidate> candidateList = new ArrayList<>();
         int maxIterations = 10000; // 下调 iteration 限制，保障 API 响应性能
         int iterations = 0;
 
@@ -2284,9 +2295,20 @@ public class ImpactAnalyzerService {
                 // 注意：这里 MVEL 的叠加在循环开始处已完成 (newMvel)
                 double score = currentMatchScore + curr.bonusScore - newMvel.length() * 0.5 - curr.depth * 30.0;
 
-                if ((wordScore > 0 || charCoverage > 0.4) && score > bestScore) {
-                    bestScore = score;
-                    bestPath = new PathState(curr.currentObj, newMvel, newTitles, newNodes, curr.depth, 0.0, score);
+                if (wordScore > 0 || charCoverage > 0.4) {
+                    DeduceCandidate cand = new DeduceCandidate();
+                    cand.objectType = curr.currentObj;
+                    cand.expression = newMvel;
+                    cand.titles = newTitles;
+                    cand.pathNodes = new ArrayList<>(newNodes);
+                    cand.score = score;
+                    candidateList.add(cand);
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestPath = new PathState(curr.currentObj, newMvel, newTitles, newNodes, curr.depth, 0.0,
+                                score);
+                    }
                 }
 
                 // 3d. 如果有 writeBackExpr / referInfo 引用跨对象，继续深层探索 (保持 BFS
@@ -2322,6 +2344,13 @@ public class ImpactAnalyzerService {
         }
 
         // 3. 构建推演输出
+        // Top-N 候选（最多 20 个），按得分从高到低排序
+        if (!candidateList.isEmpty()) {
+            candidateList.sort((a, b) -> Double.compare(b.score, a.score));
+            int limit = Math.min(20, candidateList.size());
+            res.candidates = new ArrayList<>(candidateList.subList(0, limit));
+        }
+
         if (bestPath != null && bestScore > 0) {
             res.success = true;
             res.expression = bestPath.mvelPath;

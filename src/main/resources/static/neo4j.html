@@ -901,7 +901,7 @@
                     </div>
                 </div>
 
-                <!-- Global Deduce Result Banner -->
+                <!-- Global Deduce Result Banner（仅展示最佳结果，不含候选列表） -->
                 <div v-if="globalDeduceResult"
                     style="padding: 12px 24px; background: #0f172a; border-bottom: 1px dashed #3b82f6; display: flex; flex-direction: column; gap: 8px; z-index: 9;">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -1039,7 +1039,7 @@
                                     @click="runDeduce">推演</el-button>
                             </div>
 
-                            <!-- 推演结果 -->
+                            <!-- 推演结果（仅展示最佳结果，不含候选列表） -->
                             <div v-if="deduceResult"
                                 style="margin-top: 10px; background: #0f172a; padding: 10px; border-radius: 6px;">
                                 <template v-if="deduceResult.success">

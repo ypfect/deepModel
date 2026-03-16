@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>DeepModel - 字段智能推演候选列表</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      background: #020617;
+      color: #e5e7eb;
+    }
+    .page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .header {
+      padding: 12px 20px;
+      border-bottom: 1px solid #1f2937;
+      background: #020617;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #e5e7eb;
+    }
+    .header-sub {
+      font-size: 12px;
+      color: #9ca3af;
+    }
+    .main {
+      padding: 14px 20px 24px;
+      max-width: 1180px;
+      margin: 0 auto;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .card {
+      border-radius: 10px;
+      border: 1px solid #1f2937;
+      background: radial-gradient(circle at top left, rgba(59,130,246,0.12), transparent 55%), #020617;
+      padding: 14px 16px 16px;
+      margin-bottom: 16px;
+    }
+    .label {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+    .code-pill {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      background: #020617;
+      border: 1px solid #1f2937;
+      color: #e5e7eb;
+      display: inline-block;
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .msg {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+    .table-wrap {
+      margin-top: 10px;
+      border-radius: 8px;
+      border: 1px solid #1f2937;
+      background: #020617;
+    }
+    .table-header {
+      display: grid;
+      grid-template-columns: 50px auto 80px;
+      padding: 6px 10px;
+      align-items: center;
+      column-gap: 8px;
+      font-size: 12px;
+      background: #020617;
+      border-bottom: 1px solid #1f2937;
+      color: #9ca3af;
+      font-weight: 500;
+    }
+    .row-card {
+      padding: 8px 10px;
+      border-top: 1px solid #0b1120;
+      font-size: 12px;
+    }
+    .row-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+      flex-wrap: wrap;
+    }
+    .row-body {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding-left: 34px;
+    }
+    .badge-rank {
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      border: 1px solid rgba(59,130,246,0.6);
+      color: #bfdbfe;
+      background: rgba(15,23,42,0.9);
+      display: inline-flex;
+      justify-content: center;
+      min-width: 24px;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      word-break: break-all;
+      white-space: normal;
+    }
+    .ellipsis {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pill-score {
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: rgba(22,163,74,0.14);
+      color: #bbf7d0;
+      border: 1px solid rgba(22,163,74,0.4);
+      display: inline-flex;
+      justify-content: center;
+      min-width: 40px;
+    }
+    .status-badge {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: rgba(59,130,246,0.16);
+      color: #bfdbfe;
+      border: 1px solid rgba(59,130,246,0.5);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="page">
+    <header class="header">
+      <div class="header-title">字段智能推演候选列表</div>
+      <div class="header-sub">给定业务意图，展示 Top-N 候选字段路径及中文描述，便于人工/AI 进一步筛选</div>
+    </header>
+    <main class="main">
+      <div class="card">
+        <div class="label">业务意图关键词</div>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <el-input v-model="keyword" placeholder="例如：合同开票申请金额" size="small"
+                    style="flex:1; min-width: 220px;" @keyup.enter="runDeduce" clearable />
+          <el-input v-model="tenantId" placeholder="tenantId（可选）" size="small"
+                    style="width: 160px;" clearable />
+          <el-input v-model="appName" placeholder="appName（可选）" size="small"
+                    style="width: 160px;" clearable />
+          <el-button type="primary" size="small" :loading="loading" @click="runDeduce">
+            生成候选
+          </el-button>
+        </div>
+        <div style="margin-top:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <span class="status-badge" v-if="result && result.success">
+            <span style="font-size: 12px;">✅</span>
+            推演成功
+          </span>
+          <span class="status-badge" v-else-if="result && !result.success"
+                style="background: rgba(248,113,113,0.12); border-color: rgba(248,113,113,0.5); color: #fecaca;">
+            <span style="font-size: 12px;">❌</span>
+            推演失败
+          </span>
+          <span v-if="result && result.baseObject"
+                style="font-size:11px; color:#9ca3af;">
+            起点对象：<span style="color:#e5e7eb;">{{ result.baseObject }}</span>
+          </span>
+          <span v-if="candidates && candidates.length"
+                style="font-size:11px; color:#9ca3af;">
+            候选数量：<span style="color:#e5e7eb;">{{ candidates.length }}</span>
+          </span>
+        </div>
+      </div>
+
+      <div v-if="result" class="card">
+        <div class="label">当前评分最高的表达式</div>
+        <div class="code-pill" title="{{ result.expression || '无' }}">
+          {{ result.expression || '（未匹配到表达式）' }}
+        </div>
+        <div class="msg" v-if="result.message">
+          {{ result.message }}
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+          <div>
+            <div class="label" style="margin-bottom:2px;">候选字段 Top-N（按综合得分排序）</div>
+            <div style="font-size:11px; color:#6b7280;">
+              展示来自 <code style="font-size:11px;">/api/neo4j/deducePath</code> 的 <code style="font-size:11px;">candidates</code>，
+              每条包含对象 + 表达式 + 中文链路 + 评分。
+            </div>
+          </div>
+        </div>
+        <div v-if="!candidates || !candidates.length"
+             style="font-size:12px; color:#6b7280; padding:6px 2px;">
+          暂无候选，请先在上方输入业务意图并点击“生成候选”。
+        </div>
+        <div v-else class="table-wrap">
+          <div class="table-header">
+            <div>#</div>
+            <div>字段路径 & 中文描述</div>
+            <div style="text-align:right;">得分</div>
+          </div>
+          <div v-for="(c, idx) in candidates" :key="idx" class="row-card">
+            <div class="row-header">
+              <span class="badge-rank">{{ idx + 1 }}</span>
+              <span class="ellipsis" :title="c.objectType" style="max-width:180px; color:#e5e7eb;">
+                {{ c.objectType }}
+              </span>
+              <span class="pill-score" style="margin-left:auto;">{{ c.score.toFixed(2) }}</span>
+            </div>
+            <div class="row-body">
+              <div>
+                <span style="font-size:11px; color:#9ca3af; margin-right:4px;">表达式</span>
+                <span class="mono">{{ c.expression }}</span>
+              </div>
+              <div v-if="c.titles">
+                <span style="font-size:11px; color:#9ca3af; margin-right:4px;">描述</span>
+                <span style="font-size:12px; color:#e5e7eb; white-space:normal;">{{ c.titles }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/element-plus"></script>
+  <script>
+    const { createApp, ref } = Vue;
+    const { ElMessage } = ElementPlus;
+
+    createApp({
+      setup() {
+        const keyword = ref("");
+        const tenantId = ref("");
+        const appName = ref("");
+        const loading = ref(false);
+        const result = ref(null);
+        const candidates = ref([]);
+
+        async function runDeduce() {
+          const kw = (keyword.value || "").trim();
+          if (!kw) {
+            ElMessage.warning("请输入业务意图关键词");
+            return;
+          }
+          loading.value = true;
+          result.value = null;
+          candidates.value = [];
+          try {
+            const params = new URLSearchParams();
+            params.append("keyword", kw);
+            params.append("maxDepth", "3");
+            if (tenantId.value && tenantId.value.trim()) {
+              params.append("tenantId", tenantId.value.trim());
+            }
+            if (appName.value && appName.value.trim()) {
+              params.append("appName", appName.value.trim());
+            }
+            const resp = await fetch("/api/neo4j/deducePath?" + params.toString());
+            if (!resp.ok) {
+              throw new Error("HTTP " + resp.status);
+            }
+            const data = await resp.json();
+            result.value = data;
+            candidates.value = Array.isArray(data.candidates) ? data.candidates : [];
+          } catch (e) {
+            console.error(e);
+            ElMessage.error("调用 /api/neo4j/deducePath 失败: " + e.message);
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        return {
+          keyword,
+          tenantId,
+          appName,
+          loading,
+          result,
+          candidates,
+          runDeduce,
+        };
+      },
+    })
+      .use(ElementPlus)
+      .mount("#app");
+  </script>
+</body>
+</html>
+
