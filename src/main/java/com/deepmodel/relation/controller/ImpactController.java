@@ -453,6 +453,17 @@ public class ImpactController {
     }
 
     /**
+     * 引用查询：返回通过 refer_info.referEntities 引用了指定对象的所有字段，按对象分组。
+     * 示例：GET /api/reference/incoming?entityName=ArContract
+     */
+    @GetMapping("/api/reference/incoming")
+    public List<ImpactAnalyzerService.ReferenceGroup> incomingReferences(
+            @RequestParam("entityName") String entityName,
+            @RequestParam(value = "excludeView", defaultValue = "false") boolean excludeView) {
+        return analyzerService.findObjectsReferencingEntity(entityName, excludeView);
+    }
+
+    /**
      * 生成字段升级 SQL 脚本（仅返回文本，不执行）。
      *
      * @param objectType 根对象类型

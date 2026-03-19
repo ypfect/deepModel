@@ -2365,4 +2365,64 @@ public class ImpactAnalyzerService {
         return res;
     }
 
+    // =====================================================================
+    // 引用查询：查找通过 refer_info.referEntities 引用了指定对象的所有字段，按对象分组
+    // =====================================================================
+
+    public static class ReferenceGroup {
+        public String objectType;
+        public String objectTitle;
+        public String appName;
+        public List<FieldRef> fields = new ArrayList<>();
+
+        public static class FieldRef {
+            public String name;
+            public String apiName;
+            public String title;
+            public String referInfo;
+        }
+    }
+
+    public List<ReferenceGroup> findObjectsReferencingEntity(String entityName, boolean excludeView) {
+        if (entityName == null || entityName.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<BaseappObjectField> rows;
+        try {
+            rows = mapper.selectReferencingFields(entityName.trim());
+        } catch (Exception e) {
+            log.warn("[findObjectsReferencingEntity] DB 查询失败: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+        Map<String, ReferenceGroup> groups = new LinkedHashMap<>();
+        for (BaseappObjectField f : rows) {
+            String obj = f.getObjectType();
+            if (obj == null) continue;
+            if (excludeView && obj.toLowerCase().contains("view")) continue;
+            ReferenceGroup g = groups.computeIfAbsent(obj, k -> {
+                ReferenceGroup rg = new ReferenceGroup();
+                rg.objectType = k;
+                rg.appName = f.getAppName();
+                rg.objectTitle = objectTitles.getOrDefault(k, "");
+                return rg;
+            });
+            ReferenceGroup.FieldRef fr = new ReferenceGroup.FieldRef();
+            fr.name = f.getName();
+            fr.apiName = f.getApiName() != null && !f.getApiName().isEmpty() ? f.getApiName() : f.getName();
+            fr.title = f.getTitle();
+            fr.referInfo = f.getReferInfo();
+            g.fields.add(fr);
+        }
+        // 按 appName + objectType 字母排序
+        List<ReferenceGroup> result = new ArrayList<>(groups.values());
+        result.sort((a, b) -> {
+            String aApp = a.appName != null ? a.appName.toLowerCase() : "";
+            String bApp = b.appName != null ? b.appName.toLowerCase() : "";
+            int cmp = aApp.compareTo(bApp);
+            if (cmp != 0) return cmp;
+            return a.objectType.compareToIgnoreCase(b.objectType);
+        });
+        return result;
+    }
+
 }

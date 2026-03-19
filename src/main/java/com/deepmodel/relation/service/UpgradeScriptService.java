@@ -262,9 +262,12 @@ public class UpgradeScriptService {
         roots = normalizedRoots;
 
         Set<RelType> included = parseRelTypes(relTypes);
-        int relType = 0; // 0 = intra + writeBack
+        // relType: 0=全部(含view), 1=writeBack, 2=intra, 4=intra+writeBack(不含view)
+        // 默认使用 4，与 multiRootGraph 端点保持一致，避免 view 关系污染依赖图
+        int relType = 4;
         if (included.contains(RelType.INTRA) && !included.contains(RelType.WRITE_BACK)) relType = 2;
         else if (included.contains(RelType.WRITE_BACK) && !included.contains(RelType.INTRA)) relType = 1;
+        else if (!included.contains(RelType.INTRA) && !included.contains(RelType.WRITE_BACK)) relType = 0;
 
         GraphModels.Graph graph = impactAnalyzerService.buildMultiRootClosedGraph(roots, maxDepth, relType);
         if (graph.nodes == null || graph.nodes.isEmpty()) {
@@ -627,6 +630,17 @@ public class UpgradeScriptService {
                 inDegree.put(v, Integer.valueOf(d));
                 if (d == 0) queue.offer(v);
             }
+        }
+        // 检测依赖环：Kahn 算法结束后仍有入度 > 0 的节点即处于环中；将其追加队尾并记录 WARNING
+        Set<String> cycleNodes = new LinkedHashSet<>();
+        for (Map.Entry<String, Integer> ent : inDegree.entrySet()) {
+            if (ent.getValue().intValue() > 0) {
+                cycleNodes.add(ent.getKey());
+            }
+        }
+        if (!cycleNodes.isEmpty()) {
+            log.warn("[UpgradeScript] 检测到依赖环，以下节点入度无法降为 0，追加到脚本末尾并添加 WARNING: {}", cycleNodes);
+            order.addAll(cycleNodes);
         }
         return order;
     }

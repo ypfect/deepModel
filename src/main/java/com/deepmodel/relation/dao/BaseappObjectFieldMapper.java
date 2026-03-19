@@ -31,4 +31,11 @@ public interface BaseappObjectFieldMapper {
      * 查询 type='bill' 的对象类型名称列表
      */
     List<String> selectBillObjectTypes();
+
+    /**
+     * 查询引用了指定对象（通过 refer_info.referEntities[].referEntityName）的所有字段。
+     *
+     * @param entityName 被引用的对象名，例如 "ArContract"
+     */
+    List<BaseappObjectField> selectReferencingFields(@Param("entityName") String entityName);
 }

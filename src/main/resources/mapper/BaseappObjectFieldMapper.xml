@@ -105,4 +105,28 @@
     where coalesce(type,'') = 'bill'
   </select>
 
+  <!-- 引用查询：返回 refer_info.referEntities 中包含指定对象名的所有字段 -->
+  <select id="selectReferencingFields" resultMap="BaseappObjectFieldMap">
+    SELECT f.id,
+           f.object_type,
+           f.name,
+           f.api_name,
+           f.title,
+           f.type,
+           f.biz_type,
+           f.refer_info::text as refer_info,
+           t.app_name
+    FROM baseapp_object_field f
+    LEFT JOIN baseapp_object_type t ON f.object_type = t.name
+    WHERE f.refer_info IS NOT NULL
+      AND f.refer_info::text != 'null'
+      AND jsonb_typeof(f.refer_info->'referEntities') = 'array'
+      AND EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(f.refer_info->'referEntities') AS elem
+          WHERE elem->>'referEntityName' = #{entityName}
+      )
+    ORDER BY f.object_type, f.name
+  </select>
+
 </mapper>
