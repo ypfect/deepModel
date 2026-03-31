@@ -534,7 +534,8 @@ public class ImpactController {
             }
         }
 
-        String sql = upgradeScriptService.generateUpgradeScriptBatch(roots, depth, relTypes, latestFieldDefs);
+        boolean includeComments = req.includeComments != null && req.includeComments;
+        String sql = upgradeScriptService.generateUpgradeScriptBatch(roots, depth, relTypes, latestFieldDefs, includeComments);
 
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"batch_upgrade.sql\"");
@@ -551,6 +552,8 @@ public class ImpactController {
         public String compareDbUser;
         public String compareDbPassword;
         public String compareDbAppName;
+        /** 是否在输出 SQL 中保留注释行，默认 false（不保留） */
+        public Boolean includeComments;
 
         public static class RootItem {
             public String objectType;

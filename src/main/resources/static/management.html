@@ -353,18 +353,40 @@
             </div>
         </div>
 
-        <!-- Upgrade Script Dialog (金额类型字段升级脚本，执行逻辑后续明确) -->
+        <!-- Upgrade Script Dialog -->
         <div id="upgrade-script-dialog" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.45); z-index:1100; justify-content:center; align-items:center; flex-direction:row;">
             <div style="width:80%; max-width:900px; max-height:85%; background:#fff; border-radius:10px; box-shadow:0 20px 40px rgba(15,23,42,0.25); display:flex; flex-direction:column; overflow:hidden;">
+                <!-- 标题栏 -->
                 <div style="padding:12px 16px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:space-between; background:#f9fafb;">
                     <span id="upgrade-script-title" style="font-weight:600;">升级脚本</span>
                     <div style="display:flex; align-items:center; gap:8px;">
-                        <button type="button" id="upgrade-script-download" style="padding:6px 12px; font-size:12px; border-radius:6px; background:#2563eb; color:#fff; border:none; cursor:pointer;">下载 SQL</button>
+                        <button type="button" id="upgrade-script-download" style="display:none; padding:6px 12px; font-size:12px; border-radius:6px; background:#2563eb; color:#fff; border:none; cursor:pointer;">下载 SQL</button>
                         <span id="upgrade-script-close" style="cursor:pointer; font-size:18px; color:#64748b;">&times;</span>
                     </div>
                 </div>
-                <div style="padding:8px 12px; font-size:12px; color:#64748b;">说明：以下为根据当前升级接口生成的脚本，实际执行逻辑后续明确。</div>
-                <div style="padding:12px 16px; overflow:auto; flex:1;">
+                <!-- 配置面板（批量模式专用，点执行前显示） -->
+                <div id="upgrade-script-config" style="display:none; padding:24px 28px; flex:1; overflow:auto;">
+                    <div style="font-size:13px; color:#334155; margin-bottom:20px; line-height:1.6;">
+                        将对勾选的 <strong id="upgrade-script-count">0</strong> 个根字段，按依赖拓扑顺序生成批量升级 SQL 脚本。
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:14px;">
+                        <label style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; padding:12px 14px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; transition:border-color .15s;"
+                               onmouseover="this.style.borderColor='#93c5fd'" onmouseout="this.style.borderColor='#e2e8f0'">
+                            <input type="checkbox" id="upgrade-script-include-comments"
+                                   style="margin-top:2px; width:15px; height:15px; cursor:pointer; accent-color:#2563eb; flex-shrink:0;">
+                            <div>
+                                <div style="font-size:13px; font-weight:500; color:#1e293b;">输出注释</div>
+                                <div style="font-size:12px; color:#64748b; margin-top:2px;">在 SQL 脚本中保留字段说明、执行顺序说明等 <code style="background:#f1f5f9;padding:1px 4px;border-radius:3px;font-size:11px;">--</code> 注释行；不勾选则只输出纯 SQL 语句，更简洁。</div>
+                            </div>
+                        </label>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:24px;">
+                        <button type="button" id="upgrade-script-cancel" style="padding:8px 20px; font-size:13px; border-radius:7px; background:#f1f5f9; color:#475569; border:1px solid #e2e8f0; cursor:pointer; font-weight:500;">取消</button>
+                        <button type="button" id="upgrade-script-execute" style="padding:8px 20px; font-size:13px; border-radius:7px; background:linear-gradient(135deg,#2563eb,#4f46e5); color:#fff; border:none; cursor:pointer; font-weight:500;">执行</button>
+                    </div>
+                </div>
+                <!-- 结果面板 -->
+                <div id="upgrade-script-result" style="display:none; padding:12px 16px; overflow:auto; flex:1;">
                     <pre id="upgrade-script-pre" style="margin:0; font-size:12px; background:#0f172a; color:#e5e7eb; padding:12px; border-radius:6px; white-space:pre-wrap; word-break:break-all;"></pre>
                 </div>
             </div>
@@ -481,14 +503,22 @@
             });
         }
 
-        /** 生成升级脚本：调用升级接口，在弹窗中展示并支持下载（执行逻辑后续明确） */
+        /** 生成升级脚本（单根）：直接调用接口，跳过配置面板 */
         async function openUpgradeScript(objectType, fieldName) {
             if (!objectType || !fieldName) return;
-            const dialog = document.getElementById('upgrade-script-dialog');
-            const pre = document.getElementById('upgrade-script-pre');
-            const titleEl = document.getElementById('upgrade-script-title');
+            const dialog     = document.getElementById('upgrade-script-dialog');
+            const configDiv  = document.getElementById('upgrade-script-config');
+            const resultDiv  = document.getElementById('upgrade-script-result');
+            const pre        = document.getElementById('upgrade-script-pre');
+            const titleEl    = document.getElementById('upgrade-script-title');
+            const downloadBtn = document.getElementById('upgrade-script-download');
             if (!dialog || !pre) return;
+
+            // 单根模式直接展示结果面板，不经过配置面板
             titleEl.textContent = `升级脚本：${objectType}.${fieldName}`;
+            if (configDiv) configDiv.style.display = 'none';
+            if (resultDiv) resultDiv.style.display = 'block';
+            if (downloadBtn) downloadBtn.style.display = 'none';
             pre.textContent = '加载中...';
             dialog.style.display = 'flex';
             try {
@@ -497,8 +527,8 @@
                 const text = await res.text();
                 pre.textContent = res.ok ? text : `请求失败: ${res.status}\n${text}`;
                 window.__lastUpgradeScript = { objectType, fieldName, sql: text };
-                const downloadBtn = document.getElementById('upgrade-script-download');
-                if (downloadBtn) {
+                if (res.ok && downloadBtn) {
+                    downloadBtn.style.display = 'inline-block';
                     downloadBtn.onclick = () => {
                         const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
                         const a = document.createElement('a');
@@ -522,8 +552,8 @@
             });
         }
 
-        /** 批量生成升级脚本：收集所有勾选的行，一次调用批量接口（多根合并图+拓扑排序），展示并支持下载 */
-        async function batchGenerateUpgradeScripts(container) {
+        /** 批量生成升级脚本：先弹出配置面板，点「执行」后才调用后端接口 */
+        function batchGenerateUpgradeScripts(container) {
             const checkboxes = container ? container.querySelectorAll('.upgrade-checkbox:checked') : [];
             const items = [];
             checkboxes.forEach(cb => {
@@ -535,50 +565,85 @@
                 alert('请先勾选需要升级的字段');
                 return;
             }
-            const dialog = document.getElementById('upgrade-script-dialog');
-            const pre = document.getElementById('upgrade-script-pre');
-            const titleEl = document.getElementById('upgrade-script-title');
-            if (!dialog || !pre) return;
-            titleEl.textContent = `批量升级脚本（${items.length} 个根字段，按依赖顺序）`;
-            pre.textContent = '正在生成...';
-            dialog.style.display = 'flex';
-            try {
-                // 带上比较库连接参数，让后端以最新字段定义生成 SQL
-                const compareDbPayload = {
-                    roots: items,
-                    depth: parseInt((document.getElementById('upgradeDepth') || {}).value || '3', 10) || 3,
-                    relTypes: 'intra,writeBack',
-                    compareDbUrl:      (document.getElementById('compareUrl')  || {}).value || '',
-                    compareDbUser:     (document.getElementById('compareUser') || {}).value || '',
-                    compareDbPassword: (document.getElementById('comparePass') || {}).value || '',
-                    compareDbAppName:  (document.getElementById('compareAppName') || {}).value || ''
-                };
-                const res = await fetch('/api/impact/upgradeScript/batch', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(compareDbPayload)
-                });
-                const text = await res.text();
-                pre.textContent = res.ok ? text : `请求失败: ${res.status}\n${text}`;
-                window.__lastUpgradeScript = { batch: true, sql: text };
-            } catch (e) {
-                pre.textContent = `错误: ${e.message}`;
-            }
+
+            const dialog    = document.getElementById('upgrade-script-dialog');
+            const configDiv = document.getElementById('upgrade-script-config');
+            const resultDiv = document.getElementById('upgrade-script-result');
+            const pre       = document.getElementById('upgrade-script-pre');
+            const titleEl   = document.getElementById('upgrade-script-title');
             const downloadBtn = document.getElementById('upgrade-script-download');
-            if (downloadBtn) {
-                downloadBtn.onclick = () => {
-                    const sql = (pre.textContent || '').startsWith('请求失败') || (pre.textContent || '').startsWith('错误:') ? '' : pre.textContent;
-                    const blob = new Blob([sql], { type: 'text/plain;charset=utf-8' });
-                    const a = document.createElement('a');
-                    a.href = URL.createObjectURL(blob);
-                    a.download = 'batch_upgrade.sql';
-                    a.click();
-                    URL.revokeObjectURL(a.href);
+            const executeBtn  = document.getElementById('upgrade-script-execute');
+            const cancelBtn   = document.getElementById('upgrade-script-cancel');
+            const countEl     = document.getElementById('upgrade-script-count');
+            if (!dialog || !configDiv || !resultDiv) return;
+
+            // 切换到「配置面板」状态
+            if (countEl) countEl.textContent = items.length;
+            titleEl.textContent = `批量升级脚本（${items.length} 个根字段）`;
+            configDiv.style.display = 'block';
+            resultDiv.style.display = 'none';
+            if (downloadBtn) downloadBtn.style.display = 'none';
+            // 重置复选框到默认未勾选
+            const commentChk = document.getElementById('upgrade-script-include-comments');
+            if (commentChk) commentChk.checked = false;
+
+            dialog.style.display = 'flex';
+
+            function closeDialog() { dialog.style.display = 'none'; }
+
+            // 取消 / 关闭
+            if (cancelBtn) cancelBtn.onclick = closeDialog;
+            const closeEl = document.getElementById('upgrade-script-close');
+            if (closeEl) closeEl.onclick = closeDialog;
+            dialog.onclick = (e) => { if (e.target === dialog) closeDialog(); };
+
+            // 点「执行」：切换到结果面板，调后端
+            if (executeBtn) {
+                executeBtn.onclick = async () => {
+                    const includeComments = commentChk ? commentChk.checked : false;
+
+                    // 切换到「结果面板」状态
+                    configDiv.style.display = 'none';
+                    resultDiv.style.display = 'block';
+                    if (downloadBtn) downloadBtn.style.display = 'none';
+                    pre.textContent = '正在生成，请稍候...';
+
+                    try {
+                        const payload = {
+                            roots: items,
+                            depth: parseInt((document.getElementById('upgradeDepth') || {}).value || '3', 10) || 3,
+                            relTypes: 'intra,writeBack',
+                            includeComments: includeComments,
+                            compareDbUrl:      (document.getElementById('compareUrl')  || {}).value || '',
+                            compareDbUser:     (document.getElementById('compareUser') || {}).value || '',
+                            compareDbPassword: (document.getElementById('comparePass') || {}).value || '',
+                            compareDbAppName:  (document.getElementById('compareAppName') || {}).value || ''
+                        };
+                        const res = await fetch('/api/impact/upgradeScript/batch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        const text = await res.text();
+                        pre.textContent = res.ok ? text : `请求失败: ${res.status}\n${text}`;
+                        window.__lastUpgradeScript = { batch: true, sql: text };
+
+                        if (res.ok && downloadBtn) {
+                            downloadBtn.style.display = 'inline-block';
+                            downloadBtn.onclick = () => {
+                                const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+                                const a = document.createElement('a');
+                                a.href = URL.createObjectURL(blob);
+                                a.download = 'batch_upgrade.sql';
+                                a.click();
+                                URL.revokeObjectURL(a.href);
+                            };
+                        }
+                    } catch (e) {
+                        pre.textContent = `错误: ${e.message}`;
+                    }
                 };
             }
-            const closeEl = document.getElementById('upgrade-script-close');
-            if (closeEl) closeEl.onclick = () => { dialog.style.display = 'none'; };
-            dialog.onclick = (e) => { if (e.target === dialog) dialog.style.display = 'none'; };
         }
 
         // ===== 影响分析预览（Cytoscape.js 可视化）=====

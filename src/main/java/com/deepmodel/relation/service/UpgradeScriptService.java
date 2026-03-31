@@ -12,8 +12,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * 根据字段影响关系生成数据升级 SQL 脚本（只生成文本，不执行）。
@@ -41,6 +42,10 @@ public class UpgradeScriptService {
      */
     private static final ThreadLocal<Map<String, BaseappObjectField>> latestFieldDefsCtx = new ThreadLocal<>();
 
+    /** 匹配接口返回 SQL 末尾的 MyBatis targetIds 占位符，兼容索引变化 */
+    private static final Pattern MYBATIS_TARGET_IDS_PATTERN =
+            Pattern.compile("\\s+WHERE\\s+m\\.id\\s+IN\\s*\\(#\\{targetIds\\[\\d+]\\}\\)\\s*$", Pattern.CASE_INSENSITIVE);
+
     @Value("${writeback-sql.api-url:http://arap.test-tx-16.e7link.com/arap/gen/debug/writeBackField2sql}")
     private String writeBackSqlApiUrl;
     @Value("${writeback-sql.tenant-id:711FNX50G6V0009}")
@@ -51,6 +56,9 @@ public class UpgradeScriptService {
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
 
+    /** objectType → appName 缓存，避免 N+1 DB 查询 */
+    private final Map<String, String> appNameCache = new ConcurrentHashMap<>();
+
     public UpgradeScriptService(ImpactAnalyzerService impactAnalyzerService,
                                 BaseappObjectFieldMapper mapper,
                                 OkHttpClient httpClient) {
@@ -60,9 +68,6 @@ public class UpgradeScriptService {
         this.objectMapper = new ObjectMapper();
     }
 
-    /**
-     * 关系类型枚举。
-     */
     enum RelType {
         INTRA("intra"),
         WRITE_BACK("writeBack"),
@@ -99,7 +104,7 @@ public class UpgradeScriptService {
     }
 
     /**
-     * 生成升级 SQL 脚本。
+     * 生成升级 SQL 脚本（单根字段）。
      *
      * @param rootObject 根对象类型
      * @param rootField  根字段名
@@ -119,6 +124,10 @@ public class UpgradeScriptService {
             return "-- 未找到任何影响关系: " + rootObject + "." + rootField + "\n";
         }
 
+        // [FIX P1-6] 与批量方法保持一致：规范化节点 ID + 补全比较库边
+        normalizeGraphNodeIdsToCamelCase(graph);
+        enrichGraphWithLatestEdges(graph);
+
         Map<String, Integer> depthMap = computeDepthMap(graph, rootObject, rootField);
         List<FixStep> steps = buildFixSteps(graph, depthMap, included);
 
@@ -131,10 +140,8 @@ public class UpgradeScriptService {
         sb.append("--  2. 后续各层按 depth 从小到大，先触发(intra)，再回写(writeBack)。\n");
         sb.append("-- =========================================\n\n");
 
-        // 根字段：占位说明
         appendRootFieldPlaceholder(sb, rootObject, rootField);
 
-        // 按 depth 分组
         Map<Integer, List<FixStep>> byDepth = new TreeMap<Integer, List<FixStep>>();
         for (FixStep s : steps) {
             if (s.depth < 0) continue;
@@ -150,7 +157,6 @@ public class UpgradeScriptService {
         for (Map.Entry<Integer, List<FixStep>> e : byDepth.entrySet()) {
             int depth = e.getKey();
             if (depth == 0) {
-                // 根字段已单独处理
                 continue;
             }
             List<FixStep> list = e.getValue();
@@ -160,8 +166,6 @@ public class UpgradeScriptService {
             sb.append("-- depth ").append(depth).append("\n");
             sb.append("-- =========================================\n\n");
 
-            // 先 intra，再 writeBack
-            // 为了输出稳定性，先按对象/字段排序
             Collections.sort(list, new Comparator<FixStep>() {
                 @Override
                 public int compare(FixStep a, FixStep b) {
@@ -187,20 +191,16 @@ public class UpgradeScriptService {
     }
 
     /**
-     * 多根批量生成升级脚本：合并多根下游图并闭合上游，拓扑排序后按顺序输出（占位 / intra / writeBack），
-     * 更新逻辑与单字段一致，仅图与排序不同。
+     * 批量生成升级脚本（不带比较库定义，兼容旧调用）。
      *
-     * @param roots   勾选的根字段列表，每项为 (objectType, field)
+     * @param roots    勾选的根字段列表，每项为 (objectType, field)
      * @param maxDepth 下游层级深度
      * @param relTypes 关系类型，例如 "intra,writeBack"
-     */
-    /**
-     * 批量生成升级脚本（不带比较库定义，兼容旧调用）。
      */
     public String generateUpgradeScriptBatch(List<Map.Entry<String, String>> roots,
                                              int maxDepth,
                                              String relTypes) {
-        return generateUpgradeScriptBatch(roots, maxDepth, relTypes, null);
+        return generateUpgradeScriptBatch(roots, maxDepth, relTypes, null, true);
     }
 
     /**
@@ -208,19 +208,21 @@ public class UpgradeScriptService {
      *
      * @param latestFieldDefs 比较库的最新字段定义 map（key = "ObjectType.camelField"），
      *                        为 null 时退化为使用本地 in-memory 数据（兼容旧行为）。
-     *                        以最新定义为准，确保 trigger/writeBack 表达式使用新版本。
+     * @param includeComments 是否在输出 SQL 中保留注释行（以 "--" 开头的行）；
+     *                        false 时自动去除所有注释，输出更精简的纯 SQL。
      */
     public String generateUpgradeScriptBatch(List<Map.Entry<String, String>> roots,
                                              int maxDepth,
                                              String relTypes,
-                                             Map<String, BaseappObjectField> latestFieldDefs) {
+                                             Map<String, BaseappObjectField> latestFieldDefs,
+                                             boolean includeComments) {
         if (roots == null || roots.isEmpty()) {
             return "-- 未选择任何根字段\n";
         }
-        // 设置线程上下文，所有 getLatestFieldInfo 调用都会优先命中比较库定义
         latestFieldDefsCtx.set(latestFieldDefs);
         try {
-            return doGenerateUpgradeScriptBatch(roots, maxDepth, relTypes);
+            String result = doGenerateUpgradeScriptBatch(roots, maxDepth, relTypes);
+            return includeComments ? result : stripComments(result);
         } finally {
             latestFieldDefsCtx.remove();
         }
@@ -233,21 +235,17 @@ public class UpgradeScriptService {
             return "-- 未选择任何根字段\n";
         }
 
-        // 规范化 root 字段名：前端可能传 snake_case (name)，统一转为 camelCase 再建图
         List<Map.Entry<String, String>> normalizedRoots = new java.util.ArrayList<>();
         for (Map.Entry<String, String> r : roots) {
             String obj = r.getKey();
             String fld = r.getValue();
             if (obj == null || fld == null) { normalizedRoots.add(r); continue; }
-            // 1. 先尝试直接查找
             BaseappObjectField def = getLatestFieldInfo(obj, fld);
-            // 2. 若找不到且字段名含下划线，尝试 camelCase 版本
             if (def == null && fld.contains("_")) {
                 String camelFld = ExprUtils.snakeToCamel(fld);
                 def = getLatestFieldInfo(obj, camelFld);
                 if (def != null) { fld = camelFld; }
             }
-            // 3. 用 apiName（优先）或将 name 转 camelCase 作为最终字段名
             if (def != null) {
                 String apiName = def.getApiName();
                 if (apiName != null && !apiName.trim().isEmpty()) {
@@ -262,26 +260,15 @@ public class UpgradeScriptService {
         roots = normalizedRoots;
 
         Set<RelType> included = parseRelTypes(relTypes);
-        // relType: 0=全部(含view), 1=writeBack, 2=intra, 4=intra+writeBack(不含view)
-        // 默认使用 4，与 multiRootGraph 端点保持一致，避免 view 关系污染依赖图
-        int relType = 4;
-        if (included.contains(RelType.INTRA) && !included.contains(RelType.WRITE_BACK)) relType = 2;
-        else if (included.contains(RelType.WRITE_BACK) && !included.contains(RelType.INTRA)) relType = 1;
-        else if (!included.contains(RelType.INTRA) && !included.contains(RelType.WRITE_BACK)) relType = 0;
+        // [FIX P1-5] 使用独立方法计算 relType，正确处理 VIEW 等 edge case
+        int relType = computeGraphRelType(included);
 
         GraphModels.Graph graph = impactAnalyzerService.buildMultiRootClosedGraph(roots, maxDepth, relType);
         if (graph.nodes == null || graph.nodes.isEmpty()) {
             return "-- 未找到任何影响关系（多根合并图为空）\n";
         }
 
-        // canonicalFieldName() 当字段无 apiName 时直接返回 name（snake_case），
-        // 导致图中存在同一字段的 snake_case 和 camelCase 两个节点。先统一规范化为 camelCase。
         normalizeGraphNodeIdsToCamelCase(graph);
-
-        // 用 latestFieldDefsCtx（比较库定义）补充 ImpactAnalyzerService 可能漏掉的上游边：
-        //  1. writeBack 上游边：新增字段在基础库不存在时，getDirectUpstreamEdges 返回空
-        //  2. intra 上游边：trigger/formula 在比较库新增了对 writeBack 字段的引用，
-        //     但基础库 triggerExpr 未含该引用，导致 trigger SQL 先于 writeBack SQL 执行，数据错误
         enrichGraphWithLatestEdges(graph);
 
         Set<String> rootIds = new HashSet<>();
@@ -291,11 +278,11 @@ public class UpgradeScriptService {
             }
         }
 
-        List<String> topoOrder = topologicalSort(graph);
+        // [FIX P2-8] 收集循环依赖节点，在 SQL 输出中添加 WARNING
+        Set<String> cycleNodes = new LinkedHashSet<>();
+        List<String> topoOrder = topologicalSort(graph, cycleNodes);
         Map<String, EnumSet<RelType>> incomingTypes = buildIncomingTypes(graph, included);
 
-        // 「本批有数据变化」= 会对其执行 SQL 的节点：根 + 会执行的 intra + 会执行的 writeBack（递推）
-        // 仅当回写来源在此集合内时才生成回写 SQL，避免未改动的对象被回写
         Set<String> updatedSet = computeUpdatedNodes(topoOrder, rootIds, incomingTypes, included, graph);
 
         StringBuilder sb = new StringBuilder();
@@ -304,7 +291,15 @@ public class UpgradeScriptService {
         sb.append("-- 说明：先按依赖拓扑顺序列出批量更新逻辑与执行顺序，再输出对应 SQL。\n");
         sb.append("-- =========================================\n\n");
 
-        // 先在注释中列出批量更新的逻辑和顺序，方便审阅（回写若来源无变化会标 SKIP）
+        // [FIX P2-8] 在脚本头部输出循环依赖 WARNING
+        if (!cycleNodes.isEmpty()) {
+            sb.append("-- WARNING: 检测到依赖环，以下节点存在循环依赖，生成的 SQL 顺序可能不正确，请人工审阅：\n");
+            for (String cn : cycleNodes) {
+                sb.append("--   - ").append(cn).append("\n");
+            }
+            sb.append("\n");
+        }
+
         sb.append("-- 批量更新执行顺序（拓扑排序结果）：\n");
         int idx = 1;
         for (String nodeId : topoOrder) {
@@ -361,8 +356,9 @@ public class UpgradeScriptService {
             EnumSet<RelType> types = incomingTypes.get(nodeId);
             if (types == null) types = EnumSet.noneOf(RelType.class);
 
+            boolean isCycleNode = cycleNodes.contains(nodeId);
+
             if (rootIds.contains(nodeId)) {
-                // 解析规范字段名：优先比较库最新定义，fallback 本地 in-memory
                 BaseappObjectField rootDef = getLatestFieldInfo(objectType, field);
                 String canonicalField = resolveCanonicalField(rootDef, field);
 
@@ -374,23 +370,23 @@ public class UpgradeScriptService {
                 boolean rootIsTrigger = rootFormula != null && !rootFormula.trim().isEmpty();
 
                 if (rootIsWriteBack && included.contains(RelType.WRITE_BACK)) {
-                    // 回写字段（新增或保持为 writeBack）：先执行回写填充
                     sb.append("-- ROOT 回写字段（先回写填充）：")
                       .append(objectType).append(".").append(canonicalField).append("\n");
                     appendWriteBackSql(sb, new FixStep(objectType, canonicalField, -1, EnumSet.of(RelType.WRITE_BACK)));
                 } else if (rootIsTrigger && included.contains(RelType.INTRA)) {
-                    // Trigger/公式字段（新增或由 writeBack 改为 trigger）：直接生成 UPDATE SQL
                     sb.append("-- ROOT Trigger 字段（含定义变更）：")
                       .append(objectType).append(".").append(canonicalField).append("\n");
                     appendIntraSql(sb, new FixStep(objectType, canonicalField, -1, EnumSet.of(RelType.INTRA)));
                 } else {
-                    // 基础字段（无公式、无回写）：输出占位，需人工补充修复逻辑
                     appendRootFieldPlaceholderShort(sb, objectType, canonicalField);
                 }
                 continue;
             }
             if (types.contains(RelType.INTRA) && included.contains(RelType.INTRA)) {
                 if (updatedSet.contains(nodeId)) {
+                    if (isCycleNode) {
+                        sb.append("-- WARNING: 以下节点处于依赖环中，SQL 执行顺序可能不正确\n");
+                    }
                     appendIntraSql(sb, new FixStep(objectType, field, -1, types));
                 } else {
                     sb.append("-- [SKIP] Trigger 字段 ").append(objectType).append(".").append(field)
@@ -399,6 +395,9 @@ public class UpgradeScriptService {
             }
             if (types.contains(RelType.WRITE_BACK) && included.contains(RelType.WRITE_BACK)) {
                 if (updatedSet.contains(nodeId)) {
+                    if (isCycleNode) {
+                        sb.append("-- WARNING: 以下节点处于依赖环中，SQL 执行顺序可能不正确\n");
+                    }
                     appendWriteBackSql(sb, new FixStep(objectType, field, -1, types));
                 } else {
                     sb.append("-- [SKIP] 回写 ").append(objectType).append(".").append(field)
@@ -411,19 +410,28 @@ public class UpgradeScriptService {
     }
 
     /**
-     * 计算本批「有数据变化」的节点集合：根 + 上游已变化的 intra 节点 + 来源已变化的 writeBack 节点（按拓扑顺序递推）。
-     *
-     * 关键逻辑：
-     *  - INTRA 节点只有当其 intra 上游（某个依赖字段）在 updated 中时，自身才被认为有变化。
-     *  - WRITE_BACK 节点只有当其 writeBack 来源字段在 updated 中时，自身才被认为有变化。
-     *  - 两种类型保持对称，避免"上游没变但下游被误标为有变化"。
+     * 根据 included 关系类型集合，计算传给 buildMultiRootClosedGraph / analyze 的 relType 整数值。
+     * relType: 0=全部(含view), 1=writeBack, 2=intra, 4=intra+writeBack(不含view)
      */
+    private int computeGraphRelType(Set<RelType> included) {
+        boolean wantIntra = included.contains(RelType.INTRA);
+        boolean wantWb = included.contains(RelType.WRITE_BACK);
+        boolean wantView = included.contains(RelType.VIEW);
+
+        if (wantView) {
+            return 0;
+        }
+        if (wantIntra && wantWb) return 4;
+        if (wantIntra) return 2;
+        if (wantWb) return 1;
+        return 4;
+    }
+
     private Set<String> computeUpdatedNodes(List<String> topoOrder,
                                             Set<String> rootIds,
                                             Map<String, EnumSet<RelType>> incomingTypes,
                                             Set<RelType> included,
                                             GraphModels.Graph graph) {
-        // 构建 intra 来源映射：nodeId -> 该节点的所有 intra 上游 nodeId
         Map<String, Set<String>> intraSourcesMap = new HashMap<>();
         for (GraphModels.Edge e : graph.edges) {
             if ("intra".equals(e.type)) {
@@ -441,14 +449,12 @@ public class UpgradeScriptService {
             String objectType = nodeId.substring(0, dot);
             String field = nodeId.substring(dot + 1);
 
-            // INTRA：只有当至少一个 intra 上游已在 updated 中，才标记自身为有变化
             if (types.contains(RelType.INTRA) && included.contains(RelType.INTRA)) {
                 Set<String> intraSources = intraSourcesMap.getOrDefault(nodeId, Collections.emptySet());
                 if (intraSources.stream().anyMatch(updated::contains)) {
                     updated.add(nodeId);
                 }
             }
-            // WRITE_BACK：只有当至少一个 writeBack 来源字段已在 updated 中，才标记自身为有变化
             if (types.contains(RelType.WRITE_BACK) && included.contains(RelType.WRITE_BACK)) {
                 Set<String> wbSources = getWriteBackSourceNodeIds(objectType, field);
                 if (wbSources != null && wbSources.stream().anyMatch(updated::contains)) {
@@ -459,22 +465,15 @@ public class UpgradeScriptService {
         return updated;
     }
 
-    /** 对依赖图做拓扑排序（依赖在前、被依赖在后），保证脚本顺序正确。 */
     /**
-     * 将图中所有节点的字段名统一规范化为 camelCase：
-     * ImpactAnalyzerService.canonicalFieldName() 当字段无 apiName 时直接返回 name（snake_case），
-     * 导致 buildIntraDependencies / buildCrossObjectDependencies 建出的节点 ID 是 snake_case，
-     * 而 enrichGraphWithLatestEdges 从比较库拿到的节点 ID 是 camelCase，产生重复节点。
-     * 此方法在图增强之前把所有 snake_case 节点 ID 转成 camelCase，并对重复节点/边去重。
+     * 将图中所有节点的字段名统一规范化为 camelCase，并对重复节点/边去重。
      */
     private void normalizeGraphNodeIdsToCamelCase(GraphModels.Graph graph) {
-        // 构建 old_id → new_camelCase_id 映射
         Map<String, String> idRemap = new HashMap<>();
         for (GraphModels.Node n : graph.nodes) {
             String oldId = n.id != null ? n.id : (n.object + "." + n.field);
             String fld = n.field != null ? n.field : "";
             String camelFld;
-            // 优先用 apiName（已经是 camelCase），其次 snakeToCamel(name)
             if (n.apiName != null && !n.apiName.trim().isEmpty()) {
                 camelFld = n.apiName.trim();
             } else if (fld.contains("_")) {
@@ -492,14 +491,12 @@ public class UpgradeScriptService {
 
         if (idRemap.isEmpty()) return;
 
-        // 把边的 source/target 同步更新
         for (GraphModels.Edge e : graph.edges) {
             String remapped;
             if ((remapped = idRemap.get(e.source)) != null) e.source = remapped;
             if ((remapped = idRemap.get(e.target)) != null) e.target = remapped;
         }
 
-        // 去重节点（重命名后可能出现相同 id 的多个节点）
         Set<String> seenIds = new HashSet<>();
         List<GraphModels.Node> dedupNodes = new java.util.ArrayList<>();
         for (GraphModels.Node n : graph.nodes) {
@@ -509,7 +506,6 @@ public class UpgradeScriptService {
         graph.nodes.clear();
         graph.nodes.addAll(dedupNodes);
 
-        // 去重边（重命名后可能出现相同 source|type|target 的多条边）
         Set<String> seenEdges = new HashSet<>();
         List<GraphModels.Edge> dedupEdges = new java.util.ArrayList<>();
         for (GraphModels.Edge e : graph.edges) {
@@ -525,14 +521,10 @@ public class UpgradeScriptService {
      * <p>补充两类边：
      * <ol>
      *   <li><b>writeBack 上游边</b>：基础库中不存在的新增字段无法通过
-     *       {@code getDirectUpstreamEdges} 找到其 writeBack 来源，导致该字段入度为 0，
-     *       拓扑排序排到最前，早于其来源字段执行 SQL。</li>
-     *   <li><b>intra 上游边</b>：trigger/formula 表达式在比较库中新增了对 writeBack 字段的
-     *       引用，但基础库 triggerExpr 未含该引用，{@code buildIntraDependencies} 找不到此
-     *       intra 依赖，导致 trigger SQL 早于 writeBack SQL 执行，数据升级结果不正确。</li>
+     *       {@code getDirectUpstreamEdges} 找到其 writeBack 来源。</li>
+     *   <li><b>intra 上游边</b>：trigger/formula 表达式在比较库中新增了引用，但基础库未含该引用。
+     *       注意：仅当引用字段确认属于同对象时才建 intra 边，避免跨对象字段被误识别。</li>
      * </ol>
-     *
-     * <p>两类边统一在同一迭代循环中处理，直到无新边为止，正确覆盖多层依赖链。
      */
     private void enrichGraphWithLatestEdges(GraphModels.Graph graph) {
         Set<String> existingNodeIds = new HashSet<>();
@@ -579,16 +571,17 @@ public class UpgradeScriptService {
                     }
                 }
 
-                // 2. intra 上游边：从比较库 trigger/formula 表达式提取同对象引用字段，
-                //    建 refId →[intra]→ nodeId，确保 writeBack 先于 trigger 执行
+                // 2. intra 上游边：从比较库 trigger/formula 表达式提取引用字段
+                // [FIX P0-2] 仅当引用字段确认存在于同对象中时才建 intra 边，
+                //            避免跨对象引用（如 srcObj.amount）被误识别为同对象 intra 依赖
                 String intrExpr = firstNonEmpty(def.getTriggerExpr(), def.getExpression(), def.getVirtualExpr());
                 if (intrExpr != null && !intrExpr.trim().isEmpty()) {
                     Set<String> refs = ExprUtils.extractCamelFieldsFromSql(intrExpr);
                     for (String ref : refs) {
                         String camelRef = ref.contains("_") ? ExprUtils.snakeToCamel(ref) : ref;
-                        // 只处理同对象的 intra 依赖
                         String refId = obj + "." + camelRef;
-                        if (refId.equals(nodeId)) continue; // 排除自引用
+                        if (refId.equals(nodeId)) continue;
+                        if (getLatestFieldInfo(obj, camelRef) == null) continue;
                         if (existingEdgeKeys.add(refId + "|intra|" + nodeId)) {
                             graph.edges.add(new GraphModels.Edge(refId, nodeId, "intra"));
                             changed = true;
@@ -603,7 +596,12 @@ public class UpgradeScriptService {
         }
     }
 
-    private List<String> topologicalSort(GraphModels.Graph graph) {
+    /**
+     * 对依赖图做拓扑排序（Kahn 算法），依赖在前、被依赖在后。
+     *
+     * @param outCycleNodes 如果非 null，检测到的循环依赖节点将被收集到此集合中
+     */
+    private List<String> topologicalSort(GraphModels.Graph graph, Set<String> outCycleNodes) {
         Map<String, Integer> inDegree = new HashMap<>();
         Map<String, List<String>> outEdges = new HashMap<>();
 
@@ -631,16 +629,19 @@ public class UpgradeScriptService {
                 if (d == 0) queue.offer(v);
             }
         }
-        // 检测依赖环：Kahn 算法结束后仍有入度 > 0 的节点即处于环中；将其追加队尾并记录 WARNING
-        Set<String> cycleNodes = new LinkedHashSet<>();
+        // 检测环：Kahn 算法结束后入度仍 > 0 的节点处于环中
+        Set<String> detected = new LinkedHashSet<>();
         for (Map.Entry<String, Integer> ent : inDegree.entrySet()) {
             if (ent.getValue().intValue() > 0) {
-                cycleNodes.add(ent.getKey());
+                detected.add(ent.getKey());
             }
         }
-        if (!cycleNodes.isEmpty()) {
-            log.warn("[UpgradeScript] 检测到依赖环，以下节点入度无法降为 0，追加到脚本末尾并添加 WARNING: {}", cycleNodes);
-            order.addAll(cycleNodes);
+        if (!detected.isEmpty()) {
+            log.warn("[UpgradeScript] 检测到依赖环，以下节点入度无法降为 0: {}", detected);
+            order.addAll(detected);
+            if (outCycleNodes != null) {
+                outCycleNodes.addAll(detected);
+            }
         }
         return order;
     }
@@ -663,10 +664,8 @@ public class UpgradeScriptService {
     private Set<RelType> parseRelTypes(String relTypes) {
         Set<RelType> set = EnumSet.noneOf(RelType.class);
         if (relTypes == null || relTypes.trim().isEmpty()) {
-            // 默认都包含
             set.add(RelType.INTRA);
             set.add(RelType.WRITE_BACK);
-            // VIEW 通常不参与数据修复，先不加入
             return set;
         }
         String[] parts = relTypes.split(",");
@@ -683,22 +682,16 @@ public class UpgradeScriptService {
         return set;
     }
 
-    /**
-     * 优先从「比较库最新定义」中查找字段，fallback 到本地 analyzerService。
-     * 支持 camelCase / snake_case 两种 key 格式。
-     */
     private BaseappObjectField getLatestFieldInfo(String objectType, String field) {
         Map<String, BaseappObjectField> latest = latestFieldDefsCtx.get();
         if (latest != null) {
             BaseappObjectField def = latest.get(objectType + "." + field);
             if (def != null) return def;
-            // 尝试 camelCase 转换
             if (field != null && field.contains("_")) {
                 def = latest.get(objectType + "." + ExprUtils.snakeToCamel(field));
                 if (def != null) return def;
             }
         }
-        // fallback：本地 in-memory
         BaseappObjectField def = impactAnalyzerService.getFieldInfo(objectType, field);
         if (def == null && field != null && field.contains("_")) {
             def = impactAnalyzerService.getFieldInfo(objectType, ExprUtils.snakeToCamel(field));
@@ -706,9 +699,6 @@ public class UpgradeScriptService {
         return def;
     }
 
-    /**
-     * 根据字段定义解析规范字段名：优先 apiName，否则 name，fallback 为调用方传入的字段名。
-     */
     private String resolveCanonicalField(BaseappObjectField def, String requestedField) {
         if (def == null) return requestedField;
         if (def.getApiName() != null && !def.getApiName().trim().isEmpty()) {
@@ -728,9 +718,6 @@ public class UpgradeScriptService {
           .append("-- WHERE /* TODO: 限定需要修复的范围，例如某个账期或批次 */;\n\n");
     }
 
-    /**
-     * 批量模式下的根字段占位说明：区分公式字段 / 虚拟字段 / 基础字段，只提醒需要人工补充口径。
-     */
     private void appendRootFieldPlaceholderShort(StringBuilder sb, String rootObject, String rootField) {
         BaseappObjectField def = getLatestFieldInfo(rootObject, rootField);
         String triggerExpr = def != null ? def.getTriggerExpr() : null;
@@ -745,7 +732,6 @@ public class UpgradeScriptService {
                 && virtualExpr != null
                 && !virtualExpr.trim().isEmpty();
 
-        // 根字段是纯虚拟字段：数据库没有物理列，不需要生成任何 SQL，只给出说明
         if (hasVirtualOnly) {
             sb.append("-- ROOT 虚拟字段(virtualExpr)，数据库无物理列：")
               .append(rootObject).append(".").append(rootField)
@@ -768,10 +754,6 @@ public class UpgradeScriptService {
           .append(" WHERE /* TODO: 限定本次修复范围 */;\n\n");
     }
 
-    /**
-     * 获取某字段 writeBack 所依赖的来源节点 id 集合（srcObjectType.field）。
-     * 仅当本批变更中包含这些来源之一时，才需要执行该回写 SQL。
-     */
     private Set<String> getWriteBackSourceNodeIds(String objectType, String field) {
         BaseappObjectField def = getLatestFieldInfo(objectType, field);
         if (def == null || def.getWriteBackExpr() == null || def.getWriteBackExpr().trim().isEmpty()) {
@@ -788,7 +770,6 @@ public class UpgradeScriptService {
         String srcObj = wb.getSrcObjectType();
         Set<String> ids = new HashSet<>();
         for (String f : srcFields) {
-            // 统一转为 camelCase，与 updatedSet 中的 nodeId 格式保持一致
             String camelF = f.contains("_") ? ExprUtils.snakeToCamel(f) : f;
             ids.add(srcObj + "." + camelF);
         }
@@ -796,50 +777,47 @@ public class UpgradeScriptService {
     }
 
     /**
-     * 计算每个节点的 depth（从 root 出发的最短步数，只走下游边）。
+     * 计算每个节点的 depth（从 root 出发的最长路径步数）。
+     * [FIX P0-1] 使用拓扑排序 + DP 求最长路径，替代 BFS 最短路径，
+     * 确保 DAG 中有多条路径到达同一节点时取最大 depth，保证依赖顺序正确。
      */
     private Map<String, Integer> computeDepthMap(GraphModels.Graph graph,
                                                  String rootObject,
                                                  String rootField) {
-        Map<String, Integer> depth = new HashMap<String, Integer>();
         Map<String, List<String>> adj = new HashMap<String, List<String>>();
-
         for (GraphModels.Edge e : graph.edges) {
-            List<String> list = adj.get(e.source);
-            if (list == null) {
-                list = new ArrayList<String>();
-                adj.put(e.source, list);
-            }
-            list.add(e.target);
+            adj.computeIfAbsent(e.source, k -> new ArrayList<String>()).add(e.target);
         }
 
-        Queue<String> queue = new ArrayDeque<String>();
+        List<String> topoOrder = topologicalSort(graph, null);
 
+        String rootId = null;
         for (GraphModels.Node n : graph.nodes) {
             String id = n.id != null ? n.id : (n.object + "." + n.field);
             if (rootObject.equals(n.object) && rootField.equals(n.field)) {
-                depth.put(id, Integer.valueOf(0));
-                queue.offer(id);
+                rootId = id;
+                break;
             }
         }
-
-        if (queue.isEmpty() && !graph.nodes.isEmpty()) {
+        if (rootId == null && !graph.nodes.isEmpty()) {
             GraphModels.Node n0 = graph.nodes.get(0);
-            String id0 = n0.id != null ? n0.id : (n0.object + "." + n0.field);
-            depth.put(id0, Integer.valueOf(0));
-            queue.offer(id0);
-            log.warn("[UpgradeScript] root node not found for {}.{}, fallback to {}", rootObject, rootField, id0);
+            rootId = n0.id != null ? n0.id : (n0.object + "." + n0.field);
+            log.warn("[UpgradeScript] root node not found for {}.{}, fallback to {}", rootObject, rootField, rootId);
         }
 
-        while (!queue.isEmpty()) {
-            String cur = queue.poll();
-            int d = depth.get(cur).intValue();
-            List<String> outs = adj.get(cur);
-            if (outs == null) continue;
-            for (String next : outs) {
-                if (!depth.containsKey(next)) {
-                    depth.put(next, Integer.valueOf(d + 1));
-                    queue.offer(next);
+        Map<String, Integer> depth = new HashMap<String, Integer>();
+        if (rootId != null) {
+            depth.put(rootId, Integer.valueOf(0));
+        }
+
+        for (String u : topoOrder) {
+            if (!depth.containsKey(u)) continue;
+            int d = depth.get(u).intValue();
+            for (String v : adj.getOrDefault(u, Collections.<String>emptyList())) {
+                int newD = d + 1;
+                Integer prev = depth.get(v);
+                if (prev == null || prev.intValue() < newD) {
+                    depth.put(v, Integer.valueOf(newD));
                 }
             }
         }
@@ -855,7 +833,6 @@ public class UpgradeScriptService {
         for (GraphModels.Edge e : graph.edges) {
             RelType t = RelType.fromCode(e.type);
             if (!includedTypes.contains(t)) {
-                // 不在关注范围的关系类型，直接忽略
                 continue;
             }
             EnumSet<RelType> set = incoming.get(e.target);
@@ -893,7 +870,6 @@ public class UpgradeScriptService {
         String expr = def.getExpression();
         String virtualExpr = def.getVirtualExpr();
 
-        // 仅有 virtualExpr（虚拟字段，没有物理列）的场景：不生成实际 UPDATE SQL，避免对不存在的列执行更新
         boolean hasTriggerOrExpr = (triggerExpr != null && !triggerExpr.trim().isEmpty())
                                    || (expr != null && !expr.trim().isEmpty());
         boolean hasVirtualOnly = !hasTriggerOrExpr
@@ -905,7 +881,6 @@ public class UpgradeScriptService {
             return;
         }
 
-        // 非纯虚拟字段：优先使用 trigger / expression，最后才回退到 virtualExpr
         String formula = firstNonEmpty(triggerExpr, expr, virtualExpr);
         if (formula == null || formula.trim().isEmpty()) {
             sb.append("-- [SKIP] 字段无公式: ").append(step.objectType).append(".").append(step.field).append("\n\n");
@@ -919,18 +894,14 @@ public class UpgradeScriptService {
         sb.append("\n");
         sb.append("-- 公式: ").append(formula).append("\n");
 
-        // 获取表名（带前缀）和字段名（下划线格式）
         String tableName = objectTypeToTableName(step.objectType);
         String columnName = fieldCamelToColumnName(step.field, step.objectType);
-        
-        // 公式中的字段名也需要转换为下划线格式
         String formulaSnake = convertFormulaToSnakeCase(formula, step.objectType);
 
-        // 直接生成 SQL（带前缀表名 + 下划线字段名）
+        // [FIX P1-3] 升级脚本全量刷新，不加 WHERE 过滤条件，
+        // 避免 formula 结果为 NULL 时因 SQL 三值逻辑（column <> NULL → NULL）导致漏更新
         sb.append("UPDATE ").append(tableName).append("\n")
-          .append("SET ").append(columnName).append(" = (").append(formulaSnake).append(")\n")
-          .append("WHERE ").append(columnName).append(" IS NULL")
-          .append(" OR ").append(columnName).append(" <> (").append(formulaSnake).append(");\n\n");
+          .append("SET ").append(columnName).append(" = (").append(formulaSnake).append(");\n\n");
     }
 
     private void appendWriteBackSql(StringBuilder sb, FixStep step) {
@@ -953,7 +924,6 @@ public class UpgradeScriptService {
         }
         sb.append("\n");
 
-        // 调用外部接口生成 SQL
         String fieldPath = step.objectType + "." + step.field;
         String sql = callWriteBackSqlApi(fieldPath);
         
@@ -964,12 +934,6 @@ public class UpgradeScriptService {
         }
     }
 
-    /**
-     * 调用外部接口生成回写字段的 SQL（使用 OkHttp，仅设置 Content-Type，不设置 Accept，避免 406）
-     *
-     * @param fieldPath 字段路径，格式：ObjectType.fieldName，例如：ArContractSubjectMatterItem.invoiceMakeAppAmountDir
-     * @return SQL 字符串，如果调用失败返回 null
-     */
     private String callWriteBackSqlApi(String fieldPath) {
         try {
             Map<String, String> body = new HashMap<String, String>();
@@ -992,16 +956,13 @@ public class UpgradeScriptService {
                 String sql = responseBody != null ? responseBody.string() : null;
                 return normalizeWriteBackSql(sql);
             }
-        } catch (IOException ex) {
-            log.error("[UpgradeScript] 调用回写 SQL 接口失败: fieldPath={}, error={}", fieldPath, ex.getMessage(), ex);
-            return null;
+        // [FIX P2-9] 合并重复的 IOException / Exception catch 块
         } catch (Exception ex) {
             log.error("[UpgradeScript] 调用回写 SQL 接口失败: fieldPath={}, error={}", fieldPath, ex.getMessage(), ex);
             return null;
         }
     }
 
-    /** 确保 SQL 语句以分号结尾（便于按语句批量执行） */
     private String ensureSqlEndsWithSemicolon(String sql) {
         if (sql == null) return null;
         String s = sql.trim();
@@ -1010,22 +971,45 @@ public class UpgradeScriptService {
     }
 
     /**
-     * 对回写接口返回的 SQL 做后处理：去掉首尾引号；去掉结尾的 WHERE m.id IN (#{targetIds[0]})
+     * 对回写接口返回的 SQL 做后处理：去掉首尾引号；去掉结尾的 MyBatis targetIds 占位符。
+     * [FIX P2-11] 使用正则匹配替代硬编码后缀，兼容索引号变化
      */
     private String normalizeWriteBackSql(String sql) {
         if (sql == null) return null;
         String s = sql.trim();
         if (s.isEmpty()) return s;
-        // 去掉首尾双引号（接口可能返回带引号的字符串）
         if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
             s = s.substring(1, s.length() - 1).trim();
         }
-        // 去掉结尾的 WHERE m.id IN (#{targetIds[0]})
-        String suffix = " WHERE m.id IN (#{targetIds[0]})";
-        if (s.endsWith(suffix)) {
-            s = s.substring(0, s.length() - suffix.length()).trim();
-        }
+        s = MYBATIS_TARGET_IDS_PATTERN.matcher(s).replaceFirst("").trim();
         return s;
+    }
+
+    /**
+     * 去除 SQL 文本中所有注释行（以 "--" 开头的行），并折叠多余的连续空行为单个空行。
+     * 用于在 includeComments=false 时输出更精简的纯 SQL 脚本。
+     */
+    private String stripComments(String sql) {
+        if (sql == null || sql.isEmpty()) return sql;
+        String[] lines = sql.split("\n", -1);
+        StringBuilder sb = new StringBuilder();
+        int consecutiveBlanks = 0;
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("--")) {
+                continue;
+            }
+            if (trimmed.isEmpty()) {
+                consecutiveBlanks++;
+                if (consecutiveBlanks <= 1) {
+                    sb.append("\n");
+                }
+            } else {
+                consecutiveBlanks = 0;
+                sb.append(line).append("\n");
+            }
+        }
+        return sb.toString().trim() + "\n";
     }
 
     private String firstNonEmpty(String... arr) {
@@ -1037,69 +1021,60 @@ public class UpgradeScriptService {
     }
 
     /**
-     * 将对象类型转换为表名（带前缀）
-     * 例如：InvoiceApplicationItem -> arap_invoice_application_item
+     * 将对象类型转换为表名（带前缀）。
+     * [FIX P2-7] 使用 appNameCache 缓存查询结果，避免 N+1 DB 查询。
      */
     private String objectTypeToTableName(String objectType) {
         if (objectType == null || objectType.trim().isEmpty()) {
             return "";
         }
-        String appName = mapper.selectAppNameByObjectType(objectType);
         String snake = ExprUtils.camelToSnake(objectType);
-        if (appName != null && !appName.trim().isEmpty()) {
-            return appName.trim() + "_" + snake;
+        String appName = appNameCache.computeIfAbsent(objectType, k -> {
+            String name = mapper.selectAppNameByObjectType(k);
+            return name != null ? name.trim() : "";
+        });
+        if (!appName.isEmpty()) {
+            return appName + "_" + snake;
         }
         return snake;
     }
 
-    /**
-     * 将驼峰字段名转换为数据库列名（下划线格式）
-     * 优先使用 BaseappObjectField.name（如果存在且是下划线格式），否则转换为下划线格式
-     */
     private String fieldCamelToColumnName(String fieldCamel, String objectType) {
         BaseappObjectField def = getLatestFieldInfo(objectType, fieldCamel);
         if (def != null && def.getName() != null && !def.getName().trim().isEmpty()) {
             String name = def.getName().trim();
-            // 如果 name 已经是下划线格式（包含下划线），直接使用
             if (name.contains("_")) {
                 return name;
             }
-            // 如果 name 是驼峰格式，转换为下划线格式
             return ExprUtils.camelToSnake(name);
         }
-        // 如果没有 name，将输入的驼峰字段名转换为下划线格式
         return ExprUtils.camelToSnake(fieldCamel);
     }
 
     /**
-     * 将公式中的字段名转换为下划线格式
-     * 例如：closedStatus -> closed_status, makeInvoiceAmount -> make_invoice_amount
+     * 将公式中属于当前对象的驼峰字段名转换为下划线格式。
+     * [FIX P1-4] 仅替换确认属于当前对象的字段名，跳过跨对象引用；
+     * 使用负向后行断言 (?<!\.) 避免替换带对象前缀的 alias.field 引用。
      */
     private String convertFormulaToSnakeCase(String formula, String objectType) {
         if (formula == null || formula.trim().isEmpty()) {
             return formula;
         }
         
-        // 从公式中提取所有字段名（使用 ExprUtils 的方法）
         Set<String> camelFields = ExprUtils.extractCamelFieldsFromSql(formula);
         
-        // 构建字段名映射（驼峰 -> 下划线）
         Map<String, String> fieldMap = new HashMap<String, String>();
         for (String camelField : camelFields) {
-            // 尝试通过 getFieldInfo 获取字段定义
             BaseappObjectField def = getLatestFieldInfo(objectType, camelField);
-            if (def != null && def.getName() != null && !def.getName().trim().isEmpty()) {
-                // 如果 name 已经是下划线格式，直接使用
+            if (def == null) continue;
+            if (def.getName() != null && !def.getName().trim().isEmpty()) {
                 fieldMap.put(camelField, def.getName().trim());
             } else {
-                // 否则转换为下划线格式
                 fieldMap.put(camelField, ExprUtils.camelToSnake(camelField));
             }
         }
         
-        // 替换公式中的字段名
         String result = formula;
-        // 按长度从长到短排序，避免短字段名被长字段名的一部分替换
         List<Map.Entry<String, String>> sorted = new ArrayList<Map.Entry<String, String>>(fieldMap.entrySet());
         Collections.sort(sorted, new Comparator<Map.Entry<String, String>>() {
             @Override
@@ -1111,9 +1086,7 @@ public class UpgradeScriptService {
         for (Map.Entry<String, String> e : sorted) {
             String camel = e.getKey();
             String snake = e.getValue();
-            // 使用单词边界匹配，避免部分替换
-            // 匹配：字段名前后是空格、括号、逗号、运算符等
-            String pattern = "\\b" + java.util.regex.Pattern.quote(camel) + "\\b";
+            String pattern = "(?<!\\.)\\b" + java.util.regex.Pattern.quote(camel) + "\\b";
             result = result.replaceAll(pattern, snake);
         }
         
