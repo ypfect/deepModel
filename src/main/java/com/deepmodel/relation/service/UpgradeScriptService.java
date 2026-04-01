@@ -103,6 +103,49 @@ public class UpgradeScriptService {
         }
     }
 
+    /** UPDATE 语句中一个 SET 子句（col = expr）。 */
+    static class SetClause {
+        String columnName;   // 列名，如 "amount" 或 "tax_amount"
+        String expression;   // 右侧表达式，如 "(price * qty)" 或 "(SELECT ...)"
+        String originalText; // 原始文本 "col = expr"
+    }
+
+    /**
+     * 解析后的 SQL 语句块：若干注释行 + 一条 SQL 语句（以 ';' 结尾）。
+     * isUpdate=true 时解析了表名、FROM/WHERE 子句和 SET 子句列表，可参与合并。
+     *
+     * <p>支持两种 UPDATE 格式：
+     * <ol>
+     *   <li>相关子查询格式：{@code UPDATE t SET col=(SELECT ... FROM src WHERE ...)}</li>
+     *   <li>PostgreSQL UPDATE...FROM 格式：{@code UPDATE t SET col=src.x FROM src WHERE t.id=src.fk}</li>
+     * </ol>
+     * 两种格式都能正确提取 SET/FROM/WHERE 各段，合并时要求三者均一致。
+     */
+    static class StatementBlock {
+        List<String> commentLines = new ArrayList<>();
+        String sqlStatement = null; // 完整 SQL 文本（不含尾部换行），null 表示纯注释块
+        boolean isUpdate = false;
+        String  tableName      = null;
+        String  tableAlias     = null;  // 表别名，null 表示无别名
+        boolean tableAliasAs   = false; // 别名是否使用了 AS 关键字（如 UPDATE t AS m）
+        String  fromClause     = null;  // "" = 无顶层 FROM；非空 = UPDATE...FROM 格式
+        String  whereClause    = null;  // "" = 无 WHERE；null = 未解析
+        List<SetClause> setClauses = new ArrayList<>();
+
+        /** 重新序列化为文本（注释 + SQL + 空行分隔符）。 */
+        String render() {
+            StringBuilder sb = new StringBuilder();
+            for (String c : commentLines) sb.append(c).append("\n");
+            if (sqlStatement != null) {
+                sb.append(sqlStatement).append("\n");
+                sb.append("\n");
+            } else if (!commentLines.isEmpty()) {
+                sb.append("\n");
+            }
+            return sb.toString();
+        }
+    }
+
     /**
      * 生成升级 SQL 脚本（单根字段）。
      *
@@ -222,6 +265,7 @@ public class UpgradeScriptService {
         latestFieldDefsCtx.set(latestFieldDefs);
         try {
             String result = doGenerateUpgradeScriptBatch(roots, maxDepth, relTypes);
+            result = mergeConsecutiveUpdates(result);
             return includeComments ? result : stripComments(result);
         } finally {
             latestFieldDefsCtx.remove();
@@ -984,6 +1028,400 @@ public class UpgradeScriptService {
         s = MYBATIS_TARGET_IDS_PATTERN.matcher(s).replaceFirst("").trim();
         return s;
     }
+
+    // ─── 连续同条件 UPDATE 合并（后处理优化）────────────────────────────────────
+
+    /**
+     * 后处理优化：扫描生成的 SQL 脚本，将连续出现的同表同 WHERE 条件的 UPDATE 语句
+     * 合并为一条（多个 SET 子句）。
+     *
+     * <p>安全性保证：
+     * <ul>
+     *   <li>仅合并<b>连续</b>出现的满足条件的语句，保持原有执行顺序不变。</li>
+     *   <li>若后一条语句的 SET 表达式引用了前一条语句正在更新的列（或反之），
+     *       则不合并（避免 SQL 单条 UPDATE 中多个 SET 表达式均基于行旧值求值的语义问题）。</li>
+     * </ul>
+     */
+    private String mergeConsecutiveUpdates(String sqlScript) {
+        if (sqlScript == null || sqlScript.isEmpty()) return sqlScript;
+        List<StatementBlock> blocks = parseStatementBlocks(sqlScript);
+        if (blocks.size() <= 1) return sqlScript;
+
+        StringBuilder result = new StringBuilder();
+        int i = 0;
+        while (i < blocks.size()) {
+            StatementBlock cur = blocks.get(i);
+            if (!cur.isUpdate || cur.setClauses.isEmpty()) {
+                result.append(cur.render());
+                i++;
+                continue;
+            }
+
+            // 尝试向后合并连续满足条件的 UPDATE 块
+            List<StatementBlock> group = new ArrayList<>();
+            group.add(cur);
+            int j = i + 1;
+            while (j < blocks.size()) {
+                StatementBlock next = blocks.get(j);
+                if (!next.isUpdate || next.setClauses.isEmpty()) break;
+                if (!cur.tableName.equalsIgnoreCase(next.tableName)) break;
+                // 别名兼容性：两者必须相同，或其中一方无别名
+                // 一方有别名、另一方无别名时可合并（合并后使用有别名的那一方）
+                // 两者均有别名但不同时不可合并（子查询中的 alias.col 引用无法调和）
+                String curAlias  = cur.tableAlias  != null ? cur.tableAlias  : "";
+                String nextAlias = next.tableAlias != null ? next.tableAlias : "";
+                if (!curAlias.isEmpty() && !nextAlias.isEmpty()
+                        && !curAlias.equalsIgnoreCase(nextAlias)) break;
+                // FROM 子句必须完全相同（空 = 相关子查询格式；非空 = UPDATE...FROM 格式）
+                String curFrom  = cur.fromClause  != null ? cur.fromClause  : "";
+                String nextFrom = next.fromClause != null ? next.fromClause : "";
+                if (!curFrom.equals(nextFrom)) break;
+                // WHERE 子句必须完全相同
+                String curWhere  = cur.whereClause  != null ? cur.whereClause  : "";
+                String nextWhere = next.whereClause != null ? next.whereClause : "";
+                if (!curWhere.equals(nextWhere)) break;
+                if (hasSetColumnConflict(group, next)) break;
+                group.add(next);
+                j++;
+            }
+
+            if (group.size() == 1) {
+                result.append(cur.render());
+            } else {
+                result.append(buildMergedUpdate(group));
+            }
+            i = j;
+        }
+        return result.toString();
+    }
+
+    /**
+     * 将 SQL 脚本文本解析为 {@link StatementBlock} 列表。
+     * 每个块由若干注释行 + 一条以 ';' 结尾的 SQL 语句组成。
+     */
+    private List<StatementBlock> parseStatementBlocks(String sqlScript) {
+        List<StatementBlock> blocks = new ArrayList<>();
+        String[] lines = sqlScript.split("\n", -1);
+
+        List<String> commentBuffer = new ArrayList<>();
+        StringBuilder sqlBuffer    = new StringBuilder();
+        boolean inSql = false;
+
+        for (String line : lines) {
+            String trimmed = line.trim();
+
+            if (inSql) {
+                sqlBuffer.append("\n").append(line);
+                if (trimmed.endsWith(";")) {
+                    StatementBlock b = new StatementBlock();
+                    b.commentLines.addAll(commentBuffer);
+                    b.sqlStatement = sqlBuffer.toString().trim();
+                    parseUpdateStatement(b);
+                    blocks.add(b);
+                    commentBuffer.clear();
+                    sqlBuffer.setLength(0);
+                    inSql = false;
+                }
+            } else if (trimmed.isEmpty()) {
+                if (!commentBuffer.isEmpty()) {
+                    StatementBlock b = new StatementBlock();
+                    b.commentLines.addAll(commentBuffer);
+                    blocks.add(b);
+                    commentBuffer.clear();
+                }
+            } else if (trimmed.startsWith("--")) {
+                commentBuffer.add(line);
+            } else {
+                // SQL 起始行
+                sqlBuffer.setLength(0);
+                sqlBuffer.append(line);
+                inSql = true;
+                if (trimmed.endsWith(";")) {
+                    StatementBlock b = new StatementBlock();
+                    b.commentLines.addAll(commentBuffer);
+                    b.sqlStatement = sqlBuffer.toString().trim();
+                    parseUpdateStatement(b);
+                    blocks.add(b);
+                    commentBuffer.clear();
+                    sqlBuffer.setLength(0);
+                    inSql = false;
+                }
+            }
+        }
+        // 收尾
+        if (!commentBuffer.isEmpty() || sqlBuffer.length() > 0) {
+            StatementBlock b = new StatementBlock();
+            b.commentLines.addAll(commentBuffer);
+            if (sqlBuffer.length() > 0) {
+                b.sqlStatement = sqlBuffer.toString().trim();
+                parseUpdateStatement(b);
+            }
+            if (!b.commentLines.isEmpty() || b.sqlStatement != null) {
+                blocks.add(b);
+            }
+        }
+        return blocks;
+    }
+
+    /**
+     * 解析 UPDATE 语句，提取表名、别名、FROM 子句、WHERE 子句和 SET 子句列表。
+     * 仅当 {@code sqlStatement} 以 UPDATE 开头时才解析，否则保持 isUpdate=false。
+     *
+     * <p>兼容两种格式：
+     * <ul>
+     *   <li>相关子查询：{@code UPDATE t SET col=(SELECT ... FROM src WHERE ...)} —— FROM/WHERE 在括号内，顶层无 FROM</li>
+     *   <li>PostgreSQL UPDATE...FROM：{@code UPDATE t SET col=src.x FROM src WHERE t.id=src.fk} —— 顶层有 FROM</li>
+     * </ul>
+     */
+    private void parseUpdateStatement(StatementBlock block) {
+        if (block.sqlStatement == null) return;
+        String sql = block.sqlStatement.trim();
+        if (!sql.toUpperCase().startsWith("UPDATE")) return;
+        block.isUpdate = true;
+
+        // "UPDATE " 之后的部分：tableName [alias]\nSET ...
+        String rest = sql.substring(6).trim();
+
+        // 在 rest 中找顶层 SET 关键字
+        int setIdx = findTopLevelKeyword(rest, 0, "SET");
+        if (setIdx < 0) return;
+
+        // 解析表名和别名（SET 前的部分，按空白分割）
+        // 支持三种格式：
+        //   "table"          → 无别名
+        //   "table alias"    → 无 AS 关键字的别名
+        //   "table AS alias" → 含 AS 关键字的别名
+        String tableAndAlias = rest.substring(0, setIdx).trim();
+        String[] tParts = tableAndAlias.split("\\s+");
+        block.tableName = tParts[0];
+        if (tParts.length == 3 && "AS".equalsIgnoreCase(tParts[1])) {
+            block.tableAlias   = tParts[2];
+            block.tableAliasAs = true;
+        } else if (tParts.length == 2) {
+            block.tableAlias   = tParts[1];
+            block.tableAliasAs = false;
+        } else {
+            block.tableAlias   = null;
+            block.tableAliasAs = false;
+        }
+
+        // SET 之后的内容
+        String afterSet = rest.substring(setIdx + 3).trim(); // skip "SET"
+
+        // 找顶层 FROM 和 WHERE（括号内的不算）
+        int fromIdx  = findTopLevelKeyword(afterSet, 0, "FROM");
+        int whereIdx = findTopLevelKeyword(afterSet, 0, "WHERE");
+
+        // 判断是否为 UPDATE...FROM...WHERE 格式：顶层 FROM 出现在 WHERE 之前
+        boolean hasTopLevelFrom = fromIdx >= 0 && (whereIdx < 0 || fromIdx < whereIdx);
+
+        String setSection;
+        if (hasTopLevelFrom) {
+            // UPDATE t SET col=src.x FROM src WHERE ...
+            // setSection = col=src.x（不含 FROM 及后续内容）
+            setSection = afterSet.substring(0, fromIdx).trim();
+            String afterFrom = afterSet.substring(fromIdx + 4).trim();
+            int whereInFrom = findTopLevelKeyword(afterFrom, 0, "WHERE");
+            if (whereInFrom >= 0) {
+                block.fromClause = afterFrom.substring(0, whereInFrom).trim();
+                String afterWhere = afterFrom.substring(whereInFrom + 5).trim();
+                if (afterWhere.endsWith(";")) afterWhere = afterWhere.substring(0, afterWhere.length() - 1).trim();
+                block.whereClause = afterWhere;
+            } else {
+                String fromRest = afterFrom;
+                if (fromRest.endsWith(";")) fromRest = fromRest.substring(0, fromRest.length() - 1).trim();
+                block.fromClause  = fromRest;
+                block.whereClause = "";
+            }
+        } else {
+            // 相关子查询格式：FROM/WHERE 都在括号内，顶层只可能有 WHERE
+            block.fromClause = "";
+            if (whereIdx >= 0) {
+                setSection = afterSet.substring(0, whereIdx).trim();
+                String afterWhere = afterSet.substring(whereIdx + 5).trim();
+                if (afterWhere.endsWith(";")) afterWhere = afterWhere.substring(0, afterWhere.length() - 1).trim();
+                block.whereClause = afterWhere;
+            } else {
+                setSection = afterSet;
+                if (setSection.endsWith(";")) setSection = setSection.substring(0, setSection.length() - 1).trim();
+                block.whereClause = "";
+            }
+        }
+
+        block.setClauses = parseSetClauses(setSection);
+    }
+
+    /**
+     * 在 {@code text} 中从 {@code startFrom} 开始查找顶层（括号深度为 0）的 SQL 关键字。
+     * 关键字前后必须是非字母/数字字符，避免误匹配子字符串。
+     *
+     * @return 关键字在 text 中的起始索引；未找到则返回 -1
+     */
+    private int findTopLevelKeyword(String text, int startFrom, String keyword) {
+        String upper  = text.toUpperCase();
+        String kwUp   = keyword.toUpperCase();
+        int kwLen     = kwUp.length();
+        int depth     = 0;
+
+        for (int i = startFrom; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if      (c == '(') { depth++; continue; }
+            else if (c == ')') { depth--; continue; }
+            if (depth != 0) continue;
+
+            if (upper.startsWith(kwUp, i)) {
+                boolean prevOk = (i == 0) || !Character.isLetterOrDigit(text.charAt(i - 1));
+                int endIdx = i + kwLen;
+                boolean nextOk = (endIdx >= text.length()) || !Character.isLetterOrDigit(text.charAt(endIdx));
+                if (prevOk && nextOk) return i;
+            }
+        }
+        return -1;
+    }
+
+    /** 按顶层逗号拆分 SET 子句段落，返回解析后的 {@link SetClause} 列表。 */
+    private List<SetClause> parseSetClauses(String setSection) {
+        List<SetClause> result = new ArrayList<>();
+        int depth = 0;
+        int start = 0;
+        for (int i = 0; i < setSection.length(); i++) {
+            char c = setSection.charAt(i);
+            if      (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (c == ',' && depth == 0) {
+                String part = setSection.substring(start, i).trim();
+                if (!part.isEmpty()) result.add(parseOneSetClause(part));
+                start = i + 1;
+            }
+        }
+        String last = setSection.substring(start).trim();
+        if (!last.isEmpty()) result.add(parseOneSetClause(last));
+        return result;
+    }
+
+    /** 解析单个 SET 子句（"col = expr"），找到顶层第一个 '=' 分割列名与表达式。 */
+    private SetClause parseOneSetClause(String text) {
+        SetClause sc  = new SetClause();
+        sc.originalText = text;
+        int eqIdx = -1;
+        int depth = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if      (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (c == '=' && depth == 0) { eqIdx = i; break; }
+        }
+        if (eqIdx > 0) {
+            sc.columnName = text.substring(0, eqIdx).trim();
+            sc.expression = text.substring(eqIdx + 1).trim();
+        } else {
+            sc.columnName = text.trim();
+            sc.expression = "";
+        }
+        return sc;
+    }
+
+    /**
+     * 检查 {@code next} 与 {@code group} 之间是否存在列冲突，即：
+     * group 中某 SET 表达式引用了 next 正在更新的列，或反之。
+     * 存在冲突时不能合并，以避免 SQL 中同一 UPDATE 多 SET 子句均使用行旧值求值的语义问题。
+     */
+    private boolean hasSetColumnConflict(List<StatementBlock> group, StatementBlock next) {
+        Set<String> groupCols = new HashSet<>();
+        for (StatementBlock b : group) {
+            for (SetClause sc : b.setClauses) groupCols.add(sc.columnName.toLowerCase());
+        }
+        Set<String> nextCols = new HashSet<>();
+        for (SetClause sc : next.setClauses) nextCols.add(sc.columnName.toLowerCase());
+
+        // group 的 SET 表达式是否引用了 next 正在更新的列
+        for (StatementBlock b : group) {
+            for (SetClause sc : b.setClauses) {
+                String expr = sc.expression.toLowerCase();
+                for (String col : nextCols) {
+                    if (containsWordInSql(expr, col)) return true;
+                }
+            }
+        }
+        // next 的 SET 表达式是否引用了 group 正在更新的列
+        for (SetClause sc : next.setClauses) {
+            String expr = sc.expression.toLowerCase();
+            for (String col : groupCols) {
+                if (containsWordInSql(expr, col)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 以单词边界判断 {@code text} 中是否包含 {@code word}（小写匹配）。 */
+    private boolean containsWordInSql(String text, String word) {
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                "\\b" + java.util.regex.Pattern.quote(word) + "\\b");
+        return p.matcher(text).find();
+    }
+
+    /**
+     * 将多个可合并的 UPDATE 块合并为一条 UPDATE 语句文本。
+     * 所有块的注释行依次输出，SET 子句以逗号分隔合并，FROM/WHERE 子句取第一个块的值（所有块相同）。
+     *
+     * <p>合并后格式：
+     * <pre>
+     * -- 注释1
+     * -- 注释2
+     * UPDATE table [alias]
+     * SET col1 = expr1,
+     *     col2 = expr2
+     * [FROM ...]       -- 仅 UPDATE...FROM 格式时出现
+     * [WHERE ...]
+     * ;
+     * </pre>
+     */
+    private String buildMergedUpdate(List<StatementBlock> group) {
+        StringBuilder sb = new StringBuilder();
+        // 合并所有注释
+        for (StatementBlock block : group) {
+            for (String comment : block.commentLines) sb.append(comment).append("\n");
+        }
+        // 构建 UPDATE ... SET ...
+        // 别名：优先使用 group 中任一有别名的块（所有块要么别名相同，要么其中一方无别名）
+        StatementBlock first = group.get(0);
+        String mergedAlias   = null;
+        boolean mergedAliasAs = false;
+        for (StatementBlock b : group) {
+            if (b.tableAlias != null && !b.tableAlias.isEmpty()) {
+                mergedAlias   = b.tableAlias;
+                mergedAliasAs = b.tableAliasAs;
+                break;
+            }
+        }
+        sb.append("UPDATE ").append(first.tableName);
+        if (mergedAlias != null) {
+            if (mergedAliasAs) sb.append(" AS");
+            sb.append(" ").append(mergedAlias);
+        }
+        sb.append("\n").append("SET ");
+        boolean firstSet = true;
+        for (StatementBlock block : group) {
+            for (SetClause sc : block.setClauses) {
+                if (!firstSet) sb.append(",\n    ");
+                sb.append(sc.originalText);
+                firstSet = false;
+            }
+        }
+        // UPDATE...FROM 格式：SET 之后跟 FROM（所有块的 FROM 子句相同）
+        String from = first.fromClause;
+        if (from != null && !from.isEmpty()) {
+            sb.append("\nFROM ").append(from);
+        }
+        String where = first.whereClause;
+        if (where != null && !where.isEmpty()) {
+            sb.append("\nWHERE ").append(where);
+        }
+        sb.append(";\n\n");
+        return sb.toString();
+    }
+
+    // ─── 注释剥离 ────────────────────────────────────────────────────────────
 
     /**
      * 去除 SQL 文本中所有注释行（以 "--" 开头的行），并折叠多余的连续空行为单个空行。
