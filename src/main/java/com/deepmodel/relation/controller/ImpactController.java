@@ -19,6 +19,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.AbstractMap;
 
@@ -495,6 +501,116 @@ public class ImpactController {
      */
     @PostMapping(value = "/api/impact/upgradeScript/batch", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<String> generateUpgradeScriptBatch(@RequestBody UpgradeScriptBatchRequest req) {
+        List<Map.Entry<String, String>> roots = parseRoots(req);
+        int depth = req.depth != null && req.depth > 0 ? req.depth : 3;
+        String relTypes = req.relTypes != null && !req.relTypes.isEmpty() ? req.relTypes : "intra,writeBack";
+        Map<String, BaseappObjectField> latestFieldDefs = fetchLatestFieldDefs(req, null);
+        boolean includeComments = req.includeComments != null && req.includeComments;
+
+        String sql = upgradeScriptService.generateUpgradeScriptBatch(roots, depth, relTypes, latestFieldDefs, includeComments);
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"batch_upgrade.sql\"");
+        headers.setContentType(MediaType.TEXT_PLAIN);
+        return new ResponseEntity<>(sql, headers, HttpStatus.OK);
+    }
+
+    /**
+     * 批量生成升级脚本（流式版本）：边执行边通过 HTTP 分块传输向前端推送进度。
+     *
+     * <p>响应流格式：
+     * <ul>
+     *   <li>进度行：{@code -- [PROGRESS] 消息文本\n}（每个阶段 / 每个字段处理前即时 flush）</li>
+     *   <li>最终 SQL：所有进度行之后，正常写入完整 SQL 文本</li>
+     * </ul>
+     * 前端通过 {@code fetch} + {@code ReadableStream} 逐行读取，识别 {@code -- [PROGRESS]} 前缀
+     * 更新进度 UI，其余行拼接为最终 SQL 结果。
+     */
+    @PostMapping(value = "/api/impact/upgradeScript/batch/stream",
+                 produces = "text/plain;charset=UTF-8")
+    public ResponseEntity<StreamingResponseBody> generateUpgradeScriptBatchStream(
+            @RequestBody UpgradeScriptBatchRequest req) {
+
+        final List<Map.Entry<String, String>> roots = parseRoots(req);
+        final int depth = req.depth != null && req.depth > 0 ? req.depth : 3;
+        final String relTypes = req.relTypes != null && !req.relTypes.isEmpty() ? req.relTypes : "intra,writeBack";
+        final boolean includeComments = req.includeComments != null && req.includeComments;
+
+        StreamingResponseBody body = outputStream -> {
+            BufferedWriter writer = new BufferedWriter(
+                    new OutputStreamWriter(outputStream, StandardCharsets.UTF_8));
+
+            // 所有对 writer 的写操作都加锁，避免心跳线程与主线程并发写导致数据损坏
+            // 进度回调
+            java.util.function.Consumer<String> progress = msg -> {
+                synchronized (writer) {
+                    try {
+                        writer.write("-- [PROGRESS] " + msg + "\n");
+                        writer.flush();
+                    } catch (IOException ignored) {}
+                }
+            };
+
+            // 心跳：每 8 秒发一行 -- [HEARTBEAT]，在图构建/拓扑排序等无进度阶段保活连接
+            // application.yml 已设 spring.mvc.async.request-timeout=-1 关闭 Tomcat 内部超时，
+            // 但中间代理（Nginx/LB）仍可能基于空闲时间断连，心跳可规避此问题
+            java.util.concurrent.atomic.AtomicBoolean finished =
+                    new java.util.concurrent.atomic.AtomicBoolean(false);
+            java.util.concurrent.ScheduledExecutorService heartbeatSvc =
+                    java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                        Thread t = new Thread(r, "upgrade-heartbeat");
+                        t.setDaemon(true);
+                        return t;
+                    });
+            heartbeatSvc.scheduleAtFixedRate(() -> {
+                if (!finished.get()) {
+                    synchronized (writer) {
+                        try {
+                            writer.write("-- [HEARTBEAT] keep-alive\n");
+                            writer.flush();
+                        } catch (IOException ignored) {}
+                    }
+                }
+            }, 8, 8, java.util.concurrent.TimeUnit.SECONDS);
+
+            try {
+                // compareDb 字段加载（可能耗时，单独上报进度）
+                Map<String, BaseappObjectField> latestFieldDefs = fetchLatestFieldDefs(req, progress);
+
+                String sql = upgradeScriptService.generateUpgradeScriptBatch(
+                        roots, depth, relTypes, latestFieldDefs, includeComments, progress);
+
+                synchronized (writer) {
+                    writer.write(sql);
+                    writer.flush();
+                }
+            } catch (Throwable e) {
+                // 捕获 Throwable 而非 Exception，确保 OOM / StackOverflow 等 Error 也能上报
+                log.error("[upgradeScript/batch/stream] 生成失败", e);
+                String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getName();
+                synchronized (writer) {
+                    try {
+                        writer.write("-- [ERROR] " + errMsg + "\n");
+                        writer.flush();
+                    } catch (IOException ignored) {}
+                }
+            } finally {
+                finished.set(true);
+                heartbeatSvc.shutdown();
+            }
+        };
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("text/plain;charset=UTF-8"))
+                .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"batch_upgrade.sql\"")
+                .header("X-Accel-Buffering", "no")   // 禁用 Nginx 等代理缓冲
+                .body(body);
+    }
+
+    // ─── 私有辅助方法 ────────────────────────────────────────────────────────
+
+    /** 将请求体中的 roots 列表解析为 Entry 列表。 */
+    private List<Map.Entry<String, String>> parseRoots(UpgradeScriptBatchRequest req) {
         List<Map.Entry<String, String>> roots = new ArrayList<>();
         if (req.roots != null) {
             for (UpgradeScriptBatchRequest.RootItem r : req.roots) {
@@ -503,44 +619,46 @@ public class ImpactController {
                 }
             }
         }
-        int depth = req.depth != null && req.depth > 0 ? req.depth : 3;
-        String relTypes = req.relTypes != null && !req.relTypes.isEmpty() ? req.relTypes : "intra,writeBack";
+        return roots;
+    }
 
-        // 如果前端传入了比较库连接，拉取最新字段定义用于生成 SQL（以比较库定义为准）
-        Map<String, BaseappObjectField> latestFieldDefs = null;
-        if (req.compareDbUrl != null && !req.compareDbUrl.trim().isEmpty()) {
-            try {
-                List<String> compareApps = parseAppNames(req.compareDbAppName);
-                List<BaseappObjectField> compareFields = snapshotService.fetchCompareDbFields(
-                        req.compareDbUrl.trim(), req.compareDbUser, req.compareDbPassword, compareApps);
-                latestFieldDefs = new LinkedHashMap<>();
-                for (BaseappObjectField f : compareFields) {
-                    String obj = f.getObjectType();
-                    if (obj == null)
-                        continue;
-                    // 以 apiName（camelCase）为主键，name（snake_case）为辅键，都存入，方便双格式查找
-                    if (f.getApiName() != null && !f.getApiName().trim().isEmpty()) {
-                        latestFieldDefs.put(obj + "." + f.getApiName().trim(), f);
-                    }
-                    if (f.getName() != null && !f.getName().trim().isEmpty()) {
-                        latestFieldDefs.put(obj + "." + f.getName().trim(), f);
-                        // name 是 snake_case 时也存 camelCase key
-                        String camel = com.deepmodel.relation.util.ExprUtils.snakeToCamel(f.getName().trim());
-                        latestFieldDefs.putIfAbsent(obj + "." + camel, f);
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("[upgradeScript/batch] 拉取比较库字段定义失败，降级为本地定义: {}", e.getMessage());
-            }
+    /**
+     * 从比较库拉取最新字段定义（若请求中包含 compareDbUrl）。
+     *
+     * @param progress 进度回调，可为 null
+     * @return 字段 map（key = "ObjectType.camelField"）；未配置比较库时返回 null
+     */
+    private Map<String, BaseappObjectField> fetchLatestFieldDefs(
+            UpgradeScriptBatchRequest req,
+            java.util.function.Consumer<String> progress) {
+        if (req.compareDbUrl == null || req.compareDbUrl.trim().isEmpty()) {
+            return null;
         }
-
-        boolean includeComments = req.includeComments != null && req.includeComments;
-        String sql = upgradeScriptService.generateUpgradeScriptBatch(roots, depth, relTypes, latestFieldDefs, includeComments);
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"batch_upgrade.sql\"");
-        headers.setContentType(MediaType.TEXT_PLAIN);
-        return new ResponseEntity<>(sql, headers, HttpStatus.OK);
+        if (progress != null) progress.accept("正在从比较库加载最新字段定义...");
+        try {
+            List<String> compareApps = parseAppNames(req.compareDbAppName);
+            List<BaseappObjectField> compareFields = snapshotService.fetchCompareDbFields(
+                    req.compareDbUrl.trim(), req.compareDbUser, req.compareDbPassword, compareApps);
+            Map<String, BaseappObjectField> defs = new LinkedHashMap<>();
+            for (BaseappObjectField f : compareFields) {
+                String obj = f.getObjectType();
+                if (obj == null) continue;
+                if (f.getApiName() != null && !f.getApiName().trim().isEmpty()) {
+                    defs.put(obj + "." + f.getApiName().trim(), f);
+                }
+                if (f.getName() != null && !f.getName().trim().isEmpty()) {
+                    defs.put(obj + "." + f.getName().trim(), f);
+                    String camel = com.deepmodel.relation.util.ExprUtils.snakeToCamel(f.getName().trim());
+                    defs.putIfAbsent(obj + "." + camel, f);
+                }
+            }
+            if (progress != null) progress.accept("比较库字段加载完成（" + defs.size() + " 条记录）");
+            return defs;
+        } catch (Exception e) {
+            log.warn("[upgradeScript/batch] 拉取比较库字段定义失败，降级为本地定义: {}", e.getMessage());
+            if (progress != null) progress.accept("比较库加载失败，降级为本地定义");
+            return null;
+        }
     }
 
     public static class UpgradeScriptBatchRequest {

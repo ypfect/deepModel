@@ -250,13 +250,13 @@
         }
 
         @keyframes loading {
-            0% {
-                background-position: 100% 0;
-            }
+            0% { background-position: 100% 0; }
+            100% { background-position: -100% 0; }
+        }
 
-            100% {
-                background-position: -100% 0;
-            }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
         }
 
         .status-text {
@@ -383,6 +383,31 @@
                     <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:24px;">
                         <button type="button" id="upgrade-script-cancel" style="padding:8px 20px; font-size:13px; border-radius:7px; background:#f1f5f9; color:#475569; border:1px solid #e2e8f0; cursor:pointer; font-weight:500;">取消</button>
                         <button type="button" id="upgrade-script-execute" style="padding:8px 20px; font-size:13px; border-radius:7px; background:linear-gradient(135deg,#2563eb,#4f46e5); color:#fff; border:none; cursor:pointer; font-weight:500;">执行</button>
+                    </div>
+                </div>
+                <!-- 进度面板（流式执行中） -->
+                <div id="upgrade-script-progress" style="display:none; padding:20px 24px; flex:1; flex-direction:column; gap:14px; overflow:hidden;">
+                    <!-- 标题 + 当前步骤 -->
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <svg style="flex-shrink:0; animation:spin 1s linear infinite;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                        <span id="upgrade-progress-title" style="font-size:13px; font-weight:600; color:#1e293b;">正在生成升级脚本...</span>
+                    </div>
+                    <!-- 进度条 -->
+                    <div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                            <span id="upgrade-progress-msg" style="font-size:12px; color:#475569; font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90%;"></span>
+                            <span id="upgrade-progress-pct" style="font-size:12px; color:#94a3b8; flex-shrink:0; margin-left:8px;"></span>
+                        </div>
+                        <div style="background:#e2e8f0; border-radius:99px; height:7px; overflow:hidden;">
+                            <div id="upgrade-progress-bar"
+                                 class="progress-bar indeterminate"
+                                 style="height:100%; border-radius:99px; transition:width 0.4s ease;"></div>
+                        </div>
+                    </div>
+                    <!-- 日志滚动区 -->
+                    <div style="flex:1; overflow:hidden; background:#0f172a; border-radius:8px; padding:10px 12px; display:flex; flex-direction:column; min-height:0;">
+                        <div style="font-size:11px; color:#475569; margin-bottom:6px; flex-shrink:0;">执行日志</div>
+                        <div id="upgrade-progress-log" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:2px; min-height:0;"></div>
                     </div>
                 </div>
                 <!-- 结果面板 -->
@@ -597,41 +622,154 @@
             if (closeEl) closeEl.onclick = closeDialog;
             dialog.onclick = (e) => { if (e.target === dialog) closeDialog(); };
 
-            // 点「执行」：切换到结果面板，调后端
+            // 点「执行」：切换到进度面板，调流式接口
             if (executeBtn) {
                 executeBtn.onclick = async () => {
                     const includeComments = commentChk ? commentChk.checked : false;
 
-                    // 切换到「结果面板」状态
+                    const progressDiv  = document.getElementById('upgrade-script-progress');
+                    const progressMsg  = document.getElementById('upgrade-progress-msg');
+                    const progressPct  = document.getElementById('upgrade-progress-pct');
+                    const progressBar  = document.getElementById('upgrade-progress-bar');
+                    const progressLog  = document.getElementById('upgrade-progress-log');
+                    const progressTitle = document.getElementById('upgrade-progress-title');
+
+                    // 切换到「进度面板」
                     configDiv.style.display = 'none';
-                    resultDiv.style.display = 'block';
+                    if (progressDiv) {
+                        progressDiv.style.display = 'flex';
+                        progressLog.innerHTML = '';
+                        progressMsg.textContent = '初始化...';
+                        progressPct.textContent = '';
+                        progressBar.className = 'progress-bar indeterminate';
+                        progressBar.style.width = '';
+                        progressTitle.textContent = `正在生成升级脚本（${items.length} 个根字段）...`;
+                    }
+                    resultDiv.style.display = 'none';
                     if (downloadBtn) downloadBtn.style.display = 'none';
-                    pre.textContent = '正在生成，请稍候...';
+
+                    const payload = {
+                        roots: items,
+                        depth: parseInt((document.getElementById('upgradeDepth') || {}).value || '3', 10) || 3,
+                        relTypes: 'intra,writeBack',
+                        includeComments: includeComments,
+                        compareDbUrl:      (document.getElementById('compareUrl')  || {}).value || '',
+                        compareDbUser:     (document.getElementById('compareUser') || {}).value || '',
+                        compareDbPassword: (document.getElementById('comparePass') || {}).value || '',
+                        compareDbAppName:  (document.getElementById('compareAppName') || {}).value || ''
+                    };
+
+                    // 辅助：向日志追加一行
+                    const appendLog = (text, color) => {
+                        const el = document.createElement('div');
+                        el.style.cssText = `font-size:11px; font-family:monospace; color:${color || '#64748b'}; line-height:1.6; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;`;
+                        el.title = text;
+                        el.textContent = text;
+                        progressLog.appendChild(el);
+                        progressLog.scrollTop = progressLog.scrollHeight;
+                    };
+
+                    // 解析 "(n/N)" 前缀，有则返回进度百分比，否则返回 -1
+                    const parsePct = (msg) => {
+                        const m = msg.match(/^\((\d+)\/(\d+)\)/);
+                        return m ? Math.round(parseInt(m[1]) / parseInt(m[2]) * 100) : -1;
+                    };
 
                     try {
-                        const payload = {
-                            roots: items,
-                            depth: parseInt((document.getElementById('upgradeDepth') || {}).value || '3', 10) || 3,
-                            relTypes: 'intra,writeBack',
-                            includeComments: includeComments,
-                            compareDbUrl:      (document.getElementById('compareUrl')  || {}).value || '',
-                            compareDbUser:     (document.getElementById('compareUser') || {}).value || '',
-                            compareDbPassword: (document.getElementById('comparePass') || {}).value || '',
-                            compareDbAppName:  (document.getElementById('compareAppName') || {}).value || ''
-                        };
-                        const res = await fetch('/api/impact/upgradeScript/batch', {
+                        const res = await fetch('/api/impact/upgradeScript/batch/stream', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
                         });
-                        const text = await res.text();
-                        pre.textContent = res.ok ? text : `请求失败: ${res.status}\n${text}`;
-                        window.__lastUpgradeScript = { batch: true, sql: text };
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
 
-                        if (res.ok && downloadBtn) {
+                        const reader  = res.body.getReader();
+                        const decoder = new TextDecoder();
+                        let buf = '';
+                        const sqlLines = [];
+                        let hasError = false;
+
+                        outer: while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            buf += decoder.decode(value, { stream: true });
+                            const parts = buf.split('\n');
+                            buf = parts.pop(); // 最后一段可能不完整，留到下次
+                            for (const line of parts) {
+                                if (line.startsWith('-- [HEARTBEAT] ')) {
+                                    // 心跳保活行：只记日志，不影响进度显示
+                                    appendLog('· keep-alive', '#334155');
+                                } else if (line.startsWith('-- [PROGRESS] ')) {
+                                    const msg = line.slice('-- [PROGRESS] '.length);
+                                    progressMsg.textContent = msg;
+                                    const pct = parsePct(msg);
+                                    if (pct >= 0) {
+                                        // 切换为确定式进度条
+                                        progressBar.className = 'progress-bar';
+                                        progressBar.style.cssText = `height:100%; border-radius:99px; background:linear-gradient(90deg,#2563eb,#4f46e5); transition:width 0.4s ease; width:${pct}%;`;
+                                        progressPct.textContent = pct + '%';
+                                        appendLog(msg, '#60a5fa');
+                                    } else {
+                                        appendLog(msg, '#94a3b8');
+                                    }
+                                } else if (line.startsWith('-- [ERROR] ')) {
+                                    const errMsg = line.slice('-- [ERROR] '.length);
+                                    progressMsg.textContent = '错误：' + errMsg;
+                                    progressMsg.style.color = '#ef4444';
+                                    appendLog('❌ ' + errMsg, '#f87171');
+                                    hasError = true;
+                                } else {
+                                    sqlLines.push(line);
+                                }
+                            }
+                        }
+                        // 处理 buf 中可能剩余的最后一行
+                        if (buf) {
+                            if (!buf.startsWith('-- [HEARTBEAT] ') &&
+                                !buf.startsWith('-- [PROGRESS] ') &&
+                                !buf.startsWith('-- [ERROR] ')) sqlLines.push(buf);
+                        }
+
+                        const sql = sqlLines.join('\n').trim();
+
+                        if (!sql) {
+                            // 流已结束但未收到 SQL：可能是服务端异常、连接超时等
+                            progressBar.className = 'progress-bar';
+                            progressBar.style.cssText = 'height:100%; border-radius:99px; background:#ef4444; width:100%;';
+                            progressTitle.textContent = '生成失败';
+                            progressMsg.style.color = '#ef4444';
+                            if (hasError) {
+                                progressMsg.textContent = '生成出错，请查看上方日志';
+                            } else {
+                                progressMsg.textContent = '未收到 SQL 内容，服务端可能异常或超时，请查看后台日志后重试';
+                                appendLog('❌ 连接异常：流已结束但未收到 SQL', '#f87171');
+                            }
+                            return;
+                        }
+
+                        if (hasError) {
+                            // 有错误行但同时也有 SQL，正常展示（部分成功场景）
+                            appendLog('⚠️ 生成完成（含错误）', '#fbbf24');
+                        }
+
+                        // 成功：进度条推到 100%，短暂停留后切到结果面板
+                        progressBar.className = 'progress-bar';
+                        progressBar.style.cssText = 'height:100%; border-radius:99px; background:linear-gradient(90deg,#2563eb,#4f46e5); transition:width 0.4s ease; width:100%;';
+                        progressPct.textContent = '100%';
+                        progressMsg.textContent = '完成！';
+                        appendLog('✅ 生成完成', '#34d399');
+
+                        await new Promise(r => setTimeout(r, 600));
+
+                        if (progressDiv) progressDiv.style.display = 'none';
+                        resultDiv.style.display = 'block';
+                        pre.textContent = sql;
+                        window.__lastUpgradeScript = { batch: true, sql };
+
+                        if (downloadBtn) {
                             downloadBtn.style.display = 'inline-block';
                             downloadBtn.onclick = () => {
-                                const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+                                const blob = new Blob([sql], { type: 'text/plain;charset=utf-8' });
                                 const a = document.createElement('a');
                                 a.href = URL.createObjectURL(blob);
                                 a.download = 'batch_upgrade.sql';
@@ -640,7 +778,13 @@
                             };
                         }
                     } catch (e) {
-                        pre.textContent = `错误: ${e.message}`;
+                        if (progressDiv) {
+                            progressMsg.textContent = '错误：' + e.message;
+                            progressMsg.style.color = '#ef4444';
+                            progressBar.className = 'progress-bar';
+                            progressBar.style.cssText = 'height:100%; border-radius:99px; background:#ef4444; width:100%;';
+                            appendLog('❌ ' + e.message, '#f87171');
+                        }
                     }
                 };
             }

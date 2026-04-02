@@ -3,10 +3,13 @@ server:
 
 # 回写 SQL 接口（调用外部 arap 服务）
 writeback-sql:
-  api-url: http://arap.test-tx-16.e7link.com/arap/gen/debug/writeBackField2sql
+  api-url: http://arap.release-tx-1.e7link.com/arap/gen/debug/writeBackField2sql
   tenant-id: 711FNX50G6V0009
 #连接数据库
 spring:
+  mvc:
+    async:
+      request-timeout: -1   # 关闭 Tomcat async 超时，流式响应按实际耗时完成
   neo4j:
     uri: bolt://localhost:7687
     authentication:

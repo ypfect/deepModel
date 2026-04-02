@@ -42,6 +42,18 @@ public class UpgradeScriptService {
      */
     private static final ThreadLocal<Map<String, BaseappObjectField>> latestFieldDefsCtx = new ThreadLocal<>();
 
+    /**
+     * 进度回调（流式生成时由外部注入）。
+     * 回调接收进度消息字符串，由调用方决定如何展示（写 HTTP 流、日志等）。
+     */
+    private static final ThreadLocal<java.util.function.Consumer<String>> progressCtx = new ThreadLocal<>();
+
+    /** 向进度回调发送一条消息；未注入回调时静默忽略。 */
+    private void reportProgress(String message) {
+        java.util.function.Consumer<String> cb = progressCtx.get();
+        if (cb != null) cb.accept(message);
+    }
+
     /** 匹配接口返回 SQL 末尾的 MyBatis targetIds 占位符，兼容索引变化 */
     private static final Pattern MYBATIS_TARGET_IDS_PATTERN =
             Pattern.compile("\\s+WHERE\\s+m\\.id\\s+IN\\s*\\(#\\{targetIds\\[\\d+]\\}\\)\\s*$", Pattern.CASE_INSENSITIVE);
@@ -247,28 +259,44 @@ public class UpgradeScriptService {
     }
 
     /**
-     * 批量生成升级脚本。
-     *
-     * @param latestFieldDefs 比较库的最新字段定义 map（key = "ObjectType.camelField"），
-     *                        为 null 时退化为使用本地 in-memory 数据（兼容旧行为）。
-     * @param includeComments 是否在输出 SQL 中保留注释行（以 "--" 开头的行）；
-     *                        false 时自动去除所有注释，输出更精简的纯 SQL。
+     * 批量生成升级脚本（不含进度回调，兼容旧调用）。
      */
     public String generateUpgradeScriptBatch(List<Map.Entry<String, String>> roots,
                                              int maxDepth,
                                              String relTypes,
                                              Map<String, BaseappObjectField> latestFieldDefs,
                                              boolean includeComments) {
+        return generateUpgradeScriptBatch(roots, maxDepth, relTypes, latestFieldDefs, includeComments, null);
+    }
+
+    /**
+     * 批量生成升级脚本（支持进度回调）。
+     *
+     * @param latestFieldDefs  比较库的最新字段定义 map（key = "ObjectType.camelField"），
+     *                         为 null 时退化为使用本地 in-memory 数据（兼容旧行为）。
+     * @param includeComments  是否在输出 SQL 中保留注释行；false 时输出更精简的纯 SQL。
+     * @param progressCallback 进度回调，每个阶段/字段开始处调用；为 null 时无进度输出。
+     */
+    public String generateUpgradeScriptBatch(List<Map.Entry<String, String>> roots,
+                                             int maxDepth,
+                                             String relTypes,
+                                             Map<String, BaseappObjectField> latestFieldDefs,
+                                             boolean includeComments,
+                                             java.util.function.Consumer<String> progressCallback) {
         if (roots == null || roots.isEmpty()) {
             return "-- 未选择任何根字段\n";
         }
         latestFieldDefsCtx.set(latestFieldDefs);
+        progressCtx.set(progressCallback);
         try {
             String result = doGenerateUpgradeScriptBatch(roots, maxDepth, relTypes);
+            reportProgress("正在合并连续 UPDATE 语句...");
             result = mergeConsecutiveUpdates(result);
+            reportProgress("完成！");
             return includeComments ? result : stripComments(result);
         } finally {
             latestFieldDefsCtx.remove();
+            progressCtx.remove();
         }
     }
 
@@ -279,6 +307,7 @@ public class UpgradeScriptService {
             return "-- 未选择任何根字段\n";
         }
 
+        reportProgress("正在规范化根字段名称（共 " + roots.size() + " 个）...");
         List<Map.Entry<String, String>> normalizedRoots = new java.util.ArrayList<>();
         for (Map.Entry<String, String> r : roots) {
             String obj = r.getKey();
@@ -307,11 +336,13 @@ public class UpgradeScriptService {
         // [FIX P1-5] 使用独立方法计算 relType，正确处理 VIEW 等 edge case
         int relType = computeGraphRelType(included);
 
+        reportProgress("正在构建多根合并依赖图...");
         GraphModels.Graph graph = impactAnalyzerService.buildMultiRootClosedGraph(roots, maxDepth, relType);
         if (graph.nodes == null || graph.nodes.isEmpty()) {
             return "-- 未找到任何影响关系（多根合并图为空）\n";
         }
 
+        reportProgress("正在补充最新字段定义与依赖边...");
         normalizeGraphNodeIdsToCamelCase(graph);
         enrichGraphWithLatestEdges(graph);
 
@@ -322,12 +353,22 @@ public class UpgradeScriptService {
             }
         }
 
+        reportProgress("正在拓扑排序与依赖分析...");
         // [FIX P2-8] 收集循环依赖节点，在 SQL 输出中添加 WARNING
         Set<String> cycleNodes = new LinkedHashSet<>();
         List<String> topoOrder = topologicalSort(graph, cycleNodes);
         Map<String, EnumSet<RelType>> incomingTypes = buildIncomingTypes(graph, included);
 
         Set<String> updatedSet = computeUpdatedNodes(topoOrder, rootIds, incomingTypes, included, graph);
+
+        // 预计算需生成 SQL 的节点总数，用于进度显示
+        int sqlNodeTotal = 0;
+        for (String nodeId : topoOrder) {
+            if (nodeId.indexOf('.') <= 0) continue;
+            EnumSet<RelType> t = incomingTypes.getOrDefault(nodeId, EnumSet.noneOf(RelType.class));
+            if (rootIds.contains(nodeId) || !t.isEmpty()) sqlNodeTotal++;
+        }
+        reportProgress("依赖分析完成，共 " + sqlNodeTotal + " 个字段需要生成 SQL");
 
         StringBuilder sb = new StringBuilder();
         sb.append("-- =========================================\n");
@@ -392,6 +433,7 @@ public class UpgradeScriptService {
         }
         sb.append("\n-- ===== 以上为逻辑与顺序，以下开始输出实际 SQL =====\n\n");
 
+        int sqlNodeIdx = 0;
         for (String nodeId : topoOrder) {
             int dot = nodeId.indexOf('.');
             if (dot <= 0) continue;
@@ -401,6 +443,12 @@ public class UpgradeScriptService {
             if (types == null) types = EnumSet.noneOf(RelType.class);
 
             boolean isCycleNode = cycleNodes.contains(nodeId);
+
+            // 仅对有实际内容（根字段或有入边的字段）报告进度
+            if (rootIds.contains(nodeId) || !types.isEmpty()) {
+                sqlNodeIdx++;
+                reportProgress("(" + sqlNodeIdx + "/" + sqlNodeTotal + ") " + objectType + "." + field);
+            }
 
             if (rootIds.contains(nodeId)) {
                 BaseappObjectField rootDef = getLatestFieldInfo(objectType, field);
