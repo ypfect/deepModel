@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepModel Insight - 配置体检中心</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'><path d='M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.18l6.9 3.45L12 11.09 5.1 7.63 12 4.18zM4 8.82l7 3.5v7.36l-7-3.5V8.82zm9 10.86v-7.36l7-3.5v7.36l-7 3.5z'/></svg>">
+    <!-- 引入样式 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
+    <!-- 使用系统字体，避免 Google Fonts CDN 抖动 -->
+    <style>
+        :root {
+            --el-color-primary: #3b82f6;
+            --bg:          #0d1117;
+            --card-bg:     #161b27;
+            --card-border: #2a3347;
+            --text-primary:   #e2e8f0;
+            --text-secondary: #8892a4;
+            --accent-blue:   #60a5fa;
+            --accent-green:  #34d399;
+            --accent-red:    #f87171;
+            --accent-orange: #fbbf24;
+            --accent-purple: #a78bfa;
+        }
+        * { box-sizing: border-box; }
+        html { background: #0d1117; }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+            background: #0d1117;
+            min-height: 100vh;
+            color: var(--text-primary);
+        }
+        #app {
+            padding: 32px 24px;
+            max-width: 1500px;
+            margin: 0 auto;
+        }
+
+        /* ===== Header ===== */
+        .header-section {
+            text-align: center;
+            margin-bottom: 36px;
+            position: relative;
+        }
+        .header-section h1 {
+            font-size: 32px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin: 0 0 8px 0;
+            letter-spacing: -0.5px;
+        }
+        .header-section .subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin: 0;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .header-badge {
+            display: inline-block;
+            margin-top: 12px;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            background: #1e3a5c;
+            color: var(--accent-blue);
+            border: 1px solid #2d5a8e;
+        }
+
+        /* ===== Card ===== */
+        .glass-card {
+            background: #161b27;
+            border-radius: 12px;
+            border: 1px solid #2a3347;
+            box-shadow: 0 4px 16px #00000060;
+            margin-bottom: 20px;
+            padding: 22px;
+        }
+
+
+        /* ===== Stat Cards ===== */
+        .stat-card-row { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+        .stat-card {
+            flex: 1;
+            min-width: 180px;
+            text-align: center;
+            padding: 20px 16px;
+            border-radius: 12px;
+            background: #111622;
+            border: 1px solid #2a3347;
+            position: relative;
+            overflow: hidden;
+        }
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            border-radius: 14px 14px 0 0;
+        }
+        .stat-card.info::before { background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple)); }
+        .stat-card.error::before { background: linear-gradient(90deg, var(--accent-red), #dc2626); }
+        .stat-card.warning::before { background: linear-gradient(90deg, var(--accent-orange), #f59e0b); }
+        .stat-card.fatal::before { background: linear-gradient(90deg, #dc2626, #991b1b); }
+        .stat-title {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .stat-value {
+            font-size: 36px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .stat-value.info-color { color: var(--accent-blue); }
+        .stat-value.error-color { color: var(--accent-red); }
+        .stat-value.warning-color { color: var(--accent-orange); }
+        .stat-value.fatal-color { color: #dc2626; }
+
+        /* ===== Severity Text ===== */
+        .severity-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 0.5px;
+        }
+        .severity-badge.FATAL {
+            background: rgba(220, 38, 38, 0.2);
+            color: #fca5a5;
+            border: 1px solid rgba(220, 38, 38, 0.4);
+        }
+        .severity-badge.ERROR {
+            background: rgba(248, 113, 113, 0.15);
+            color: #fca5a5;
+            border: 1px solid rgba(248, 113, 113, 0.3);
+        }
+        .severity-badge.WARNING {
+            background: rgba(251, 191, 36, 0.15);
+            color: #fde68a;
+            border: 1px solid rgba(251, 191, 36, 0.3);
+        }
+        .severity-badge.INFO {
+            background: rgba(96, 165, 250, 0.15);
+            color: #93c5fd;
+            border: 1px solid rgba(96, 165, 250, 0.3);
+        }
+
+        /* ===== Category Badge ===== */
+        .category-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 500;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .category-badge.NESTED_AGGREGATE,
+        .category-badge.AGGREGATE_IN_VALIDATE_EXPR {
+            background: rgba(220, 38, 38, 0.2);
+            color: #fca5a5;
+            border: 1px solid rgba(220, 38, 38, 0.3);
+        }
+        .category-badge.FIELD_NOT_FOUND,
+        .category-badge.OBJECT_NOT_FOUND {
+            background: rgba(248, 113, 113, 0.15);
+            color: #fca5a5;
+            border: 1px solid rgba(248, 113, 113, 0.3);
+        }
+        .category-badge.MISSING_REQUIRED_FIELD,
+        .category-badge.INVALID_EXECUTING_MOMENT {
+            background: rgba(251, 191, 36, 0.15);
+            color: #fde68a;
+            border: 1px solid rgba(251, 191, 36, 0.3);
+        }
+        .category-badge.TYPE_MISMATCH {
+            background: rgba(167, 139, 250, 0.15);
+            color: #c4b5fd;
+            border: 1px solid rgba(167, 139, 250, 0.3);
+        }
+        .category-badge.FATAL_PARSE_ERROR {
+            background: rgba(220, 38, 38, 0.25);
+            color: #fca5a5;
+            border: 1px solid rgba(220, 38, 38, 0.4);
+        }
+        .category-badge.SELF_REFERENCE_IN_VALIDATE {
+            background: rgba(251, 146, 60, 0.15);
+            color: #fdba74;
+            border: 1px solid rgba(251, 146, 60, 0.3);
+        }
+
+        /* ===== Expression Type Badge ===== */
+        .expr-type-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 500;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .expr-type-badge.WRITE_BACK {
+            background: rgba(96, 165, 250, 0.15);
+            color: #93c5fd;
+            border: 1px solid rgba(96, 165, 250, 0.3);
+        }
+        .expr-type-badge.WRITE_BACK_VALIDATE {
+            background: rgba(167, 139, 250, 0.15);
+            color: #c4b5fd;
+            border: 1px solid rgba(167, 139, 250, 0.3);
+        }
+        .expr-type-badge.TRIGGER {
+            background: rgba(52, 211, 153, 0.15);
+            color: #6ee7b7;
+            border: 1px solid rgba(52, 211, 153, 0.3);
+        }
+        .expr-type-badge.EXPRESSION {
+            background: rgba(251, 191, 36, 0.15);
+            color: #fde68a;
+            border: 1px solid rgba(251, 191, 36, 0.3);
+        }
+
+        /* ===== 扫描进度条 ===== */
+        .scan-progress-wrap {
+            margin-top: 18px;
+            padding: 18px;
+            border-radius: 10px;
+            background: #111622;
+            border: 1px solid #2a3347;
+        }
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+        .progress-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        .progress-pct {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--accent-blue);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .progress-track {
+            width: 100%;
+            height: 8px;
+            background: #1e2d42;
+            border-radius: 9999px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+        .progress-track.sm {
+            height: 5px;
+            margin-bottom: 0;
+        }
+        .progress-fill {
+            height: 100%;
+            border-radius: 9999px;
+            transition: width 0.25s ease;
+        }
+        .progress-fill.obj {
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+        }
+        .progress-fill.fld {
+            background: linear-gradient(90deg, #10b981, #34d399);
+        }
+        .progress-sub {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .progress-sub-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        .current-obj-tag {
+            font-size: 12px;
+            padding: 2px 10px;
+            border-radius: 6px;
+            background: #1e3a5c;
+            color: var(--accent-blue);
+            border: 1px solid #2d5a8e;
+            font-family: 'JetBrains Mono', monospace;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 320px;
+        }
+        .scan-tip {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .pulse-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--accent-blue);
+            animation: pulse 1.2s ease-in-out infinite;
+            flex-shrink: 0;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50%       { opacity: 0.4; transform: scale(0.75); }
+        }
+
+        /* ===== Filters ===== */
+        .filter-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .filter-chip {
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid #2a3347;
+            background: #111622;
+            color: var(--text-secondary);
+            user-select: none;
+        }
+        .filter-chip:hover {
+            background: #1a2d4a;
+            border-color: #3b82f6;
+        }
+        .filter-chip.active {
+            background: #1e3a5c;
+            border-color: var(--accent-blue);
+            color: var(--text-primary);
+        }
+        .filter-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            margin-right: 4px;
+        }
+        .filter-divider {
+            width: 1px;
+            height: 20px;
+            background: var(--card-border);
+            margin: 0 4px;
+        }
+
+        /* ===== Message cell ===== */
+        .message-cell {
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
+        .message-cell strong {
+            color: var(--text-primary);
+        }
+
+        /* ===== Element Plus Dark Overrides ===== */
+        .el-tabs__item { color: var(--text-secondary) !important; }
+        .el-tabs__item.is-active { color: var(--accent-blue) !important; }
+        .el-tabs__active-bar { background-color: var(--accent-blue) !important; }
+        .el-input__wrapper {
+            background: #111622 !important;
+            border: 1px solid #2a3347 !important;
+            box-shadow: none !important;
+        }
+        .el-input__inner { color: var(--text-primary) !important; }
+        .el-input__inner::placeholder { color: var(--text-secondary) !important; }
+        .el-button--primary { background: linear-gradient(135deg, #3b82f6, #2563eb) !important; border: none !important; }
+        .el-button--success { background: linear-gradient(135deg, #10b981, #059669) !important; border: none !important; }
+        .el-form-item__label { color: var(--text-secondary) !important; }
+        .el-skeleton { --el-skeleton-color: #1e2a3d !important; --el-skeleton-to-color: #28374f !important; }
+
+        /* ===== 原生 Data Table ===== */
+        .data-table-wrap {
+            overflow-x: auto;
+            max-height: 650px;
+            overflow-y: auto;
+            border-radius: 10px;
+            border: 1px solid var(--card-border);
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            table-layout: fixed;
+        }
+        .data-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: #0a1223;
+            color: var(--text-primary);
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 12px 14px;
+            border-bottom: 1px solid #2a3347;
+            text-align: left;
+            white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+        }
+        .data-table thead th:hover {
+            background: #0f1a30;
+        }
+        .data-table tbody tr {
+            /* 背景由 Vue :style 绑定控制，此处不设 background */
+        }
+        .data-table tbody tr:hover {
+            /* hover 也由 Vue mouseenter/mouseleave 控制，CSS 层不干预 */
+        }
+        .data-table td {
+            padding: 11px 14px;
+            border-bottom: 1px solid #1f2b3e;
+            vertical-align: middle;
+            word-break: break-all;
+        }
+        .data-table .col-object { width: 190px; }
+        .data-table .col-field  { width: 190px; }
+        .data-table .col-type   { width: 140px; }
+        .data-table .col-cat    { width: 200px; }
+        .data-table .col-sev    { width: 100px; }
+        .data-table .col-msg    { min-width: 280px; }
+        .sort-icon { margin-left: 4px; opacity: 0.4; font-style: normal; }
+        .sort-icon.asc  { opacity: 1; }
+        .sort-icon.desc { opacity: 1; }
+
+        /* ===== Empty state ===== */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+        .empty-state .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.4; }
+        .empty-state .text { font-size: 15px; }
+    </style>
+
+    <!-- Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/element-plus@2.4.4/dist/index.full.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <div class="header-section">
+            <h1>配置一致性体检中心</h1>
+            <p class="subtitle">Expression Consistency Checker Dashboard</p>
+            <div class="header-badge">v2.0 — 支持回写表达式 & validateExpr 深度校验</div>
+        </div>
+
+        <!-- 控制面板 -->
+        <div class="glass-card">
+            <el-tabs v-model="activeMode">
+                <el-tab-pane label="全量模块扫描" name="appScan">
+                    <el-form :inline="true" @submit.prevent="runAppScan">
+                        <el-form-item label="应用模块名">
+                            <el-input v-model="appForm.appName" placeholder="例如 arap, 留空则扫全库" clearable style="width: 300px"></el-input>
+                        </el-form-item>
+                        <el-form-item>
+                            <el-button type="primary" native-type="submit" :loading="isLoading">执行全量体检</el-button>
+                        </el-form-item>
+                    </el-form>
+                </el-tab-pane>
+                <el-tab-pane label="单一对象靶向扫描" name="objectScan">
+                    <el-form :inline="true" @submit.prevent="runObjectScan">
+                        <el-form-item label="对象标识符">
+                            <el-input v-model="objectForm.objectType" placeholder="例如 ArReceipt" clearable style="width: 300px"></el-input>
+                        </el-form-item>
+                        <el-form-item>
+                            <el-button type="success" native-type="submit" :loading="isLoading">精准狙击扫描</el-button>
+                        </el-form-item>
+                    </el-form>
+                </el-tab-pane>
+            </el-tabs>
+
+            <!-- 扫描进度条（仅全量扫描时显示） -->
+            <div class="scan-progress-wrap" v-if="isLoading && activeMode === 'appScan'">
+                <!-- 对象进度 -->
+                <div class="progress-header">
+                    <span class="progress-label">📊 对象扫描进度</span>
+                    <span class="progress-pct">{{ scanProg.scannedObjects }} / {{ scanProg.totalObjects }}</span>
+                </div>
+                <div class="progress-track">
+                    <div class="progress-fill obj"
+                         :style="{ width: scanProg.totalObjects > 0 ? (scanProg.scannedObjects / scanProg.totalObjects * 100).toFixed(1) + '%' : '0%' }"></div>
+                </div>
+
+                <!-- 字段进度 -->
+                <div class="progress-sub">
+                    <span class="progress-sub-label">🔍 字段：{{ scanProg.scannedFields }} / {{ scanProg.totalFields }}</span>
+                    <div class="progress-track sm" style="flex:1">
+                        <div class="progress-fill fld"
+                             :style="{ width: scanProg.totalFields > 0 ? (scanProg.scannedFields / scanProg.totalFields * 100).toFixed(1) + '%' : '0%' }"></div>
+                    </div>
+                </div>
+
+                <!-- 当前正在扫描的对象 -->
+                <div class="scan-tip" v-if="scanProg.currentObject">
+                    <span class="pulse-dot"></span>
+                    <span class="progress-sub-label">正在扫描：</span>
+                    <span class="current-obj-tag">📎 {{ scanProg.currentObject }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 统计面板 -->
+        <div class="stat-card-row">
+            <div class="stat-card info">
+                <div class="stat-title">已扫描单据对象</div>
+                <el-skeleton v-if="isLoading" animated :rows="1"></el-skeleton>
+                <div v-else class="stat-value info-color">{{ reportData.scannedCount }}</div>
+            </div>
+            <div class="stat-card fatal">
+                <div class="stat-title">致命错误 (FATAL)</div>
+                <el-skeleton v-if="isLoading" animated :rows="1"></el-skeleton>
+                <div v-else class="stat-value fatal-color">{{ fatalCount }}</div>
+            </div>
+            <div class="stat-card error">
+                <div class="stat-title">阻断性错误 (ERROR)</div>
+                <el-skeleton v-if="isLoading" animated :rows="1"></el-skeleton>
+                <div v-else class="stat-value error-color">{{ reportData.totalErrors }}</div>
+            </div>
+            <div class="stat-card warning">
+                <div class="stat-title">警告事项 (WARNING)</div>
+                <el-skeleton v-if="isLoading" animated :rows="1"></el-skeleton>
+                <div v-else class="stat-value warning-color">{{ reportData.totalWarnings }}</div>
+            </div>
+        </div>
+
+        <!-- 筛选器 + 数据表格 -->
+        <div class="glass-card">
+            <!-- 筛选面板 -->
+            <div class="filter-bar" v-if="!isLoading && reportData.items.length > 0">
+                <span class="filter-label">严重级别：</span>
+                <span class="filter-chip" :class="{ active: filterSeverity === '' }" @click="filterSeverity = ''">全部</span>
+                <span class="filter-chip" :class="{ active: filterSeverity === 'FATAL' }" @click="filterSeverity = 'FATAL'">🔴 FATAL</span>
+                <span class="filter-chip" :class="{ active: filterSeverity === 'ERROR' }" @click="filterSeverity = 'ERROR'">🟠 ERROR</span>
+                <span class="filter-chip" :class="{ active: filterSeverity === 'WARNING' }" @click="filterSeverity = 'WARNING'">🟡 WARNING</span>
+
+                <div class="filter-divider"></div>
+
+                <span class="filter-label">表达式类型：</span>
+                <span class="filter-chip" :class="{ active: filterExprType === '' }" @click="filterExprType = ''">全部</span>
+                <span class="filter-chip" :class="{ active: filterExprType === 'WRITE_BACK' }" @click="filterExprType = 'WRITE_BACK'">回写表达式</span>
+                <span class="filter-chip" :class="{ active: filterExprType === 'WRITE_BACK_VALIDATE' }" @click="filterExprType = 'WRITE_BACK_VALIDATE'">回写校验</span>
+                <span class="filter-chip" :class="{ active: filterExprType === 'TRIGGER' }" @click="filterExprType = 'TRIGGER'">触发器</span>
+                <span class="filter-chip" :class="{ active: filterExprType === 'EXPRESSION' }" @click="filterExprType = 'EXPRESSION'">计算表达式</span>
+            </div>
+
+            <el-skeleton v-if="isLoading" animated :rows="10"></el-skeleton>
+
+            <template v-else>
+                <template v-if="filteredItems.length > 0">
+                    <div class="data-table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-object" @click="toggleSort('objectType')">
+                                        单据对象 <i class="sort-icon" :class="sortIconClass('objectType')">{{ sortArrow('objectType') }}</i>
+                                    </th>
+                                    <th class="col-field" @click="toggleSort('fieldName')">
+                                        异常字段 <i class="sort-icon" :class="sortIconClass('fieldName')">{{ sortArrow('fieldName') }}</i>
+                                    </th>
+                                    <th class="col-type" @click="toggleSort('expressionType')">表达式种类</th>
+                                    <th class="col-cat" @click="toggleSort('errorCategory')">异常类型</th>
+                                    <th class="col-sev" @click="toggleSort('severity')">严重级别</th>
+                                    <th class="col-msg">诊断详情</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(row, idx) in sortedItems"
+                                    :key="row.objectType + row.fieldName + row.errorCategory"
+                                    :style="{ backgroundColor: rowBg(idx) }"
+                                    @mouseenter="hoveredRow = idx"
+                                    @mouseleave="hoveredRow = -1">
+                                    <td><strong style="color:#e2e8f0">{{ row.objectType }}</strong></td>
+                                    <td><span style="font-family:monospace;color:#60a5fa">{{ row.fieldName }}</span></td>
+                                    <td><span :class="['expr-type-badge', row.expressionType]">{{ exprTypeLabel(row.expressionType) }}</span></td>
+                                    <td><span :class="['category-badge', row.errorCategory]">{{ categoryLabel(row.errorCategory) }}</span></td>
+                                    <td><span :class="['severity-badge', row.severity]">{{ row.severity }}</span></td>
+                                    <td><div class="message-cell" v-html="formatMessage(row.message)"></div></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </template>
+
+                <div v-else class="empty-state">
+                    <div class="icon">✅</div>
+                    <div class="text">未发现任何一致性问题，配置状态良好！</div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, reactive, computed } = Vue;
+        const { ElMessage } = ElementPlus;
+
+        const app = createApp({
+            setup() {
+                const activeMode = ref('appScan');
+                const isLoading = ref(false);
+                const filterSeverity = ref('');
+                const filterExprType = ref('');
+
+                const appForm = reactive({ appName: '' });
+                const objectForm = reactive({ objectType: '' });
+
+                const reportData = reactive({
+                    scannedCount: 0,
+                    totalErrors: 0,
+                    totalWarnings: 0,
+                    items: []
+                });
+
+                // 扫描进度状态（SSE 流式更新）
+                const scanProg = reactive({
+                    totalObjects:   0,
+                    totalFields:    0,
+                    scannedObjects: 0,
+                    scannedFields:  0,
+                    currentObject:  ''
+                });
+
+                const fatalCount = computed(() => {
+                    return reportData.items.filter(i => i.severity === 'FATAL').length;
+                });
+
+                const filteredItems = computed(() => {
+                    let items = reportData.items;
+                    if (filterSeverity.value) {
+                        items = items.filter(i => i.severity === filterSeverity.value);
+                    }
+                    if (filterExprType.value) {
+                        items = items.filter(i => i.expressionType === filterExprType.value);
+                    }
+                    return items;
+                });
+
+                const mapResponseData = (data) => {
+                    reportData.scannedCount = data.scannedObjectCount || 0;
+                    reportData.totalErrors = data.totalErrors || 0;
+                    reportData.totalWarnings = data.totalWarnings || 0;
+                    reportData.items = data.items || [];
+                };
+
+                const runAppScan = () => {
+                    if (isLoading.value) return;
+                    isLoading.value = true;
+                    filterSeverity.value = '';
+                    filterExprType.value = '';
+                    // 重置进度
+                    scanProg.totalObjects = 0;
+                    scanProg.totalFields  = 0;
+                    scanProg.scannedObjects = 0;
+                    scanProg.scannedFields  = 0;
+                    scanProg.currentObject  = '';
+
+                    const url = `/api/validation/report/stream${appForm.appName ? '?appName=' + encodeURIComponent(appForm.appName) : ''}`;
+                    const es = new EventSource(url);
+
+                    es.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'start') {
+                                scanProg.totalObjects = data.totalObjects;
+                                scanProg.totalFields  = data.totalFields;
+                            } else if (data.type === 'progress') {
+                                scanProg.scannedObjects = data.scannedObjects;
+                                scanProg.scannedFields  = data.scannedFields;
+                                scanProg.currentObject  = data.currentObject || '';
+                            } else if (data.type === 'complete') {
+                                es.close();
+                                mapResponseData(data.report);
+                                isLoading.value = false;
+                                ElMessage.success(`全量扫描完成！已分析 ${reportData.scannedCount} 个对象`);
+                            } else if (data.type === 'error') {
+                                es.close();
+                                isLoading.value = false;
+                                ElMessage.error('扫描异常：' + (data.message || '未知错误'));
+                            }
+                        } catch (e) {
+                            console.error('SSE parse error', e);
+                        }
+                    };
+
+                    es.onerror = () => {
+                        es.close();
+                        isLoading.value = false;
+                        ElMessage.error('连接已断开，请检查后端服务是否运行');
+                    };
+                };
+
+                const runObjectScan = async () => {
+                    if (!objectForm.objectType.trim()) {
+                        ElMessage.warning('请输入对象标识符');
+                        return;
+                    }
+                    isLoading.value = true;
+                    filterSeverity.value = '';
+                    filterExprType.value = '';
+                    try {
+                        const response = await fetch(`/api/validation/check?objectType=${encodeURIComponent(objectForm.objectType)}`);
+                        if (!response.ok) throw new Error('API Error');
+                        const data = await response.json();
+                        mapResponseData(data);
+                        ElMessage.success(`扫描 ${objectForm.objectType} 完成`);
+                    } catch (error) {
+                        ElMessage.error('对象可能不存在或服务异常');
+                        console.error(error);
+                    } finally {
+                        isLoading.value = false;
+                    }
+                };
+
+                const hoveredRow = ref(-1);
+
+                const rowBg = (idx) => {
+                    if (hoveredRow.value === idx) return '#1c3054';
+                    return idx % 2 === 0 ? '#1a2133' : '#141924';
+                };
+
+                const sortKey = ref('severity');
+                const sortDir = ref('asc');  // 'asc' | 'desc'
+
+                const severityOrder = { 'FATAL': 0, 'ERROR': 1, 'WARNING': 2, 'INFO': 3 };
+
+                const sortedItems = computed(() => {
+                    const items = [...filteredItems.value];
+                    const key = sortKey.value;
+                    const dir = sortDir.value === 'asc' ? 1 : -1;
+                    return items.sort((a, b) => {
+                        if (key === 'severity') {
+                            const ao = severityOrder[a.severity] ?? 9;
+                            const bo = severityOrder[b.severity] ?? 9;
+                            return (ao - bo) * dir;
+                        }
+                        const av = (a[key] || '').toLowerCase();
+                        const bv = (b[key] || '').toLowerCase();
+                        return av < bv ? -dir : av > bv ? dir : 0;
+                    });
+                });
+
+                const toggleSort = (key) => {
+                    if (sortKey.value === key) {
+                        sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        sortKey.value = key;
+                        sortDir.value = 'asc';
+                    }
+                };
+
+                const sortArrow = (key) => {
+                    if (sortKey.value !== key) return '↕';
+                    return sortDir.value === 'asc' ? '↑' : '↓';
+                };
+
+                const sortIconClass = (key) => {
+                    if (sortKey.value !== key) return '';
+                    return sortDir.value === 'asc' ? 'asc' : 'desc';
+                };
+
+                /** 表达式类型可读标签 */
+                const exprTypeLabel = (type) => {
+                    const map = {
+                        'WRITE_BACK': '回写表达式',
+                        'WRITE_BACK_VALIDATE': '回写校验',
+                        'TRIGGER': '触发器',
+                        'EXPRESSION': '计算表达式'
+                    };
+                    return map[type] || type || '-';
+                };
+
+                /** 异常类型可读标签 */
+                const categoryLabel = (cat) => {
+                    const map = {
+                        'FIELD_NOT_FOUND': '字段缺失',
+                        'OBJECT_NOT_FOUND': '对象未找到',
+                        'TYPE_MISMATCH': '类型不匹配',
+                        'FATAL_PARSE_ERROR': '解析失败',
+                        'NESTED_AGGREGATE': '嵌套聚合',
+                        'AGGREGATE_IN_VALIDATE_EXPR': '校验中误用聚合',
+                        'SELF_REFERENCE_IN_VALIDATE': '自引用',
+                        'MISSING_REQUIRED_FIELD': '缺少必填属性',
+                        'INVALID_EXECUTING_MOMENT': '非法执行时机',
+                        'INVALID_CASCADE_TARGET': '级联目标无效'
+                    };
+                    return map[cat] || cat || '-';
+                };
+
+                /** 格式化诊断消息，高亮关键术语 */
+                const formatMessage = (msg) => {
+                    if (!msg) return '';
+                    return msg
+                        .replace(/`([^`]+)`/g, '<code style="background:rgba(96,165,250,0.15);color:var(--accent-blue);padding:1px 5px;border-radius:4px;font-family:JetBrains Mono,monospace;font-size:12px">$1</code>')
+                        .replace(/(sum|count|avg|min|max|string_agg|array_agg)\(/gi, '<strong style="color:var(--accent-red)">$1(</strong>')
+                        .replace(/(validateExpr|writeBackExpr|expression|executingMoment|srcObjectType|idField)/g, '<strong style="color:var(--accent-purple)">$1</strong>')
+                        .replace(/(PostgreSQL|不允许嵌套调用聚合函数)/g, '<strong style="color:var(--accent-red)">$1</strong>');
+                };
+
+                return {
+                    activeMode,
+                    isLoading,
+                    appForm,
+                    objectForm,
+                    reportData,
+                    scanProg,
+                    fatalCount,
+                    filteredItems,
+                    sortedItems,
+                    filterSeverity,
+                    filterExprType,
+                    runAppScan,
+                    runObjectScan,
+                    toggleSort,
+                    sortArrow,
+                    sortIconClass,
+                    hoveredRow,
+                    rowBg,
+                    exprTypeLabel,
+                    categoryLabel,
+                    formatMessage
+                }
+            }
+        });
+
+        app.use(ElementPlus);
+        for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+            app.component(key, component);
+        }
+        app.mount('#app');
+    </script>
+</body>
+</html>

@@ -8,6 +8,9 @@ public class WriteBackExpr {
     private String idField;
     private String expression;
     private String condition;
+    private String executingMoment;
+    private String validateExpr;
+    private String validateMessage;
 
     public String getSrcObjectType() { return srcObjectType; }
     public void setSrcObjectType(String srcObjectType) { this.srcObjectType = srcObjectType; }
@@ -17,4 +20,10 @@ public class WriteBackExpr {
     public void setExpression(String expression) { this.expression = expression; }
     public String getCondition() { return condition; }
     public void setCondition(String condition) { this.condition = condition; }
+    public String getExecutingMoment() { return executingMoment; }
+    public void setExecutingMoment(String executingMoment) { this.executingMoment = executingMoment; }
+    public String getValidateExpr() { return validateExpr; }
+    public void setValidateExpr(String validateExpr) { this.validateExpr = validateExpr; }
+    public String getValidateMessage() { return validateMessage; }
+    public void setValidateMessage(String validateMessage) { this.validateMessage = validateMessage; }
 }
