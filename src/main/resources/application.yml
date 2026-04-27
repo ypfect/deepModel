@@ -1,10 +1,9 @@
 server:
   port: 18080
 
-# 回写 SQL 接口（调用外部 arap 服务）
+# 回写 SQL 接口（默认从 spring.datasource.url 自动推导 arap 服务地址）
 writeback-sql:
-  api-url: http://arap.release-tx-1.e7link.com/arap/gen/debug/writeBackField2sql
-  tenant-id: 711FNX50G6V0009
+  tenant-id: 3XNLNA60G34006P
 #连接数据库
 spring:
   mvc:
@@ -17,7 +16,7 @@ spring:
       password: ypfect93
   datasource:
 #    url: jdbc:postgresql://localhost:5432/testapp
-    url: jdbc:postgresql://postgres.test-tx-21.e7link.com:5432/tenant-public
+    url: jdbc:postgresql://postgres.test-tx-19.e7link.com:5432/tenant-public
 #    url: jdbc:postgresql://postgres.release-tx-1.e7link.com:5432/tenant-public
     password: stet44{czars
 #    password: 123

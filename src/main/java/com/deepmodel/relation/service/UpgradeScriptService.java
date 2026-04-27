@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import jakarta.annotation.PostConstruct;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -48,6 +49,12 @@ public class UpgradeScriptService {
      */
     private static final ThreadLocal<java.util.function.Consumer<String>> progressCtx = new ThreadLocal<>();
 
+    /**
+     * 当前批量生成上下文中的回写 SQL API 地址覆盖（从对比库 URL 推导）。
+     * 当为 null 时使用默认值（从 Spring Boot 数据源推导）。
+     */
+    private static final ThreadLocal<String> writeBackApiUrlOverrideCtx = new ThreadLocal<>();
+
     /** 向进度回调发送一条消息；未注入回调时静默忽略。 */
     private void reportProgress(String message) {
         java.util.function.Consumer<String> cb = progressCtx.get();
@@ -58,10 +65,18 @@ public class UpgradeScriptService {
     private static final Pattern MYBATIS_TARGET_IDS_PATTERN =
             Pattern.compile("\\s+WHERE\\s+m\\.id\\s+IN\\s*\\(#\\{targetIds\\[\\d+]\\}\\)\\s*$", Pattern.CASE_INSENSITIVE);
 
-    @Value("${writeback-sql.api-url:http://arap.test-tx-16.e7link.com/arap/gen/debug/writeBackField2sql}")
-    private String writeBackSqlApiUrl;
-    @Value("${writeback-sql.tenant-id:711FNX50G6V0009}")
+    /** 从 JDBC URL 提取环境名的正则：postgres.{env}.e7link.com */
+    private static final Pattern ENV_FROM_JDBC_PATTERN =
+            Pattern.compile("postgres\\.([^:/]+)\\.e7link\\.com");
+
+    @Value("${spring.datasource.url:}")
+    private String datasourceUrl;
+
+    @Value("${writeback-sql.tenant-id:}")
     private String writeBackSqlTenantId;
+
+    /** 从 Spring Boot 数据源推导的默认回写 API 地址，@PostConstruct 时初始化 */
+    private String defaultWriteBackSqlApiUrl;
 
     private final ImpactAnalyzerService impactAnalyzerService;
     private final BaseappObjectFieldMapper mapper;
@@ -78,6 +93,37 @@ public class UpgradeScriptService {
         this.mapper = mapper;
         this.httpClient = httpClient;
         this.objectMapper = new ObjectMapper();
+    }
+
+    @PostConstruct
+    private void init() {
+        defaultWriteBackSqlApiUrl = buildWriteBackApiUrl(datasourceUrl);
+        if (defaultWriteBackSqlApiUrl != null) {
+            log.info("[UpgradeScript] 回写 SQL API 默认地址（从数据源推导）: {}", defaultWriteBackSqlApiUrl);
+        } else {
+            log.warn("[UpgradeScript] 无法从数据源 URL 推导回写 SQL API 地址: {}", datasourceUrl);
+        }
+    }
+
+    /**
+     * 从 JDBC URL 提取环境名，构建回写 SQL API 地址。
+     * 例: jdbc:postgresql://postgres.test-tx-19.e7link.com:5432/tenant-public
+     *   → http://arap.test-tx-19.e7link.com/arap/gen/debug/writeBackField2sql
+     */
+    static String buildWriteBackApiUrl(String jdbcUrl) {
+        if (jdbcUrl == null || jdbcUrl.isEmpty()) return null;
+        java.util.regex.Matcher m = ENV_FROM_JDBC_PATTERN.matcher(jdbcUrl);
+        if (m.find()) {
+            String env = m.group(1);
+            return "http://arap." + env + ".e7link.com/arap/gen/debug/writeBackField2sql";
+        }
+        return null;
+    }
+
+    /** 获取当前上下文中生效的回写 SQL API 地址（对比库覆盖 > 默认值） */
+    private String resolveWriteBackApiUrl() {
+        String override = writeBackApiUrlOverrideCtx.get();
+        return override != null ? override : defaultWriteBackSqlApiUrl;
     }
 
     enum RelType {
@@ -266,28 +312,51 @@ public class UpgradeScriptService {
                                              String relTypes,
                                              Map<String, BaseappObjectField> latestFieldDefs,
                                              boolean includeComments) {
-        return generateUpgradeScriptBatch(roots, maxDepth, relTypes, latestFieldDefs, includeComments, null);
+        return generateUpgradeScriptBatch(roots, maxDepth, relTypes, latestFieldDefs, includeComments, null, null, null, null);
     }
 
     /**
      * 批量生成升级脚本（支持进度回调）。
      *
-     * @param latestFieldDefs  比较库的最新字段定义 map（key = "ObjectType.camelField"），
-     *                         为 null 时退化为使用本地 in-memory 数据（兼容旧行为）。
-     * @param includeComments  是否在输出 SQL 中保留注释行；false 时输出更精简的纯 SQL。
-     * @param progressCallback 进度回调，每个阶段/字段开始处调用；为 null 时无进度输出。
+     * @param latestFieldDefs    比较库的最新字段定义 map（key = "ObjectType.camelField"），
+     *                           为 null 时退化为使用本地 in-memory 数据（兼容旧行为）。
+     * @param includeComments    是否在输出 SQL 中保留注释行；false 时输出更精简的纯 SQL。
+     * @param progressCallback   进度回调，每个阶段/字段开始处调用；为 null 时无进度输出。
+     * @param compareDbUrl       对比库 JDBC URL（可选），用于推导回写 SQL API 地址。
+     * @param writeBackTenantId  回写 SQL API 的 Tenant-Id（可选），覆盖默认配置。
+     * @param writeBackApiUrl    回写 SQL API 地址（可选），用户手动指定时优先使用。
      */
     public String generateUpgradeScriptBatch(List<Map.Entry<String, String>> roots,
                                              int maxDepth,
                                              String relTypes,
                                              Map<String, BaseappObjectField> latestFieldDefs,
                                              boolean includeComments,
-                                             java.util.function.Consumer<String> progressCallback) {
+                                             java.util.function.Consumer<String> progressCallback,
+                                             String compareDbUrl,
+                                             String writeBackTenantId,
+                                             String writeBackApiUrl) {
         if (roots == null || roots.isEmpty()) {
             return "-- 未选择任何根字段\n";
         }
         latestFieldDefsCtx.set(latestFieldDefs);
         progressCtx.set(progressCallback);
+
+        // 优先使用用户手动指定的回写 API 地址，否则从对比库 URL 推导
+        if (writeBackApiUrl != null && !writeBackApiUrl.trim().isEmpty()) {
+            writeBackApiUrlOverrideCtx.set(writeBackApiUrl.trim());
+            log.info("[UpgradeScript] 回写 SQL API 地址（用户指定）: {}", writeBackApiUrl.trim());
+        } else if (compareDbUrl != null && !compareDbUrl.trim().isEmpty()) {
+            String overrideUrl = buildWriteBackApiUrl(compareDbUrl);
+            if (overrideUrl != null) {
+                writeBackApiUrlOverrideCtx.set(overrideUrl);
+                log.info("[UpgradeScript] 回写 SQL API 地址（从对比库推导）: {}", overrideUrl);
+            }
+        }
+        // 覆盖 tenant-id
+        if (writeBackTenantId != null && !writeBackTenantId.trim().isEmpty()) {
+            this.writeBackSqlTenantId = writeBackTenantId.trim();
+        }
+
         try {
             String result = doGenerateUpgradeScriptBatch(roots, maxDepth, relTypes);
             reportProgress("正在合并连续 UPDATE 语句...");
@@ -297,6 +366,7 @@ public class UpgradeScriptService {
         } finally {
             latestFieldDefsCtx.remove();
             progressCtx.remove();
+            writeBackApiUrlOverrideCtx.remove();
         }
     }
 
@@ -524,10 +594,14 @@ public class UpgradeScriptService {
                                             Map<String, EnumSet<RelType>> incomingTypes,
                                             Set<RelType> included,
                                             GraphModels.Graph graph) {
+        // [FIX] 统一从图中的边构建 sources map，避免 WRITE_BACK 重新解析字段名导致 ID 不匹配
         Map<String, Set<String>> intraSourcesMap = new HashMap<>();
+        Map<String, Set<String>> wbSourcesMap = new HashMap<>();
         for (GraphModels.Edge e : graph.edges) {
             if ("intra".equals(e.type)) {
                 intraSourcesMap.computeIfAbsent(e.target, k -> new HashSet<>()).add(e.source);
+            } else if ("writeBack".equals(e.type)) {
+                wbSourcesMap.computeIfAbsent(e.target, k -> new HashSet<>()).add(e.source);
             }
         }
 
@@ -548,9 +622,31 @@ public class UpgradeScriptService {
                 }
             }
             if (types.contains(RelType.WRITE_BACK) && included.contains(RelType.WRITE_BACK)) {
-                Set<String> wbSources = getWriteBackSourceNodeIds(objectType, field);
-                if (wbSources != null && wbSources.stream().anyMatch(updated::contains)) {
+                // [FIX] 优先使用图中的边（与 INTRA 一致），确保 ID 匹配
+                Set<String> graphWbSources = wbSourcesMap.getOrDefault(nodeId, Collections.emptySet());
+                boolean hasUpdatedSource = graphWbSources.stream().anyMatch(updated::contains);
+                // 兜底：如果图中没有 writeBack 边指向该节点，再尝试从字段定义解析
+                if (!hasUpdatedSource && graphWbSources.isEmpty()) {
+                    Set<String> parsedWbSources = getWriteBackSourceNodeIds(objectType, field);
+                    hasUpdatedSource = parsedWbSources != null && parsedWbSources.stream().anyMatch(updated::contains);
+                    if (!hasUpdatedSource && parsedWbSources != null && !parsedWbSources.isEmpty()) {
+                        log.warn("[computeUpdatedNodes] WB节点 {} 的解析来源 {} 均不在 updated 集合中",
+                                nodeId, parsedWbSources);
+                    }
+                } else if (!hasUpdatedSource) {
+                    log.warn("[computeUpdatedNodes] WB节点 {} 的图边来源 {} 均不在 updated 集合中",
+                            nodeId, graphWbSources);
+                }
+                if (hasUpdatedSource) {
                     updated.add(nodeId);
+                }
+            }
+
+            // 诊断：节点在图中但没有任何入边类型
+            if (types.isEmpty()) {
+                boolean hasGraphEdges = wbSourcesMap.containsKey(nodeId) || intraSourcesMap.containsKey(nodeId);
+                if (hasGraphEdges) {
+                    log.warn("[computeUpdatedNodes] 节点 {} 在图中有边但 incomingTypes 为空，可能是边类型过滤问题", nodeId);
                 }
             }
         }
@@ -1027,21 +1123,27 @@ public class UpgradeScriptService {
     }
 
     private String callWriteBackSqlApi(String fieldPath) {
+        String apiUrl = resolveWriteBackApiUrl();
+        if (apiUrl == null || apiUrl.isEmpty()) {
+            log.warn("[UpgradeScript] 回写 SQL API 地址未配置且无法从数据源推导, fieldPath={}", fieldPath);
+            return null;
+        }
+        String tenantId = writeBackSqlTenantId;
         try {
             Map<String, String> body = new HashMap<String, String>();
             body.put("fieldPath", fieldPath);
             String json = objectMapper.writeValueAsString(body);
 
             Request.Builder builder = new Request.Builder()
-                    .url(writeBackSqlApiUrl)
+                    .url(apiUrl)
                     .addHeader("Content-Type", "application/json")
-                    .addHeader("Tenant-Id", writeBackSqlTenantId)
+                    .addHeader("Tenant-Id", tenantId != null ? tenantId : "")
                     .post(RequestBody.create(json, JSON));
             Request request = builder.build();
 
             try (Response response = httpClient.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    log.warn("[UpgradeScript] 接口返回非 2xx: fieldPath={}, code={}", fieldPath, response.code());
+                    log.warn("[UpgradeScript] 接口返回非 2xx: url={}, fieldPath={}, code={}", apiUrl, fieldPath, response.code());
                     return null;
                 }
                 ResponseBody responseBody = response.body();
@@ -1050,7 +1152,7 @@ public class UpgradeScriptService {
             }
         // [FIX P2-9] 合并重复的 IOException / Exception catch 块
         } catch (Exception ex) {
-            log.error("[UpgradeScript] 调用回写 SQL 接口失败: fieldPath={}, error={}", fieldPath, ex.getMessage(), ex);
+            log.error("[UpgradeScript] 调用回写 SQL 接口失败: url={}, fieldPath={}, error={}", apiUrl, fieldPath, ex.getMessage(), ex);
             return null;
         }
     }

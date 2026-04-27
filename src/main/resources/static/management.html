@@ -379,6 +379,22 @@
                                 <div style="font-size:12px; color:#64748b; margin-top:2px;">在 SQL 脚本中保留字段说明、执行顺序说明等 <code style="background:#f1f5f9;padding:1px 4px;border-radius:3px;font-size:11px;">--</code> 注释行；不勾选则只输出纯 SQL 语句，更简洁。</div>
                             </div>
                         </label>
+                        <div style="padding:12px 14px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;">
+                            <div style="font-size:13px; font-weight:500; color:#1e293b; margin-bottom:8px;">回写 SQL 接口配置</div>
+                            <div style="display:flex; flex-direction:column; gap:6px;">
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <label for="upgrade-wb-tenant-id" style="font-size:12px; color:#374151; white-space:nowrap; min-width:72px;">租户 ID</label>
+                                    <input type="text" id="upgrade-wb-tenant-id" value="711FNX50G6V0009"
+                                           style="flex:1; font-size:12px; padding:5px 8px; border:1px solid #d1d5db; border-radius:5px; box-sizing:border-box; font-family:monospace;">
+                                </div>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <label for="upgrade-wb-api-url" style="font-size:12px; color:#374151; white-space:nowrap; min-width:72px;">API 地址</label>
+                                    <input type="text" id="upgrade-wb-api-url" placeholder="自动从对比库推导（可手动修改）"
+                                           style="flex:1; font-size:12px; padding:5px 8px; border:1px solid #d1d5db; border-radius:5px; box-sizing:border-box; font-family:monospace;">
+                                </div>
+                                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">回写字段的 SQL 通过调用 arap 服务接口生成。地址默认从对比库 URL 推导，也可手动指定。</div>
+                            </div>
+                        </div>
                     </div>
                     <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:24px;">
                         <button type="button" id="upgrade-script-cancel" style="padding:8px 20px; font-size:13px; border-radius:7px; background:#f1f5f9; color:#475569; border:1px solid #e2e8f0; cursor:pointer; font-weight:500;">取消</button>
@@ -612,6 +628,16 @@
             const commentChk = document.getElementById('upgrade-script-include-comments');
             if (commentChk) commentChk.checked = false;
 
+            // 自动从对比库 URL 推导回写 API 地址
+            const wbApiUrlEl = document.getElementById('upgrade-wb-api-url');
+            if (wbApiUrlEl) {
+                const compareUrl = (document.getElementById('compareUrl') || {}).value || '';
+                const envMatch = compareUrl.match(/postgres\.([^:/]+)\.e7link\.com/);
+                wbApiUrlEl.value = envMatch
+                    ? 'http://arap.' + envMatch[1] + '.e7link.com/arap/gen/debug/writeBackField2sql'
+                    : '';
+            }
+
             dialog.style.display = 'flex';
 
             function closeDialog() { dialog.style.display = 'none'; }
@@ -656,7 +682,9 @@
                         compareDbUrl:      (document.getElementById('compareUrl')  || {}).value || '',
                         compareDbUser:     (document.getElementById('compareUser') || {}).value || '',
                         compareDbPassword: (document.getElementById('comparePass') || {}).value || '',
-                        compareDbAppName:  (document.getElementById('compareAppName') || {}).value || ''
+                        compareDbAppName:  (document.getElementById('compareAppName') || {}).value || '',
+                        writeBackTenantId: (document.getElementById('upgrade-wb-tenant-id') || {}).value || '',
+                        writeBackApiUrl:   (document.getElementById('upgrade-wb-api-url') || {}).value || ''
                     };
 
                     // 辅助：向日志追加一行

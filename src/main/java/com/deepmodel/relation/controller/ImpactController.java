@@ -507,7 +507,9 @@ public class ImpactController {
         Map<String, BaseappObjectField> latestFieldDefs = fetchLatestFieldDefs(req, null);
         boolean includeComments = req.includeComments != null && req.includeComments;
 
-        String sql = upgradeScriptService.generateUpgradeScriptBatch(roots, depth, relTypes, latestFieldDefs, includeComments);
+        String sql = upgradeScriptService.generateUpgradeScriptBatch(
+                roots, depth, relTypes, latestFieldDefs, includeComments, null,
+                req.compareDbUrl, req.writeBackTenantId, req.writeBackApiUrl);
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"batch_upgrade.sql\"");
         headers.setContentType(MediaType.TEXT_PLAIN);
@@ -577,7 +579,8 @@ public class ImpactController {
                 Map<String, BaseappObjectField> latestFieldDefs = fetchLatestFieldDefs(req, progress);
 
                 String sql = upgradeScriptService.generateUpgradeScriptBatch(
-                        roots, depth, relTypes, latestFieldDefs, includeComments, progress);
+                        roots, depth, relTypes, latestFieldDefs, includeComments, progress,
+                        req.compareDbUrl, req.writeBackTenantId, req.writeBackApiUrl);
 
                 synchronized (writer) {
                     writer.write(sql);
@@ -672,6 +675,10 @@ public class ImpactController {
         public String compareDbAppName;
         /** 是否在输出 SQL 中保留注释行，默认 false（不保留） */
         public Boolean includeComments;
+        /** 回写 SQL API 的 Tenant-Id（可选），覆盖默认配置 */
+        public String writeBackTenantId;
+        /** 回写 SQL API 地址（可选），用户手动指定时优先使用 */
+        public String writeBackApiUrl;
 
         public static class RootItem {
             public String objectType;
