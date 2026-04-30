@@ -43,7 +43,8 @@ public class ImpactAnalyzerService {
     private final Map<String, List<BaseappObjectField>> rowsByObject = new ConcurrentHashMap<String, List<BaseappObjectField>>();
     // 缓存对象标题: objectType -> title
     private final Map<String, String> objectTitles = new ConcurrentHashMap<>();
-    private final Map<String, String> enumTypes = new HashMap<>();
+    // 枚举定义缓存: enumName -> Set<validValue>
+    private final Map<String, Set<String>> enumValueMap = new ConcurrentHashMap<>();
     private final Map<String, String> objectLabels = new HashMap<>(); // objectName -> 描述标签
 
     // bill 类型对象集合（来自 baseapp_object_type.type='bill'）
@@ -145,6 +146,11 @@ public class ImpactAnalyzerService {
         }
         long tBillEnd = System.currentTimeMillis();
 
+        // 加载枚举定义
+        long tEnumStart = System.currentTimeMillis();
+        loadEnumDefinitions();
+        long tEnumEnd = System.currentTimeMillis();
+
         // 清除分析结果缓存（因为数据源已更新）
         long tCacheStart = System.currentTimeMillis();
         clearAnalysisCache();
@@ -153,15 +159,16 @@ public class ImpactAnalyzerService {
         long tEnd = System.currentTimeMillis();
 
         log.info(
-                "[reload] done. total={}ms, selectAll={}ms, groupBy={}ms, loadViews={}ms, loadTitles={}ms, loadBillTypes={}ms, clearCache={}ms, objects={}, fields={}, views={}",
+                "[reload] done. total={}ms, selectAll={}ms, groupBy={}ms, loadViews={}ms, loadTitles={}ms, loadBillTypes={}ms, loadEnums={}ms, clearCache={}ms, objects={}, fields={}, views={}, enums={}",
                 (tEnd - t0),
                 (tSelectEnd - tSelectStart),
                 (tGroupEnd - tGroupStart),
                 (tViewsEnd - tViewsStart),
                 (tTitleEnd - tTitleStart),
                 (tBillEnd - tBillStart),
+                (tEnumEnd - tEnumStart),
                 (tCacheEnd - tCacheStart),
-                rowsByObject.size(), allRows.size(), viewReverseDeps.size());
+                rowsByObject.size(), allRows.size(), viewReverseDeps.size(), enumValueMap.size());
     }
 
     /**
@@ -220,6 +227,49 @@ public class ImpactAnalyzerService {
             return camelCase;
         // 首字母大写转换为 PascalCase
         return Character.toUpperCase(camelCase.charAt(0)) + camelCase.substring(1);
+    }
+
+    /**
+     * 从 baseapp_system_metadata 加载所有枚举定义，构建 enumName → Set(validValues) 映射。
+     */
+    private void loadEnumDefinitions() {
+        enumValueMap.clear();
+        try {
+            List<String> enumJsonList = mapper.selectEnumDefinitions();
+            for (String json : enumJsonList) {
+                try {
+                    JsonNode root = objectMapper.readTree(json);
+                    String enumName = root.path("name").asText();
+                    if (enumName == null || enumName.isEmpty()) continue;
+
+                    JsonNode valueDefs = root.path("enumValueDefs");
+                    if (!valueDefs.isArray()) continue;
+
+                    Set<String> values = new HashSet<>();
+                    for (JsonNode def : valueDefs) {
+                        String val = def.path("value").asText();
+                        if (val != null && !val.isEmpty()) {
+                            values.add(val);
+                        }
+                    }
+                    if (!values.isEmpty()) {
+                        enumValueMap.put(enumName, values);
+                    }
+                } catch (Exception e) {
+                    log.debug("解析枚举定义 JSON 失败，跳过: {}", e.getMessage());
+                }
+            }
+            log.info("Loaded {} enum definitions", enumValueMap.size());
+        } catch (Exception e) {
+            log.warn("Failed to load enum definitions from DB", e);
+        }
+    }
+
+    /**
+     * 获取枚举定义映射（供 ExpressionValidatorService 使用）
+     */
+    public Map<String, Set<String>> getEnumValueMap() {
+        return enumValueMap;
     }
 
     private void loadViews() {

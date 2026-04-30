@@ -38,4 +38,9 @@ public interface BaseappObjectFieldMapper {
      * @param entityName 被引用的对象名，例如 "ArContract"
      */
     List<BaseappObjectField> selectReferencingFields(@Param("entityName") String entityName);
+
+    /**
+     * 查询所有枚举类型定义（baseapp_system_metadata 中类型为枚举的条目）
+     */
+    List<String> selectEnumDefinitions();
 }

@@ -21,5 +21,9 @@ public enum ErrorCategory {
      * executingMoment=onlyCascade 时，writeBackExpr.expression 中引用的源对象字段不是回写字段（没有 writeBackExpr），
      * 导致级联链条不存在上游驱动者，onlyCascade 回写永远不会触发（Dead Config）。
      */
-    INVALID_CASCADE_TARGET
+    INVALID_CASCADE_TARGET,
+    /** 表达式中引用的枚举值不在枚举定义的 enumValueDefs 中 */
+    ENUM_VALUE_NOT_FOUND,
+    /** 表达式中引用的枚举类型在元数据中没有定义 */
+    ENUM_TYPE_NOT_FOUND
 }

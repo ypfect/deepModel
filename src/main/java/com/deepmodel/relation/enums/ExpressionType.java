@@ -4,5 +4,6 @@ public enum ExpressionType {
     WRITE_BACK,
     WRITE_BACK_VALIDATE,
     TRIGGER,
-    EXPRESSION
+    EXPRESSION,
+    ENUM
 }

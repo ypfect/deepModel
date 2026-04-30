@@ -129,4 +129,12 @@
     ORDER BY f.object_type, f.name
   </select>
 
+  <!-- 查询所有枚举类型定义 -->
+  <select id="selectEnumDefinitions" resultType="string">
+    SELECT m.content::text
+    FROM baseapp_system_metadata m
+    WHERE m.is_deleted = false
+      AND lower(m.type_id) LIKE '%enum%'
+  </select>
+
 </mapper>

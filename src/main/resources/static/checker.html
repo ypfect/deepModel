@@ -197,6 +197,16 @@
             color: #fdba74;
             border: 1px solid rgba(251, 146, 60, 0.3);
         }
+        .category-badge.ENUM_VALUE_NOT_FOUND {
+            background: rgba(244, 114, 182, 0.15);
+            color: #f9a8d4;
+            border: 1px solid rgba(244, 114, 182, 0.3);
+        }
+        .category-badge.ENUM_TYPE_NOT_FOUND {
+            background: rgba(244, 114, 182, 0.10);
+            color: #f9a8d4;
+            border: 1px solid rgba(244, 114, 182, 0.25);
+        }
 
         /* ===== Expression Type Badge ===== */
         .expr-type-badge {
@@ -226,6 +236,11 @@
             background: rgba(251, 191, 36, 0.15);
             color: #fde68a;
             border: 1px solid rgba(251, 191, 36, 0.3);
+        }
+        .expr-type-badge.ENUM {
+            background: rgba(244, 114, 182, 0.15);
+            color: #f9a8d4;
+            border: 1px solid rgba(244, 114, 182, 0.3);
         }
 
         /* ===== 扫描进度条 ===== */
@@ -463,7 +478,7 @@
         <div class="header-section">
             <h1>配置一致性体检中心</h1>
             <p class="subtitle">Expression Consistency Checker Dashboard</p>
-            <div class="header-badge">v2.0 — 支持回写表达式 & validateExpr 深度校验</div>
+            <div class="header-badge">v3.0 — 支持回写表达式 & validateExpr & 枚举值深度校验</div>
         </div>
 
         <!-- 控制面板 -->
@@ -563,6 +578,7 @@
                 <span class="filter-chip" :class="{ active: filterExprType === 'WRITE_BACK_VALIDATE' }" @click="filterExprType = 'WRITE_BACK_VALIDATE'">回写校验</span>
                 <span class="filter-chip" :class="{ active: filterExprType === 'TRIGGER' }" @click="filterExprType = 'TRIGGER'">触发器</span>
                 <span class="filter-chip" :class="{ active: filterExprType === 'EXPRESSION' }" @click="filterExprType = 'EXPRESSION'">计算表达式</span>
+                <span class="filter-chip" :class="{ active: filterExprType === 'ENUM' }" @click="filterExprType = 'ENUM'">枚举引用</span>
             </div>
 
             <el-skeleton v-if="isLoading" animated :rows="10"></el-skeleton>
@@ -785,7 +801,8 @@
                         'WRITE_BACK': '回写表达式',
                         'WRITE_BACK_VALIDATE': '回写校验',
                         'TRIGGER': '触发器',
-                        'EXPRESSION': '计算表达式'
+                        'EXPRESSION': '计算表达式',
+                        'ENUM': '枚举引用'
                     };
                     return map[type] || type || '-';
                 };
@@ -802,7 +819,9 @@
                         'SELF_REFERENCE_IN_VALIDATE': '自引用',
                         'MISSING_REQUIRED_FIELD': '缺少必填属性',
                         'INVALID_EXECUTING_MOMENT': '非法执行时机',
-                        'INVALID_CASCADE_TARGET': '级联目标无效'
+                        'INVALID_CASCADE_TARGET': '级联目标无效',
+                        'ENUM_VALUE_NOT_FOUND': '枚举值不存在',
+                        'ENUM_TYPE_NOT_FOUND': '枚举类型未定义'
                     };
                     return map[cat] || cat || '-';
                 };

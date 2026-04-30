@@ -24,6 +24,8 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -196,6 +198,9 @@ public class ExpressionValidatorService {
                 report.addItem(new ValidationErrorItem(field.getObjectType(), field.getName(), ExpressionType.WRITE_BACK, ErrorCategory.FATAL_PARSE_ERROR, SeverityLevel.FATAL, "Failed to parse writeBackExpr JSON: " + e.getMessage()));
             }
         }
+
+        // 4. 枚举值校验
+        validateEnumReferences(field, groupedFields, report);
     }
 
     // ========== WriteBack 专项校验 ==========
@@ -455,6 +460,89 @@ public class ExpressionValidatorService {
             report.addItem(new ValidationErrorItem(field.getObjectType(), field.getName(),
                     ExpressionType.WRITE_BACK_VALIDATE, ErrorCategory.MISSING_REQUIRED_FIELD, SeverityLevel.WARNING,
                     "配置了 validateExpr 但未配置 validateMessage，校验失败时用户将看到默认技术错误提示"));
+        }
+    }
+
+    // ========== 枚举值校验 ==========
+
+    /** 匹配表达式中单引号包裹的枚举引用: 'EnumName.value' */
+    private static final Pattern ENUM_REF_PATTERN = Pattern.compile("'([A-Za-z]\\w*)\\.(\\w+)'");
+
+    /**
+     * 扫描字段的所有表达式，检查其中引用的枚举值是否在枚举定义中存在。
+     * 例如 'RevenueConfirmationStatusEnum.done' → 检查 done 是否在 RevenueConfirmationStatusEnum 的 enumValueDefs 中。
+     */
+    private void validateEnumReferences(BaseappObjectField field,
+                                        Map<String, List<BaseappObjectField>> groupedFields,
+                                        ValidationReport report) {
+        Map<String, Set<String>> enumValueMap = impactAnalyzerService.getEnumValueMap();
+        if (enumValueMap.isEmpty()) return;
+
+        // 收集所有需要检查的表达式文本
+        List<String> expressions = new ArrayList<>();
+        if (field.getExpression() != null && !field.getExpression().trim().isEmpty()) {
+            expressions.add(field.getExpression());
+        }
+        if (field.getTriggerExpr() != null && !field.getTriggerExpr().trim().isEmpty()) {
+            expressions.add(field.getTriggerExpr());
+        }
+        if (field.getVirtualExpr() != null && !field.getVirtualExpr().trim().isEmpty()) {
+            expressions.add(field.getVirtualExpr());
+        }
+
+        // writeBackExpr 是 JSON 数组，需要提取每个元素的 expression 和 condition
+        if (field.getWriteBackExpr() != null && !field.getWriteBackExpr().trim().isEmpty()) {
+            try {
+                List<WriteBackExpr> writeBacks = objectMapper.readValue(
+                        field.getWriteBackExpr(), new TypeReference<List<WriteBackExpr>>() {});
+                for (WriteBackExpr wb : writeBacks) {
+                    if (wb.getExpression() != null && !wb.getExpression().trim().isEmpty()) {
+                        expressions.add(wb.getExpression());
+                    }
+                    if (wb.getCondition() != null && !wb.getCondition().trim().isEmpty()) {
+                        expressions.add(wb.getCondition());
+                    }
+                    if (wb.getValidateExpr() != null && !wb.getValidateExpr().trim().isEmpty()) {
+                        expressions.add(wb.getValidateExpr());
+                    }
+                }
+            } catch (JsonProcessingException e) {
+                // writeBackExpr JSON 解析失败已在其他规则中报告，此处跳过
+            }
+        }
+
+        // 去重：同一字段内相同的枚举引用只报一次
+        Set<String> reported = new HashSet<>();
+
+        for (String exprText : expressions) {
+            Matcher matcher = ENUM_REF_PATTERN.matcher(exprText);
+            while (matcher.find()) {
+                String enumName = matcher.group(1);
+                String enumValue = matcher.group(2);
+                String refKey = enumName + "." + enumValue;
+                if (reported.contains(refKey)) continue;
+                reported.add(refKey);
+
+                Set<String> validValues = enumValueMap.get(enumName);
+                if (validValues == null) {
+                    // 仅当名称看起来像枚举（包含 Enum/Status/Type 后缀）时才报 WARNING
+                    if (enumName.endsWith("Enum") || enumName.endsWith("Status") || enumName.endsWith("Type")) {
+                        report.addItem(new ValidationErrorItem(
+                                field.getObjectType(), field.getName(),
+                                ExpressionType.ENUM, ErrorCategory.ENUM_TYPE_NOT_FOUND, SeverityLevel.WARNING,
+                                "表达式中引用了枚举类型 `" + enumName + "` 但在元数据中未找到该枚举的定义"));
+                    }
+                    continue;
+                }
+
+                if (!validValues.contains(enumValue)) {
+                    report.addItem(new ValidationErrorItem(
+                            field.getObjectType(), field.getName(),
+                            ExpressionType.ENUM, ErrorCategory.ENUM_VALUE_NOT_FOUND, SeverityLevel.ERROR,
+                            "表达式中引用了 `" + enumName + "." + enumValue
+                                    + "` 但该值不在枚举定义中。合法值: " + validValues));
+                }
+            }
         }
     }
 
