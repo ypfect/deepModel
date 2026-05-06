@@ -26,6 +26,8 @@ public class GraphModels {
         public String source;
         public String target;
         public String type; // intra | writeBack
+        /** 回写时机（仅 writeBack 边有值），如 "ALWAYS"、JSON 格式的状态条件 */
+        public String executingMoment;
         public Edge(){}
         public Edge(String source, String target, String type){
             this.source = source; this.target = target; this.type = type;

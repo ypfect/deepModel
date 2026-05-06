@@ -15,6 +15,7 @@
     <result property="virtualExpr" column="virtual_expr"/>
     <result property="writeBackExpr" column="write_back_expr" jdbcType="OTHER"/>
     <result property="referInfo" column="refer_info" jdbcType="OTHER"/>
+    <result property="sourceInfo" column="source_info" jdbcType="OTHER"/>
     <result property="appName" column="app_name"/>
   </resultMap>
 
@@ -70,6 +71,7 @@
            f.virtual_expr,
            f.write_back_expr::text as write_back_expr,
            f.refer_info::text as refer_info,
+           f.source_info::text as source_info,
            t.app_name
     from baseapp_object_field f
     left join baseapp_object_type t on f.object_type = t.name
@@ -135,6 +137,19 @@
     FROM baseapp_system_metadata m
     WHERE m.is_deleted = false
       AND lower(m.type_id) LIKE '%enum%'
+  </select>
+
+  <!-- 查询所有 LIST 类型字段的 source_info（用于识别子表关系） -->
+  <select id="selectSourceInfoFields" resultMap="BaseappObjectFieldMap">
+    SELECT f.object_type,
+           f.name,
+           f.type,
+           f.source_info::text as source_info,
+           f.refer_info::text as refer_info
+    FROM baseapp_object_field f
+    WHERE f.type = 'LIST'
+      AND f.source_info IS NOT NULL
+      AND f.source_info::text != 'null'
   </select>
 
 </mapper>

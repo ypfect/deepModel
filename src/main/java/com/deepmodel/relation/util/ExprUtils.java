@@ -154,4 +154,124 @@ public class ExprUtils {
         ));
         return commonFunctions.contains(id.toLowerCase());
     }
+
+    /**
+     * 从表达式中提取跨对象字段引用（foreignKey.fieldName 格式）。
+     * <p>
+     * 例如 triggerExpr 为 {@code projectId.projectName + contractId.contractNo}，
+     * 返回 {@code {projectId -> projectName, contractId -> contractNo}}。
+     * <p>
+     * 仅匹配 camelCase.camelCase 模式（首字母小写、含大写字母或以 Id 结尾的外键 + 点号 + 字段名），
+     * 排除 SQL 关键字和表别名（如 m.id、t.amount）。
+     *
+     * @param expr 表达式文本
+     * @return foreignKeyField → referencedFieldName 的映射，无匹配则返回空 Map
+     */
+    public static Map<String, String> extractCrossObjectRefs(String expr) {
+        Map<String, String> result = new LinkedHashMap<String, String>();
+        if (expr == null || expr.trim().isEmpty()) return result;
+
+        // 去掉单引号字符串
+        String noStr = SINGLE_QUOTE_STR.matcher(expr).replaceAll(" ");
+
+        // 匹配 word.word 模式（点号连接的两个标识符）
+        Pattern dotRef = Pattern.compile("([a-zA-Z_][a-zA-Z0-9_]*)\\.([a-zA-Z_][a-zA-Z0-9_]*)");
+        Matcher m = dotRef.matcher(noStr);
+
+        while (m.find()) {
+            String left = m.group(1);
+            String right = m.group(2);
+
+            // 排除 SQL 表别名（单字母如 m.id, t.amount）
+            if (left.length() <= 1) continue;
+            // 排除 SQL 关键字
+            if (SQL_STOPWORDS.contains(left.toLowerCase())) continue;
+            if (SQL_STOPWORDS.contains(right.toLowerCase())) continue;
+
+            // 将 snake_case 转为 camelCase
+            String fkField = left.contains("_") ? snakeToCamel(left) : left;
+            String refField = right.contains("_") ? snakeToCamel(right) : right;
+
+            if (fkField != null && !fkField.isEmpty()
+                    && refField != null && !refField.isEmpty()) {
+                result.put(fkField, refField);
+            }
+        }
+        return result;
+    }
+
+    /** 标识主表（当前对象自身）字段的 key */
+    public static final String KEY_MAIN = "__MAIN__";
+
+    /**
+     * 从 expression SQL 中提取变量字段引用。
+     * <p>
+     * 返回 Map&lt;String, Set&lt;String&gt;&gt;，其中：
+     * <ul>
+     *   <li>key = {@link #KEY_MAIN} 表示当前对象自身的字段引用</li>
+     *   <li>key = listFieldName（如 "orderItems"）表示子表字段引用</li>
+     * </ul>
+     * 例如 "sum(items.qty * items.price) + discount" 返回：
+     * {__MAIN__ = [discount], items = [qty, price]}
+     *
+     * @param expression expression SQL 字符串（可能含 sum/count/case when 等）
+     * @return 变量字段按所属对象（主表/子表）分组的映射；空表达式返回空 Map
+     */
+    public static Map<String, Set<String>> extractVariablesFromExpression(String expression) {
+        Map<String, Set<String>> result = new LinkedHashMap<>();
+        if (expression == null || expression.trim().isEmpty()) {
+            return result;
+        }
+
+        // 移除字符串常量（避免把常量中的单词误判为字段名）
+        String cleaned = SINGLE_QUOTE_STR.matcher(expression).replaceAll(" ");
+        // 移除数字常量
+        cleaned = cleaned.replaceAll("\\b\\d+(\\.\\d+)?\\b", " ");
+        // 用非标识符字符切割，但保留 "."（用于识别 listField.xxx）
+        String[] tokens = NON_ID.matcher(cleaned).replaceAll(" ").trim().split("\\s+");
+
+        for (String token : tokens) {
+            if (token.isEmpty()) {
+                continue;
+            }
+            // 跳过 SQL 关键字
+            if (SQL_STOPWORDS.contains(token.toLowerCase())) {
+                continue;
+            }
+            // 跳过纯数字
+            if (token.matches("\\d+")) {
+                continue;
+            }
+            // 跳过下划线开头的占位符（如 ${alias}）
+            if (token.startsWith("_") || token.startsWith("$")) {
+                continue;
+            }
+
+            if (token.contains(".")) {
+                // 包含点号：listField.fieldName 或 alias.fieldName
+                String[] parts = token.split("\\.", 2);
+                String prefix = parts[0];
+                String fieldName = parts.length > 1 ? parts[1] : null;
+                if (prefix.isEmpty() || fieldName == null || fieldName.isEmpty()) {
+                    continue;
+                }
+                if (SQL_STOPWORDS.contains(prefix.toLowerCase()) || SQL_STOPWORDS.contains(fieldName.toLowerCase())) {
+                    continue;
+                }
+                // 转为 camelCase
+                String camelPrefix = prefix.contains("_") ? snakeToCamel(prefix) : prefix;
+                String camelField = fieldName.contains("_") ? snakeToCamel(fieldName) : fieldName;
+                if (camelPrefix != null && camelField != null) {
+                    result.computeIfAbsent(camelPrefix, k -> new LinkedHashSet<>()).add(camelField);
+                }
+            } else {
+                // 单独字段名：主表自身字段
+                String camelField = token.contains("_") ? snakeToCamel(token) : token;
+                if (camelField != null && !camelField.isEmpty()) {
+                    result.computeIfAbsent(KEY_MAIN, k -> new LinkedHashSet<>()).add(camelField);
+                }
+            }
+        }
+        return result;
+    }
 }

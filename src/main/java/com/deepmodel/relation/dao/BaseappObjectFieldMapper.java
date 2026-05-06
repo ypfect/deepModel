@@ -43,4 +43,9 @@ public interface BaseappObjectFieldMapper {
      * 查询所有枚举类型定义（baseapp_system_metadata 中类型为枚举的条目）
      */
     List<String> selectEnumDefinitions();
+
+    /**
+     * 查询所有 LIST 类型字段的 source_info（用于识别子表关系）
+     */
+    List<BaseappObjectField> selectSourceInfoFields();
 }

@@ -50,6 +50,11 @@ public class ImpactAnalyzerService {
     // bill 类型对象集合（来自 baseapp_object_type.type='bill'）
     private volatile Set<String> billObjectTypes = Collections.emptySet();
 
+    // 子表关系映射：主表 → 直接子表列表
+    private final Map<String, Set<String>> mainToDetails = new ConcurrentHashMap<>();
+    // 子表关系映射：子表 → 主表
+    private final Map<String, String> detailToMain = new ConcurrentHashMap<>();
+
     private static final Map<String, List<String>> GLOBAL_SYNONYMS = new HashMap<>();
     static {
         GLOBAL_SYNONYMS.put("User", Arrays.asList("人员", "员工", "操作人", "经办人"));
@@ -75,6 +80,9 @@ public class ImpactAnalyzerService {
             .build();
 
     private final FormulaParserService formulaParserService;
+    private final WriteBackRelationService writeBackRelationService;
+    private final ExpressionFieldService expressionFieldService;
+    private final EntityReferenceService entityReferenceService;
 
     // @Lazy 避免与 SkillsService 循环依赖：SkillsService 注入 ImpactAnalyzerService，
     // ImpactAnalyzerService 仅在 clearAnalysisCache 时通知 SkillsService 清缓存。
@@ -82,9 +90,15 @@ public class ImpactAnalyzerService {
     @Autowired
     private SkillsService skillsService;
 
-    public ImpactAnalyzerService(BaseappObjectFieldMapper mapper, FormulaParserService formulaParserService) {
+    public ImpactAnalyzerService(BaseappObjectFieldMapper mapper, FormulaParserService formulaParserService,
+                                 WriteBackRelationService writeBackRelationService,
+                                 ExpressionFieldService expressionFieldService,
+                                 EntityReferenceService entityReferenceService) {
         this.mapper = mapper;
         this.formulaParserService = formulaParserService;
+        this.writeBackRelationService = writeBackRelationService;
+        this.expressionFieldService = expressionFieldService;
+        this.entityReferenceService = entityReferenceService;
     }
 
     @PostConstruct
@@ -146,6 +160,26 @@ public class ImpactAnalyzerService {
         }
         long tBillEnd = System.currentTimeMillis();
 
+        // 加载子表关系映射
+        long tDetailStart = System.currentTimeMillis();
+        loadDetailRelations();
+        long tDetailEnd = System.currentTimeMillis();
+
+        // 构建回写触发关系索引
+        long tWbStart = System.currentTimeMillis();
+        writeBackRelationService.buildIndex(allRows);
+        long tWbEnd = System.currentTimeMillis();
+
+        // 构建表达式字段依赖层级索引
+        long tExprStart = System.currentTimeMillis();
+        expressionFieldService.buildIndex(allRows, mainToDetails);
+        long tExprEnd = System.currentTimeMillis();
+
+        // 构建对象引用关系反向索引
+        long tRefStart = System.currentTimeMillis();
+        entityReferenceService.buildIndex(allRows);
+        long tRefEnd = System.currentTimeMillis();
+
         // 加载枚举定义
         long tEnumStart = System.currentTimeMillis();
         loadEnumDefinitions();
@@ -159,16 +193,17 @@ public class ImpactAnalyzerService {
         long tEnd = System.currentTimeMillis();
 
         log.info(
-                "[reload] done. total={}ms, selectAll={}ms, groupBy={}ms, loadViews={}ms, loadTitles={}ms, loadBillTypes={}ms, loadEnums={}ms, clearCache={}ms, objects={}, fields={}, views={}, enums={}",
+                "[reload] done. total={}ms, selectAll={}ms, groupBy={}ms, loadViews={}ms, loadTitles={}ms, loadBillTypes={}ms, loadDetails={}ms, loadEnums={}ms, clearCache={}ms, objects={}, fields={}, views={}, details={}, enums={}",
                 (tEnd - t0),
                 (tSelectEnd - tSelectStart),
                 (tGroupEnd - tGroupStart),
                 (tViewsEnd - tViewsStart),
                 (tTitleEnd - tTitleStart),
                 (tBillEnd - tBillStart),
+                (tDetailEnd - tDetailStart),
                 (tEnumEnd - tEnumStart),
                 (tCacheEnd - tCacheStart),
-                rowsByObject.size(), allRows.size(), viewReverseDeps.size(), enumValueMap.size());
+                rowsByObject.size(), allRows.size(), viewReverseDeps.size(), mainToDetails.size(), enumValueMap.size());
     }
 
     /**
@@ -227,6 +262,75 @@ public class ImpactAnalyzerService {
             return camelCase;
         // 首字母大写转换为 PascalCase
         return Character.toUpperCase(camelCase.charAt(0)) + camelCase.substring(1);
+    }
+
+    /**
+     * 加载子表关系映射：从 source_info 中提取 isDetail=true 的 LIST 字段，
+     * 构建 mainEntity → Set(detailEntity) 和 detailEntity → mainEntity 映射。
+     */
+    private void loadDetailRelations() {
+        mainToDetails.clear();
+        detailToMain.clear();
+        try {
+            List<BaseappObjectField> sourceInfoFields = mapper.selectSourceInfoFields();
+            for (BaseappObjectField field : sourceInfoFields) {
+                if (field.getSourceInfo() == null || field.getSourceInfo().isEmpty()) {
+                    continue;
+                }
+                try {
+                    JsonNode si = objectMapper.readTree(field.getSourceInfo());
+                    boolean isDetail = si.has("isDetail") && si.get("isDetail").asBoolean(false);
+                    String sourceEntityName = si.has("sourceEntityName") ? si.get("sourceEntityName").asText(null) : null;
+                    if (isDetail && sourceEntityName != null && !sourceEntityName.isEmpty()) {
+                        String mainEntity = field.getObjectType();
+                        mainToDetails.computeIfAbsent(mainEntity, k -> new LinkedHashSet<>()).add(sourceEntityName);
+                        detailToMain.put(sourceEntityName, mainEntity);
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to parse source_info for {}.{}: {}", field.getObjectType(), field.getName(), e.getMessage());
+                }
+            }
+            log.info("Loaded detail relations: {} main entities, {} detail entities", mainToDetails.size(), detailToMain.size());
+        } catch (Exception e) {
+            log.warn("Failed to load detail relations", e);
+        }
+    }
+
+    /**
+     * 获取主表→子表列表映射（全量）。
+     */
+    public Map<String, Set<String>> getMainToDetails() {
+        return Collections.unmodifiableMap(mainToDetails);
+    }
+
+    /**
+     * 获取子表→主表映射（全量）。
+     */
+    public Map<String, String> getDetailToMain() {
+        return Collections.unmodifiableMap(detailToMain);
+    }
+
+    /**
+     * 获取指定主表的所有子表（含递归子表，最多 3 层）。
+     *
+     * @param mainEntityName 主表对象名
+     * @return 所有子表名称集合
+     */
+    public Set<String> getAllDetailEntities(String mainEntityName) {
+        return collectDetails(mainEntityName, 0);
+    }
+
+    private Set<String> collectDetails(String entityName, int level) {
+        Set<String> result = new LinkedHashSet<>();
+        Set<String> directDetails = mainToDetails.get(entityName);
+        if (directDetails == null || directDetails.isEmpty() || level >= 3) {
+            return result;
+        }
+        for (String detail : directDetails) {
+            result.add(detail);
+            result.addAll(collectDetails(detail, level + 1));
+        }
+        return result;
     }
 
     /**
@@ -801,6 +905,10 @@ public class ImpactAnalyzerService {
                     wb.setSrcObjectType(src);
                     wb.setExpression(expr);
                     wb.setCondition(cond);
+                    wb.setIdField(optText(jn, "idField"));
+                    wb.setExecutingMoment(optText(jn, "executingMoment"));
+                    wb.setValidateExpr(optText(jn, "validateExpr"));
+                    wb.setValidateMessage(optText(jn, "validateMessage"));
                     return wb;
                 }
                 return null;
@@ -1199,6 +1307,36 @@ public class ImpactAnalyzerService {
                             level.put(uId, d + 1);
                         }
                     }
+
+                    // T006: 跨对象 triggerExpr 依赖（foreignKey.fieldName 格式）
+                    BaseappObjectField fieldInfo = getFieldInfo(obj, fld);
+                    if (fieldInfo != null && fieldInfo.getTriggerExpr() != null) {
+                        Map<String, String> crossRefs = ExprUtils.extractCrossObjectRefs(fieldInfo.getTriggerExpr());
+                        if (!crossRefs.isEmpty()) {
+                            log.debug("[TriggerParse] object={}, field={}, deps={}, crossObjectDeps={}",
+                                    obj, fld, upstream, crossRefs);
+                        }
+                        for (Map.Entry<String, String> ref : crossRefs.entrySet()) {
+                            String fkField = ref.getKey();    // e.g. projectId
+                            String refField = ref.getValue();  // e.g. projectName
+                            // 从外键字段的 refObjectType 元数据中获取目标对象
+                            BaseappObjectField fkFieldInfo = getFieldInfo(obj, fkField);
+                            if (fkFieldInfo != null && fkFieldInfo.getRefObjectType() != null
+                                    && !fkFieldInfo.getRefObjectType().trim().isEmpty()) {
+                                String refObj = fkFieldInfo.getRefObjectType().trim();
+                                String crossId = refObj + "." + refField;
+                                addEdgeIfAbsent(edges, edgeSet, crossId, cur, "intra");
+                                if (!nodeSet.contains(crossId)) {
+                                    nodeSet.add(crossId);
+                                    GraphModels.Node cn = new GraphModels.Node(refObj, refField);
+                                    fillNodeMeta(cn);
+                                    g.nodes.add(cn);
+                                    q.offer(crossId);
+                                    level.put(crossId, d + 1);
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // 2. WriteBack Upstream: 谁回写了我 (Source -> Me)
@@ -1210,9 +1348,18 @@ public class ImpactAnalyzerService {
                         if (wb != null && wb.getSrcObjectType() != null) {
                             String srcObj = wb.getSrcObjectType();
                             Set<String> srcFields = ExprUtils.extractCamelFieldsFromSql(wb.getExpression());
+                            // T011: 从 condition 中提取引用的过滤字段，合并到依赖集合
+                            if (wb.getCondition() != null && !wb.getCondition().trim().isEmpty()) {
+                                srcFields.addAll(ExprUtils.extractCamelFieldsFromSql(wb.getCondition()));
+                            }
+                            String moment = wb.getExecutingMoment();
                             for (String srcFld : srcFields) {
                                 String uId = srcObj + "." + srcFld;
-                                addEdgeIfAbsent(edges, edgeSet, uId, cur, "writeBack"); // Source -> Me
+                                if (addEdgeIfAbsent(edges, edgeSet, uId, cur, "writeBack")) {
+                                    // 设置回写时机到最后添加的边
+                                    GraphModels.Edge lastEdge = edges.get(edges.size() - 1);
+                                    lastEdge.executingMoment = moment;
+                                }
                                 if (!nodeSet.contains(uId)) {
                                     nodeSet.add(uId);
                                     GraphModels.Node n = new GraphModels.Node(srcObj, srcFld);
@@ -1266,7 +1413,16 @@ public class ImpactAnalyzerService {
                 if (includeWriteBack) {
                     for (Map.Entry<String, String> e : buildCrossObjectDependencies(obj, fld)) {
                         String nid = e.getKey() + "." + e.getValue();
-                        addEdgeIfAbsent(edges, edgeSet, cur, nid, "writeBack");
+                        if (addEdgeIfAbsent(edges, edgeSet, cur, nid, "writeBack")) {
+                            // 从目标字段的 writeBackExpr 中读取 executingMoment
+                            BaseappObjectField targetField = getFieldInfo(e.getKey(), e.getValue());
+                            if (targetField != null) {
+                                WriteBackExpr wbTarget = parseWriteBack(targetField.getWriteBackExpr());
+                                if (wbTarget != null) {
+                                    edges.get(edges.size() - 1).executingMoment = wbTarget.getExecutingMoment();
+                                }
+                            }
+                        }
                         if (!nodeSet.contains(nid)) {
                             nodeSet.add(nid);
                             GraphModels.Node n = new GraphModels.Node(e.getKey(), e.getValue());

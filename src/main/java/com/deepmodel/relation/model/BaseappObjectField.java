@@ -14,6 +14,9 @@ public class BaseappObjectField {
     private String writeBackExpr;
     private String referInfo;
 
+    // Source info for LIST type fields (detail entity identification)
+    private String sourceInfo; // jsonb as text
+
     // Reference relation
     private String refObjectType;
 
@@ -130,5 +133,13 @@ public class BaseappObjectField {
 
     public void setReferInfo(String referInfo) {
         this.referInfo = referInfo;
+    }
+
+    public String getSourceInfo() {
+        return sourceInfo;
+    }
+
+    public void setSourceInfo(String sourceInfo) {
+        this.sourceInfo = sourceInfo;
     }
 }

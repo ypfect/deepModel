@@ -1,6 +1,7 @@
 package com.deepmodel.relation.service;
 
 import com.deepmodel.relation.dao.BaseappObjectFieldMapper;
+import com.deepmodel.relation.config.ExpressionEngineConfig;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.GraphModels;
 import com.deepmodel.relation.model.WriteBackExpr;
@@ -82,17 +83,23 @@ public class UpgradeScriptService {
     private final BaseappObjectFieldMapper mapper;
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final ExpressionEngineConfig expressionEngineConfig;
+    private final WriteBackSqlGenerator writeBackSqlGenerator;
 
     /** objectType → appName 缓存，避免 N+1 DB 查询 */
     private final Map<String, String> appNameCache = new ConcurrentHashMap<>();
 
     public UpgradeScriptService(ImpactAnalyzerService impactAnalyzerService,
                                 BaseappObjectFieldMapper mapper,
-                                OkHttpClient httpClient) {
+                                OkHttpClient httpClient,
+                                ExpressionEngineConfig expressionEngineConfig,
+                                WriteBackSqlGenerator writeBackSqlGenerator) {
         this.impactAnalyzerService = impactAnalyzerService;
         this.mapper = mapper;
         this.httpClient = httpClient;
         this.objectMapper = new ObjectMapper();
+        this.expressionEngineConfig = expressionEngineConfig;
+        this.writeBackSqlGenerator = writeBackSqlGenerator;
     }
 
     @PostConstruct
@@ -1111,17 +1118,36 @@ public class UpgradeScriptService {
             sb.append(" (").append(def.getTitle()).append(")");
         }
         sb.append("\n");
+        // 输出回写时机
+        String moment = wb.getExecutingMoment();
+        if (moment != null && !moment.trim().isEmpty()) {
+            sb.append("-- 回写时机: ").append(moment).append("\n");
+        }
 
-        String fieldPath = step.objectType + "." + step.field;
-        String sql = callWriteBackSqlApi(fieldPath);
-        
+        String sql;
+        if (expressionEngineConfig.isLocalWritebackSql()) {
+            // 本地生成回写 SQL
+            sql = writeBackSqlGenerator.generateSql(step.objectType, step.field, wb);
+            log.debug("[UpgradeScript] 本地生成回写 SQL: {}.{}", step.objectType, step.field);
+        } else {
+            // Feature Flag=false 时的回退路径：HTTP 远程调用
+            String fieldPath = step.objectType + "." + step.field;
+            sql = callWriteBackSqlApi(fieldPath);
+        }
+
         if (sql != null && !sql.trim().isEmpty()) {
             sb.append(ensureSqlEndsWithSemicolon(sql.trim())).append("\n\n");
         } else {
-            sb.append("-- [WARN] 接口调用失败，无法生成 SQL: ").append(fieldPath).append("\n\n");
+            sb.append("-- [WARN] 无法生成回写 SQL: ").append(step.objectType).append(".").append(step.field).append("\n\n");
         }
     }
 
+    /**
+     * [回退路径] 通过 HTTP 调用外部 arap 服务生成回写 SQL。
+     * <p>
+     * 仅在 Feature Flag {@code expression-engine.local-writeback-sql=false} 时使用。
+     * 待本地模式（{@link WriteBackSqlGenerator}）稳定后可移除此方法及相关 OkHttp 依赖。
+     */
     private String callWriteBackSqlApi(String fieldPath) {
         String apiUrl = resolveWriteBackApiUrl();
         if (apiUrl == null || apiUrl.isEmpty()) {
