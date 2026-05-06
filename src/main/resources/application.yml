@@ -4,6 +4,9 @@ server:
 # 回写 SQL 接口（默认从 spring.datasource.url 自动推导 arap 服务地址）
 writeback-sql:
   tenant-id: 3XNLNA60G34006P
+# 表达式引擎配置
+expression-engine:
+  local-writeback-sql: false  # true=本地生成回写SQL, false=HTTP远程调用(默认)
 #连接数据库
 spring:
   mvc:
