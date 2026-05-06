@@ -48,4 +48,9 @@ public interface BaseappObjectFieldMapper {
      * 查询所有 LIST 类型字段的 source_info（用于识别子表关系）
      */
     List<BaseappObjectField> selectSourceInfoFields();
+
+    /**
+     * 查询支持变更单的实体名称列表（content->>'isSupportChangeBill'='true'）
+     */
+    List<String> selectChangeBillSupportedEntities();
 }

@@ -152,4 +152,13 @@
       AND f.source_info::text != 'null'
   </select>
 
+  <!-- 查询支持变更单的实体名称列表 -->
+  <select id="selectChangeBillSupportedEntities" resultType="string">
+    select m.name
+    from baseapp_system_metadata m
+    where m.is_deleted = false
+      and m.type_id = 'MetaType.entity'
+      and m.content::jsonb->>'isSupportChangeBill' = 'true'
+  </select>
+
 </mapper>

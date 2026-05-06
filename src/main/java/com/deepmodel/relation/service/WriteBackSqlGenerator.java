@@ -22,6 +22,13 @@ import java.util.concurrent.ConcurrentHashMap;
  *   UPDATE {targetTable} m
  *   SET {column} = (SELECT {expression} FROM {srcTable} WHERE {idField} = m.id AND is_deleted = false {condition});
  * </pre>
+ * <p>
+ * 对齐线上 GenSqlByModelFiledController.writebackField2sql 的完整逻辑：
+ * <ol>
+ *   <li>COALESCE 防空值包装（根据目标字段类型自动添加）</li>
+ *   <li>ExecutingMoment → billStatus WHERE 条件追加</li>
+ *   <li>变更单 isChangeBill 过滤条件追加</li>
+ * </ol>
  */
 @Service
 public class WriteBackSqlGenerator {
@@ -33,6 +40,26 @@ public class WriteBackSqlGenerator {
 
     /** objectType → appName 缓存 */
     private final Map<String, String> appNameCache = new ConcurrentHashMap<String, String>();
+
+    /**
+     * ExecutingMoment 到 billFullStatus IN 条件的静态映射。
+     * 对齐 platform WriteBackExecutingMoment.getAppendCriteria() 的输出。
+     */
+    private static final Map<String, String> MOMENT_CRITERIA = new LinkedHashMap<>();
+    static {
+        // onlyAfterSubmit → OR(billFullStatus IN (...), (billFullStatus='BillStatus.excepted' AND billStatus IN (...)))
+        MOMENT_CRITERIA.put("onlyAfterSubmit",
+                "(billFullStatus in ('BillStatus.submitting','BillStatus.submitted','BillStatus.approving',"
+                        + "'BillStatus.effecting','BillStatus.effective','BillStatus.finishing','BillStatus.finished',"
+                        + "'BillStatus.closing','BillStatus.opening','BillStatus.closed') "
+                        + "or (billFullStatus = 'BillStatus.excepted' "
+                        + "and billStatus in ('BillStatus.submitted','BillStatus.approving')))");
+        // onlyAfterEffective → AND(billFullStatus IN (...))
+        MOMENT_CRITERIA.put("onlyAfterEffective",
+                "billFullStatus in ('BillStatus.effective','BillStatus.finishing','BillStatus.finished',"
+                        + "'BillStatus.closing','BillStatus.opening','BillStatus.closed')");
+        // always / onlyAfterSave / onlyCascade → 不追加条件
+    }
 
     public WriteBackSqlGenerator(ImpactAnalyzerService impactAnalyzerService,
                                  BaseappObjectFieldMapper mapper) {
@@ -59,11 +86,28 @@ public class WriteBackSqlGenerator {
         String srcTable = objectTypeToTableName(wb.getSrcObjectType());
         String expression = convertFormulaToSnakeCase(wb.getExpression(), wb.getSrcObjectType());
 
+        // 1. COALESCE 防空值包装
+        BaseappObjectField targetFieldDef = impactAnalyzerService.getFieldInfo(objectType, field);
+        expression = wrapCoalesce(expression, targetFieldDef);
+
         // 确定关联条件字段：idField 或默认推导
         String joinCondition = buildJoinCondition(wb, objectType);
 
-        // 构建 WHERE 条件
-        String whereCondition = buildWhereCondition(wb);
+        // 构建 WHERE 条件（从 writeBackExpr.condition）
+        String condition = buildWhereCondition(wb);
+
+        // 2. ExecutingMoment → billStatus 条件追加
+        String momentCondition = buildMomentCondition(wb, wb.getSrcObjectType());
+        condition = mergeConditions(momentCondition, condition);
+
+        // 3. 变更单 isChangeBill 过滤
+        condition = appendChangeBillCondition(wb.getSrcObjectType(), condition);
+
+        // 包装 condition
+        String conditionClause = "";
+        if (condition != null && !condition.isEmpty()) {
+            conditionClause = " and (" + condition + ")";
+        }
 
         StringBuilder sql = new StringBuilder();
         sql.append("UPDATE ").append(targetTable).append(" m\n");
@@ -72,18 +116,150 @@ public class WriteBackSqlGenerator {
         sql.append("  FROM ").append(srcTable).append("\n");
         sql.append("  WHERE ").append(joinCondition);
         sql.append(" AND is_deleted = false");
-        if (whereCondition != null && !whereCondition.isEmpty()) {
-            sql.append(" AND ").append(whereCondition);
-        }
+        sql.append(conditionClause);
         sql.append("\n);");
 
         String result = sql.toString();
-        log.info("[WriteBackSqlGen] object={}, field={}, srcObject={}, expression={}, condition={}, idField={}",
+        log.info("[WriteBackSqlGen] object={}, field={}, srcObject={}, expression={}, condition={}, idField={}, moment={}",
                 objectType, field, wb.getSrcObjectType(), wb.getExpression(),
-                wb.getCondition(), wb.getIdField());
+                wb.getCondition(), wb.getIdField(), wb.getExecutingMoment());
 
         return result;
     }
+
+    // ─── COALESCE 防空值包装 ───
+
+    /**
+     * 根据目标字段类型对表达式添加 COALESCE 包装，防止更新为 null 值。
+     * 对齐线上 GenSqlByModelFiledController.getHandledWriteBackExpr()。
+     */
+    private String wrapCoalesce(String expression, BaseappObjectField fieldDef) {
+        if (expression == null) return expression;
+        String upper = expression.toUpperCase().replace(" ", "");
+        // 已有 COALESCE 或 COUNT，不再添加
+        if (upper.startsWith("COALESCE(") || upper.startsWith("COUNT(")) {
+            return expression;
+        }
+
+        String fieldType = fieldDef != null ? fieldDef.getType() : null;
+        if (fieldType == null || fieldType.isEmpty()) {
+            return expression;
+        }
+
+        switch (fieldType.toUpperCase()) {
+            case "BIGDECIMAL":
+            case "INTEGER":
+            case "LONG":
+                return String.format("COALESCE(%s, 0)", expression);
+            case "BOOLEAN":
+                return String.format("COALESCE(%s, false)", expression);
+            case "STRING":
+                return String.format("COALESCE(%s, '')", expression);
+            default:
+                return expression;
+        }
+    }
+
+    // ─── ExecutingMoment 条件 ───
+
+    /**
+     * 根据 executingMoment 生成 billStatus/billFullStatus 的过滤条件。
+     * 对齐线上 GenSqlByModelFiledController.appendMomentCriteria()。
+     * <p>
+     * 当源对象是子表时，需要通过 rootBillFieldPath 路径引用主表的 billFullStatus。
+     */
+    private String buildMomentCondition(WriteBackExpr wb, String srcObjectType) {
+        String moment = wb.getExecutingMoment();
+        if (moment == null || moment.trim().isEmpty() || "always".equals(moment) || "onlyAfterSave".equals(moment) || "onlyCascade".equals(moment)) {
+            return null;
+        }
+
+        String criteriaTemplate = MOMENT_CRITERIA.get(moment);
+        if (criteriaTemplate == null) {
+            return null;
+        }
+
+        // 查找源对象到主表的路径
+        String rootBillFieldPath = getRootBillFieldPath(srcObjectType);
+        if (rootBillFieldPath != null && !rootBillFieldPath.isEmpty()) {
+            // 子表场景：将 billFullStatus/billStatus 替换为 rootBillFieldPath.billFullStatus
+            criteriaTemplate = criteriaTemplate.replace("billFullStatus", rootBillFieldPath + ".billFullStatus");
+            criteriaTemplate = criteriaTemplate.replace("billStatus", rootBillFieldPath + ".billStatus");
+        }
+
+        // 转换驼峰字段名为下划线
+        return convertFormulaToSnakeCase(criteriaTemplate, srcObjectType);
+    }
+
+    /**
+     * 递归查找源对象到主表的 FK 字段路径。
+     * 对齐线上 GenSqlByModelFiledController.getRootBillFieldPath()。
+     */
+    private String getRootBillFieldPath(String srcObjectType) {
+        try {
+            Map<String, String> detailToMainMap = impactAnalyzerService.getDetailToMain();
+            String mainEntity = detailToMainMap.get(srcObjectType);
+            if (mainEntity == null) {
+                // 源对象不是子表
+                return "";
+            }
+
+            // 找到指向主表的 FK 字段名（约定：主表名首字母小写 + "Id"）
+            String fkFieldName = Character.toLowerCase(mainEntity.charAt(0)) + mainEntity.substring(1) + "Id";
+
+            // 如果主表本身也是子表，递归查找
+            String parentPath = getRootBillFieldPath(mainEntity);
+            if (parentPath != null && !parentPath.isEmpty()) {
+                return fkFieldName + "." + parentPath;
+            }
+
+            return fkFieldName;
+        } catch (Exception e) {
+            log.warn("Failed to get rootBillFieldPath for entity: {}", srcObjectType, e);
+            return "";
+        }
+    }
+
+    // ─── 变更单 isChangeBill 过滤 ───
+
+    /**
+     * 如果源对象支持变更单，追加 isChangeBill=false 条件。
+     * 对齐线上 GenSqlByModelFiledController.appendCondition()。
+     */
+    private String appendChangeBillCondition(String srcObjectType, String condition) {
+        try {
+            if (impactAnalyzerService.isSupportChangeBill(srcObjectType)) {
+                if (condition != null && !condition.isEmpty()) {
+                    if (condition.contains("isChangeBill")) {
+                        // condition 已含 isChangeBill，追加 any('{t,f}') 兼容
+                        return String.format("(%s) and is_change_bill = any('{t,f}')", condition);
+                    } else {
+                        return String.format("(%s) and is_change_bill = false", condition);
+                    }
+                } else {
+                    return "is_change_bill = false";
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to check change bill support for entity: {}", srcObjectType, e);
+        }
+        return condition;
+    }
+
+    // ─── 条件合并工具 ───
+
+    private String mergeConditions(String first, String second) {
+        boolean hasFirst = first != null && !first.isEmpty();
+        boolean hasSecond = second != null && !second.isEmpty();
+        if (hasFirst && hasSecond) {
+            return String.format("(%s) and (%s)", first, second);
+        }
+        if (hasFirst) return first;
+        if (hasSecond) return second;
+        return null;
+    }
+
+    // ─── 原有方法（未改动） ───
 
     /**
      * 构建 JOIN 条件（源表如何关联到目标表）。

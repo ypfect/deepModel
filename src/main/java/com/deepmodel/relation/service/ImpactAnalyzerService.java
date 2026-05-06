@@ -50,6 +50,9 @@ public class ImpactAnalyzerService {
     // bill 类型对象集合（来自 baseapp_object_type.type='bill'）
     private volatile Set<String> billObjectTypes = Collections.emptySet();
 
+    // 支持变更单的实体集合（来自 baseapp_system_metadata.content.isSupportChangeBill=true）
+    private volatile Set<String> changeBillEntities = Collections.emptySet();
+
     // 子表关系映射：主表 → 直接子表列表
     private final Map<String, Set<String>> mainToDetails = new ConcurrentHashMap<>();
     // 子表关系映射：子表 → 主表
@@ -159,6 +162,23 @@ public class ImpactAnalyzerService {
             billObjectTypes = Collections.emptySet();
         }
         long tBillEnd = System.currentTimeMillis();
+
+        // 加载支持变更单的实体列表
+        long tChangeBillStart = System.currentTimeMillis();
+        try {
+            List<String> cbNames = mapper.selectChangeBillSupportedEntities();
+            changeBillEntities = new HashSet<String>();
+            for (String n : cbNames) {
+                if (n != null && !n.trim().isEmpty()) {
+                    changeBillEntities.add(n.trim());
+                }
+            }
+            log.info("Loaded {} change-bill supported entities", changeBillEntities.size());
+        } catch (Exception e) {
+            log.warn("Failed to load change-bill supported entities", e);
+            changeBillEntities = Collections.emptySet();
+        }
+        long tChangeBillEnd = System.currentTimeMillis();
 
         // 加载子表关系映射
         long tDetailStart = System.currentTimeMillis();
@@ -308,6 +328,13 @@ public class ImpactAnalyzerService {
      */
     public Map<String, String> getDetailToMain() {
         return Collections.unmodifiableMap(detailToMain);
+    }
+
+    /**
+     * 判断指定实体是否支持变更单（isSupportChangeBill=true）。
+     */
+    public boolean isSupportChangeBill(String entityName) {
+        return changeBillEntities.contains(entityName);
     }
 
     /**
