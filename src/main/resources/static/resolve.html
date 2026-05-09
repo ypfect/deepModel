@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepModel Insight - 元数据匹配</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, sans-serif; background: #f8fafc; height: 100vh; }
+        #app { height: 100%; display: flex; flex-direction: column; }
+        .header { background: #fff; height: 56px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; padding: 0 24px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); flex-shrink: 0; }
+        .logo { font-size: 18px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 10px; }
+        .logo-mark { width: 26px; height: 26px; border-radius: 8px; background: radial-gradient(circle at 0 0,#38bdf8,#6366f1 45%,#a855f7 100%); box-shadow: 0 0 0 1px rgba(15,23,42,0.15), 0 8px 18px rgba(15,23,42,0.35); }
+        .main-content { flex: 1; display: flex; flex-direction: column; padding: 32px; max-width: 900px; margin: 0 auto; width: 100%; box-sizing: border-box; overflow-y: auto; }
+        .search-area { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; margin-bottom: 24px; }
+        .search-row { display: flex; gap: 12px; align-items: flex-end; }
+        .search-input { flex: 1; }
+        .result-area { flex: 1; }
+        .object-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; margin-bottom: 16px; }
+        .object-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .object-name { font-size: 18px; font-weight: 700; color: #0f172a; }
+        .object-title { font-size: 14px; color: #64748b; }
+        .score-badge { display: inline-flex; padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; }
+        .score-high { background: #d1fae5; color: #065f46; }
+        .score-mid { background: #dbeafe; color: #1e40af; }
+        .score-low { background: #fef3c7; color: #92400e; }
+        .source-badge { display: inline-flex; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 500; background: #f1f5f9; color: #475569; margin-left: 6px; }
+        .meta-row { display: flex; gap: 16px; font-size: 13px; color: #64748b; flex-wrap: wrap; margin-bottom: 8px; }
+        .meta-row span { display: flex; align-items: center; gap: 4px; }
+        .field-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        .field-table th { text-align: left; font-size: 12px; color: #64748b; font-weight: 600; padding: 8px 12px; border-bottom: 2px solid #e2e8f0; text-transform: uppercase; }
+        .field-table td { font-size: 13px; color: #334155; padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
+        .field-table tr:hover td { background: #f8fafc; }
+        .category-badge { display: inline-flex; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+        .cat-AMOUNT { background: #fef3c7; color: #92400e; }
+        .cat-QTY { background: #dbeafe; color: #1e40af; }
+        .cat-WRITE_BACK { background: #d1fae5; color: #065f46; }
+        .cat-TRIGGER { background: #ede9fe; color: #5b21b6; }
+        .cat-VIRTUAL { background: #fce7f3; color: #9d174d; }
+        .cat-BASE { background: #f1f5f9; color: #475569; }
+        .hint-text { font-size: 13px; color: #94a3b8; margin-top: 8px; }
+        .examples { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+        .example-chip { padding: 4px 12px; border-radius: 99px; font-size: 13px; background: #f1f5f9; color: #475569; cursor: pointer; border: 1px solid #e2e8f0; transition: all 0.15s; }
+        .example-chip:hover { background: #e0f2fe; color: #0284c7; border-color: #7dd3fc; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/element-plus@2.4.4/dist/index.full.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+</head>
+<body>
+<div id="app">
+    <header class="header">
+        <div class="logo"><div class="logo-mark"></div><span>元数据匹配测试</span></div>
+    </header>
+    <div class="main-content">
+        <div class="search-area">
+            <div class="search-row">
+                <div class="search-input">
+                    <div style="font-size:13px;color:#64748b;margin-bottom:6px;font-weight:600;">输入自然语言查询</div>
+                    <el-input v-model="query" placeholder="输入中文业务术语或英文技术名..." size="large"
+                              @keyup.enter="doResolve" clearable>
+                        <template #prefix><el-icon><Search /></el-icon></template>
+                    </el-input>
+                </div>
+                <el-button type="primary" size="large" @click="doResolve" :loading="loading" icon="Search"
+                           style="border-radius:8px;min-width:100px;">匹配</el-button>
+            </div>
+            <div class="hint-text">试试这些示例：</div>
+            <div class="examples">
+                <span class="example-chip" v-for="ex in examples" :key="ex" @click="query=ex;doResolve()">{{ ex }}</span>
+            </div>
+        </div>
+
+        <!-- 结果区域 -->
+        <div class="result-area">
+            <el-empty v-if="!result && !loading" description="输入查询后点击匹配" :image-size="80"></el-empty>
+
+            <div v-if="result && result.objectMatches.length === 0 && !loading"
+                 style="text-align:center;padding:40px;color:#94a3b8;">
+                未找到匹配结果，请换个关键词试试
+            </div>
+
+            <div v-for="om in (result?.objectMatches || [])" :key="om.objectType" class="object-card">
+                <div class="object-header">
+                    <span class="object-name">{{ om.objectType }}</span>
+                    <span class="object-title" v-if="om.title && om.title !== om.objectType">{{ om.title }}</span>
+                    <span class="score-badge" :class="scoreClass(om.score)">{{ om.score.toFixed(2) }}</span>
+                    <span class="source-badge">{{ om.matchSource }}</span>
+                </div>
+                <div class="meta-row">
+                    <span v-if="om.parentEntity">📎 主表: {{ om.parentEntity }}</span>
+                    <span v-if="om.detailEntities && om.detailEntities.length > 0">📋 子表: {{ om.detailEntities.join(', ') }}</span>
+                </div>
+
+                <!-- 字段匹配表格 -->
+                <div v-if="om.fieldMatches && om.fieldMatches.length > 0">
+                    <div style="font-size:13px;font-weight:600;color:#334155;margin-top:16px;margin-bottom:8px;">
+                        匹配到 {{ om.fieldMatches.length }} 个字段
+                    </div>
+                    <table class="field-table">
+                        <thead>
+                            <tr>
+                                <th>字段名</th>
+                                <th>标题</th>
+                                <th>分类</th>
+                                <th>Score</th>
+                                <th>来源</th>
+                                <th>回写</th>
+                                <th>触发</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="fm in om.fieldMatches" :key="fm.field">
+                                <td style="font-weight:600;">{{ fm.field }}</td>
+                                <td>{{ fm.title || '-' }}</td>
+                                <td><span class="category-badge" :class="'cat-' + fm.category">{{ fm.category }}</span></td>
+                                <td><span class="score-badge" :class="scoreClass(fm.score)" style="font-size:11px;">{{ fm.score.toFixed(2) }}</span></td>
+                                <td><span class="source-badge">{{ fm.matchSource }}</span></td>
+                                <td>{{ fm.hasWriteBack ? '✅' : '-' }}</td>
+                                <td>{{ fm.hasTrigger ? '✅' : '-' }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- JSON 原始响应 -->
+            <el-collapse v-if="result" style="margin-top:16px;">
+                <el-collapse-item title="查看原始 JSON 响应">
+                    <pre style="font-size:12px;background:#f1f5f9;padding:16px;border-radius:8px;overflow-x:auto;max-height:400px;">{{ JSON.stringify(result, null, 2) }}</pre>
+                </el-collapse-item>
+            </el-collapse>
+        </div>
+    </div>
+</div>
+
+<script>
+const { createApp, ref } = Vue;
+const app = createApp({
+    setup() {
+        const query = ref('');
+        const loading = ref(false);
+        const result = ref(null);
+        const examples = ['应收合同', '应收合同的原始金额', '应收合同的子表', 'ArContract', '采购订单', '合同金额', '付款状态', '收款单'];
+
+        const scoreClass = (score) => {
+            if (score >= 0.8) return 'score-high';
+            if (score >= 0.6) return 'score-mid';
+            return 'score-low';
+        };
+
+        const doResolve = async () => {
+            if (!query.value.trim()) return;
+            loading.value = true;
+            result.value = null;
+            try {
+                const resp = await fetch(`/api/skills/resolve?query=${encodeURIComponent(query.value.trim())}&maxResults=10`);
+                if (resp.ok) {
+                    result.value = await resp.json();
+                } else {
+                    ElementPlus.ElMessage.error('请求失败: ' + resp.status);
+                }
+            } catch (e) {
+                ElementPlus.ElMessage.error('网络错误: ' + e.message);
+            } finally {
+                loading.value = false;
+            }
+        };
+
+        return { query, loading, result, examples, scoreClass, doResolve };
+    }
+});
+app.use(ElementPlus);
+for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+    app.component(key, component);
+}
+app.mount('#app');
+</script>
+</body>
+</html>
