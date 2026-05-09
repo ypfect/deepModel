@@ -567,8 +567,14 @@ public class SkillsService {
         // 填充上下文并匹配字段
         for (ObjectMatch om : objectMatches) {
             fillObjectContext(om);
-            if (includeFields && fieldPart != null && !fieldPart.isEmpty()) {
-                om.fieldMatches = matchFields(om.objectType, fieldPart);
+            if (includeFields) {
+                if (fieldPart != null && !fieldPart.isEmpty()) {
+                    // 有明确字段查询词：返回匹配的字段
+                    om.fieldMatches = matchFields(om.objectType, fieldPart);
+                } else {
+                    // 无字段查询词：返回该对象的全部字段（AI 需要完整候选池）
+                    om.fieldMatches = getAllFields(om.objectType);
+                }
             }
         }
 
@@ -595,6 +601,18 @@ public class SkillsService {
             }
         }
 
+        // 1b. 英文名子串匹配（输入 "contract" → 匹配 ArContract、ApContract 等）
+        String inputLower = input.toLowerCase();
+        for (String type : allTypes) {
+            if (matched.contains(type)) continue;
+            if (type.toLowerCase().contains(inputLower)) {
+                // score 按子串占比计算：输入越长占比越高
+                double ratio = (double) input.length() / type.length();
+                double score = 0.5 + ratio * 0.4; // 0.5 ~ 0.9
+                addObjectMatch(matches, matched, type, titles, Math.min(score, 0.85), ResolveModels.MatchSource.EXACT_NAME);
+            }
+        }
+
         // 2. 同义词精确匹配
         for (Map.Entry<String, List<String>> entry : synonyms.entrySet()) {
             for (String syn : entry.getValue()) {
@@ -611,12 +629,16 @@ public class SkillsService {
             }
         }
 
-        // 4. 中文标题包含匹配（输入包含标题 或 标题包含输入）
+        // 4. 中文标题包含匹配（输入包含标题 或 标题包含输入），score 按长度比例调整
         for (Map.Entry<String, String> entry : titles.entrySet()) {
             if (matched.contains(entry.getKey())) continue;
             String titleVal = entry.getValue();
-            if (titleVal.contains(input) || input.contains(titleVal)) {
-                addObjectMatch(matches, matched, entry.getKey(), titles, 0.6, ResolveModels.MatchSource.TITLE_CONTAINS);
+            if (titleVal != null && (titleVal.contains(input) || input.contains(titleVal))) {
+                int matchLen = Math.min(input.length(), titleVal.length());
+                int maxLen = Math.max(input.length(), titleVal.length());
+                double ratio = (double) matchLen / maxLen;
+                double score = 0.4 + ratio * 0.35; // 0.4 ~ 0.75，按匹配比例
+                addObjectMatch(matches, matched, entry.getKey(), titles, score, ResolveModels.MatchSource.TITLE_CONTAINS);
             }
         }
 
@@ -697,6 +719,19 @@ public class SkillsService {
 
         matches.sort((a, b) -> Double.compare(b.score, a.score));
         return matches;
+    }
+
+    /**
+     * 返回对象的全部字段（无查询词时，给 AI 提供完整候选池）。
+     */
+    private List<FieldMatch> getAllFields(String objectType) {
+        List<BaseappObjectField> fields = analyzerService.getFieldDetailsForObject(objectType);
+        List<FieldMatch> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (BaseappObjectField f : fields) {
+            addFieldMatch(result, seen, f, 0.5, ResolveModels.MatchSource.TITLE_CONTAINS);
+        }
+        return result;
     }
 
     private void addFieldMatch(List<FieldMatch> matches, Set<String> matched,
