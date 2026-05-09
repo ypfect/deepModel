@@ -7,6 +7,9 @@ writeback-sql:
 # 表达式引擎配置
 expression-engine:
   local-writeback-sql: false  # true=本地生成回写SQL, false=HTTP远程调用(默认)
+# 决策表分析配置
+decision-table:
+  scan-path: /Users/pengfyu/workspace/feature/dev  # opus77 代码库根目录，用于扫描 CSV 决策表
 #连接数据库
 spring:
   mvc:

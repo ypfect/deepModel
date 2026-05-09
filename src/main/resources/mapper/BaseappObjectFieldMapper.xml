@@ -161,4 +161,56 @@
       and m.content::jsonb->>'isSupportChangeBill' = 'true'
   </select>
 
+  <!-- ===== FuncUnit Customizer 查询 ===== -->
+
+  <!-- 对象绑定的 FuncUnit（ObjectTypeFuncUnitCustomizer 数据源） -->
+  <select id="selectObjectTypeFuncUnits" resultType="map">
+    SELECT
+      otfu.id,
+      fu.name AS func_unit_name,
+      fu.method_step_type,
+      fu.exec_base_method,
+      fu.func_unit_type_id
+    FROM baseapp_object_type_func_unit otfu
+    JOIN baseapp_func_unit fu ON otfu.func_unit_id = fu.id
+    WHERE otfu.object_type = #{entityName}
+      AND otfu.is_deleted = false
+      AND fu.is_deleted = false
+  </select>
+
+  <!-- 实体业务规则（EntityBusinessRuleCustomizer 数据源） -->
+  <!-- 直接 JOIN 底表避免视图 baseapp_business_trigger_action_spec_view 可能不存在 -->
+  <select id="selectEntityBusinessRules" resultType="map">
+    SELECT
+      ebr.id,
+      ebr.rule_id,
+      ebr.is_binding_use,
+      ebr.is_disabled,
+      a.func_unit_name,
+      coalesce(nullif(btas.func_unit_step, ''), a.func_unit_step) as func_unit_step,
+      a.func_unit_type_id,
+      t.base_method as trigger_base_method,
+      a.live_style_id as action_spec_style_id
+    FROM baseapp_entity_business_rule ebr
+    JOIN baseapp_entity_rule_trigger ert ON ert.entity_rule_id = ebr.id
+    JOIN baseapp_business_trigger_action_spec btas ON ert.trigger_id = btas.trigger_id
+    JOIN baseapp_business_trigger t ON btas.trigger_id = t.id
+    JOIN baseapp_business_action_spec a ON btas.action_spec_id = a.id
+    WHERE ebr.object_type = #{entityName}
+      AND ebr.is_deleted = false
+      AND coalesce(ebr.is_disabled, false) = false
+      AND a.live_style_id = 'PLUGIN'
+      AND a.func_unit_name IS NOT NULL
+      AND a.func_unit_name != ''
+  </select>
+
+  <!-- 预执行规则（PreDoRuleFuncUnitCustomizer - 表可能不存在，查询时容错） -->
+  <select id="selectPreDoRules" resultType="map">
+    SELECT id, name, object_type
+    FROM baseapp_pre_do_rule_group
+    WHERE object_type = #{entityName}
+      AND is_deleted = false
+    LIMIT 10
+  </select>
+
 </mapper>

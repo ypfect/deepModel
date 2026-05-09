@@ -4,6 +4,7 @@ import com.deepmodel.relation.model.BaseappObjectField;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
+import java.util.Map;
 
 public interface BaseappObjectFieldMapper {
     List<BaseappObjectField> selectByObjectType(@Param("objectType") String objectType);
@@ -53,4 +54,23 @@ public interface BaseappObjectFieldMapper {
      * 查询支持变更单的实体名称列表（content->>'isSupportChangeBill'='true'）
      */
     List<String> selectChangeBillSupportedEntities();
+
+    // ===== FuncUnit Customizer 查询 =====
+
+    /**
+     * 查询对象绑定的 FuncUnit（ObjectTypeFuncUnitCustomizer 数据源）
+     * 关联 baseapp_func_unit 获取部件名称、步骤、方法
+     */
+    List<Map<String, Object>> selectObjectTypeFuncUnits(@Param("entityName") String entityName);
+
+    /**
+     * 查询实体业务规则（EntityBusinessRuleCustomizer 数据源）
+     * 关联触发动作视图获取部件名称
+     */
+    List<Map<String, Object>> selectEntityBusinessRules(@Param("entityName") String entityName);
+
+    /**
+     * 查询预执行规则（PreDoRuleFuncUnitCustomizer 数据源）
+     */
+    List<Map<String, Object>> selectPreDoRules(@Param("entityName") String entityName);
 }

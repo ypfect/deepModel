@@ -10,6 +10,14 @@ hooks:
     prompt: Execute speckit.git.initialize?
     description: Initialize Git repository before constitution setup
     condition: null
+  before_bug:
+  - extension: git
+    command: speckit.git.feature
+    enabled: true
+    optional: false
+    prompt: Execute speckit.git.feature?
+    description: Create fix branch before bug specification
+    condition: null
   before_specify:
   - extension: git
     command: speckit.git.feature
@@ -89,6 +97,14 @@ hooks:
     optional: true
     prompt: Commit specification changes?
     description: Auto-commit after specification
+    condition: null
+  after_bug:
+  - extension: git
+    command: speckit.git.commit
+    enabled: true
+    optional: true
+    prompt: Commit bug specification changes?
+    description: Auto-commit after bug specification
     condition: null
   after_clarify:
   - extension: git
