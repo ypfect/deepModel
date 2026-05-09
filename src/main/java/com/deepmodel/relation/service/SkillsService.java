@@ -720,16 +720,43 @@ public class SkillsService {
         matches.sort((a, b) -> Double.compare(b.score, a.score));
         return matches;
     }
-
     /**
-     * 返回对象的全部字段（无查询词时，给 AI 提供完整候选池）。
+     * 返回对象的高价值字段（无查询词时，给 AI 提供候选池）。
+     * 按分类优先级排序：回写 > 触发 > 金额 > 数量 > 虚拟 > 普通，限制最多 50 个。
      */
     private List<FieldMatch> getAllFields(String objectType) {
         List<BaseappObjectField> fields = analyzerService.getFieldDetailsForObject(objectType);
         List<FieldMatch> result = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
+
+        // 按分类优先级分组
+        List<BaseappObjectField> writeBackFields = new ArrayList<>();
+        List<BaseappObjectField> triggerFields = new ArrayList<>();
+        List<BaseappObjectField> amountFields = new ArrayList<>();
+        List<BaseappObjectField> qtyFields = new ArrayList<>();
+        List<BaseappObjectField> virtualFields = new ArrayList<>();
+        List<BaseappObjectField> baseFields = new ArrayList<>();
+
         for (BaseappObjectField f : fields) {
-            addFieldMatch(result, seen, f, 0.5, ResolveModels.MatchSource.TITLE_CONTAINS);
+            if (isWriteBackField(f)) writeBackFields.add(f);
+            else if (isTriggerField(f)) triggerFields.add(f);
+            else if (isAmountField(f)) amountFields.add(f);
+            else if (isQtyField(f)) qtyFields.add(f);
+            else if (isVirtualField(f)) virtualFields.add(f);
+            else baseFields.add(f);
+        }
+
+        // 按优先级依次添加
+        for (BaseappObjectField f : writeBackFields) addFieldMatch(result, seen, f, 0.7, ResolveModels.MatchSource.TITLE_CONTAINS);
+        for (BaseappObjectField f : triggerFields)   addFieldMatch(result, seen, f, 0.65, ResolveModels.MatchSource.TITLE_CONTAINS);
+        for (BaseappObjectField f : amountFields)    addFieldMatch(result, seen, f, 0.6, ResolveModels.MatchSource.TITLE_CONTAINS);
+        for (BaseappObjectField f : qtyFields)       addFieldMatch(result, seen, f, 0.6, ResolveModels.MatchSource.TITLE_CONTAINS);
+        for (BaseappObjectField f : virtualFields)   addFieldMatch(result, seen, f, 0.55, ResolveModels.MatchSource.TITLE_CONTAINS);
+        for (BaseappObjectField f : baseFields)      addFieldMatch(result, seen, f, 0.5, ResolveModels.MatchSource.TITLE_CONTAINS);
+
+        // 限制总数
+        if (result.size() > 50) {
+            result = new ArrayList<>(result.subList(0, 50));
         }
         return result;
     }
