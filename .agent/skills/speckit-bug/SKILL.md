@@ -70,9 +70,9 @@ Given that bug description, do this:
 
    If a `before_bug` hook ran successfully in the Pre-Execution Checks above, it will have created/switched to a git branch and output JSON containing `BRANCH_NAME` and `FEATURE_NUM`. Note these values for reference, but the branch name does **not** dictate the spec directory name.
 
-3. **Determine the parent iteration directory**:
+3. **确认关联的特性迭代（交互式）**:
 
-   Bug specs are nested under their parent iteration's `bugs/` subdirectory:
+   Bug specs 嵌套在其所属特性迭代的 `bugs/` 子目录下：
    ```
    specs/
      002-metadata-services/       ← 迭代目录
@@ -82,50 +82,94 @@ Given that bug description, do this:
            spec.md                ← bug spec
    ```
 
-   **Resolution order for parent iteration**:
-   1. If the user explicitly specified an iteration (e.g., `002-metadata-services` or just `002`):
-      - Find the matching directory under `specs/` by prefix
-   2. Otherwise, read `.specify/feature.json` → `feature_directory`:
-      - If it points to a valid iteration directory (e.g., `specs/002-metadata-services`), use it
-      - If it points to a bug directory (e.g., `specs/002-metadata-services/bugs/001-fix-xxx`), extract and use the iteration root
-   3. If neither available: **ask the user** which iteration this bug belongs to, listing existing directories under `specs/`
+   **执行流程**：
 
-   Set `PARENT_ITERATION_DIR` to the resolved iteration directory (absolute path).
+   a. **扫描现有特性迭代**：列出 `specs/` 下所有顶层迭代目录（排除 bugs 子目录）
 
-4. **Create the bug directory under `bugs/`**:
+   b. **读取最近的特性迭代**：
+      - 先检查 `.specify/feature.json` → `feature_directory`，提取其所属的顶层迭代目录
+      - 如果指向 bug 目录（如 `specs/002-xxx/bugs/001-fix-xxx`），提取迭代根目录（`specs/002-xxx`）
+      - 如果指向迭代目录本身，直接使用
+
+   c. **向用户展示确认表格**，**必须等待用户回复后再继续**：
+
+      ```
+      检测到最近的特性迭代：
+
+      | 选项 | 说明 |
+      |------|------|
+      | A | 关联到 `{最近迭代名}` — {迭代spec标题摘要} |
+      | B | 关联到其他特性（请指定编号或名称） |
+      | C | 不关联任何特性，创建为独立 bug |
+
+      这个 bug 属于哪个特性？回复 A/B/C：
+      ```
+
+      如果没有检测到最近的特性迭代（`feature.json` 不存在或无效），只展示 B 和 C 选项。
+
+   d. **根据用户回复处理**：
+      - **A（确认关联最近迭代）**：使用检测到的迭代目录
+      - **B（用户指定）**：列出所有可用迭代供用户选择，等待用户回复后使用对应目录
+      - **C（独立 bug）**：在 `specs/` 下创建一个新的独立 bug 迭代目录：
+        - 扫描 `specs/` 确定下一个序号（如 `005`）
+        - 目录名格式：`<NNN>-<short-name>`（如 `005-fix-contract-save-npe`）
+        - 此目录既是迭代目录也是 bug 目录（spec.md 直接放在该目录下，无需 bugs/ 子目录）
+        - `feature.json` 中 `parent_iteration` 设为 `null`
+
+   e. **如果用户回复了 A 或 B**：
+      - Set `PARENT_ITERATION_DIR` to the resolved iteration directory (absolute path)
+      - `IS_STANDALONE = false`
+   
+   f. **如果用户回复了 C**：
+      - `PARENT_ITERATION_DIR = null`
+      - `IS_STANDALONE = true`
+
+   Set `PARENT_ITERATION_DIR` to the resolved iteration directory (absolute path), or null for standalone bugs.
+
+4. **Create the bug directory**:
+
+   **路径 A/B（关联到特性迭代，IS_STANDALONE = false）**：
 
    - Scan `PARENT_ITERATION_DIR/bugs/` for existing bug directories
    - Determine next sequential number (3-digit, starting from `001`)
    - Construct bug directory name: `<NNN>-<short-name>` (e.g., `001-fix-contract-save-npe`)
    - Set `BUG_DIR` to `PARENT_ITERATION_DIR/bugs/<bug-directory-name>`
-
-   **Create the directory and spec file**:
-   - `mkdir -p BUG_DIR`
-   - Copy `.specify/templates/bug-spec-template.md` to `BUG_DIR/spec.md` as the starting point
-   - Set `SPEC_FILE` to `BUG_DIR/spec.md`
-   - Persist the resolved path to `.specify/feature.json`:
-     ```json
-     {
-       "feature_directory": "<resolved bug dir>",
-       "parent_iteration": "<parent iteration dir>"
-     }
-     ```
-     Example:
+   - Persist to `.specify/feature.json`:
      ```json
      {
        "feature_directory": "specs/002-metadata-services/bugs/001-fix-contract-save-npe",
        "parent_iteration": "specs/002-metadata-services"
      }
      ```
-     `parent_iteration` enables downstream commands (`/speckit.plan`, `/speckit.tasks`, etc.) to access the iteration's spec.md, plan.md, data-model.md as background context for the bug fix.
+
+   **路径 C（独立 bug，IS_STANDALONE = true）**：
+
+   - Scan `specs/` for existing top-level directories to determine next sequential number
+   - Set `BUG_DIR` to `specs/<NNN>-<short-name>`（如 `specs/005-fix-contract-save-npe`）
+   - Persist to `.specify/feature.json`:
+     ```json
+     {
+       "feature_directory": "specs/005-fix-contract-save-npe",
+       "parent_iteration": null
+     }
+     ```
+
+   **Common steps（两种路径共用）**：
+   - `mkdir -p BUG_DIR/checklists`
+   - Copy `.specify/templates/bug-spec-template.md` to `BUG_DIR/spec.md` as the starting point
+   - Set `SPEC_FILE` to `BUG_DIR/spec.md`
+   - `parent_iteration` enables downstream commands (`/speckit.plan`, `/speckit.tasks`, etc.) to access the iteration's spec.md, plan.md, data-model.md as background context for the bug fix. When `null`, downstream commands only use the bug's own spec.
 
    **IMPORTANT**:
    - You must only create one bug report per `/speckit.bug` invocation
    - The spec directory and file are always created by this command, never by the hook
-   - Bug numbering is scoped to the parent iteration's `bugs/` directory (independent of the iteration's own numbering)
+   - Bug numbering is scoped to the parent iteration's `bugs/` directory for 关联 bug, or to `specs/` for 独立 bug
 
 5. **Load iteration context** (background for bug analysis):
 
+   **如果 IS_STANDALONE = true（独立 bug）**：跳过此步骤，无父迭代上下文可加载。
+
+   **如果 IS_STANDALONE = false（关联 bug）**：
    Read the following files from `PARENT_ITERATION_DIR` if they exist:
    - `spec.md` — understand the iteration's feature scope and user stories
    - `plan.md` — understand the tech stack, architecture, and file structure
