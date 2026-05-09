@@ -1,6 +1,8 @@
 package com.deepmodel.relation.service;
 
 import com.deepmodel.relation.model.BaseappObjectField;
+import com.deepmodel.relation.model.ResolveModels;
+import com.deepmodel.relation.model.ResolveModels.*;
 import com.deepmodel.relation.model.WriteBackExpr;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
@@ -65,6 +67,7 @@ public class SkillsService {
     private final Cache<String, PatternCheckResult>  patternCache  = CacheBuilder.newBuilder().maximumSize(500).recordStats().build();
     private final Cache<String, ChangeScopeResult>   scopeCache    = CacheBuilder.newBuilder().maximumSize(500).recordStats().build();
     private final Cache<String, List<FieldSearchResult>> searchCache = CacheBuilder.newBuilder().maximumSize(500).recordStats().build();
+    private final Cache<String, ResolveResult> resolveCache = CacheBuilder.newBuilder().maximumSize(500).recordStats().build();
 
     public SkillsService(ImpactAnalyzerService analyzerService) {
         this.analyzerService = analyzerService;
@@ -77,6 +80,7 @@ public class SkillsService {
         patternCache.invalidateAll();
         scopeCache.invalidateAll();
         searchCache.invalidateAll();
+        resolveCache.invalidateAll();
         log.info("[SkillsService] 已清除所有 Skills 缓存");
     }
 
@@ -465,6 +469,267 @@ public class SkillsService {
             results.add(r);
         }
         return results;
+    }
+
+    // =========================================================
+    // 6. 自然语言元数据匹配（resolve）
+    // =========================================================
+
+    /** 子表语义关键词 */
+    private static final List<String> DETAIL_KEYWORDS = Arrays.asList("子表", "明细", "行项目", "明细表", "子项");
+
+    /** 对象+字段分隔符关键词 */
+    private static final List<String> FIELD_SEPARATORS = Arrays.asList("的", ".", "。");
+
+    /**
+     * 自然语言元数据匹配：接收用户输入文本，返回分层匹配结果。
+     *
+     * @param query         用户输入的自然语言文本
+     * @param maxResults    最多返回对象匹配数，默认 5
+     * @param includeFields 是否同时匹配字段，默认 true
+     */
+    public ResolveResult resolve(String query, int maxResults, boolean includeFields) {
+        String cacheKey = query + "|" + maxResults + "|" + includeFields;
+        try {
+            return resolveCache.get(cacheKey, () -> doResolve(query, maxResults, includeFields));
+        } catch (ExecutionException e) {
+            log.warn("[SkillsService] resolve cache load failed for {}: {}", query, e.getMessage());
+            return doResolve(query, maxResults, includeFields);
+        }
+    }
+
+    private ResolveResult doResolve(String query, int maxResults, boolean includeFields) {
+        ResolveResult result = new ResolveResult();
+        result.query = query;
+
+        if (query == null || query.trim().isEmpty()) {
+            return result;
+        }
+        query = query.trim();
+
+        // 检查是否包含子表关键词
+        boolean isDetailQuery = false;
+        String objectPartForDetail = null;
+        for (String kw : DETAIL_KEYWORDS) {
+            if (query.contains(kw)) {
+                isDetailQuery = true;
+                objectPartForDetail = query.replace(kw, "").trim();
+                // 去掉分隔符
+                for (String sep : FIELD_SEPARATORS) {
+                    if (objectPartForDetail.endsWith(sep)) {
+                        objectPartForDetail = objectPartForDetail.substring(0, objectPartForDetail.length() - sep.length()).trim();
+                    }
+                }
+                break;
+            }
+        }
+
+        // 分割对象部分和字段部分
+        String objectPart = query;
+        String fieldPart = null;
+        if (!isDetailQuery) {
+            for (String sep : FIELD_SEPARATORS) {
+                int idx = query.indexOf(sep);
+                if (idx > 0 && idx < query.length() - sep.length()) {
+                    objectPart = query.substring(0, idx).trim();
+                    fieldPart = query.substring(idx + sep.length()).trim();
+                    break;
+                }
+            }
+        } else {
+            objectPart = objectPartForDetail;
+        }
+
+        // 对象匹配
+        List<ObjectMatch> objectMatches = matchObjects(objectPart, maxResults);
+
+        // 如果是子表查询，为每个匹配的对象返回其子表
+        if (isDetailQuery) {
+            List<ObjectMatch> detailMatches = new ArrayList<>();
+            for (ObjectMatch om : objectMatches) {
+                Set<String> details = analyzerService.getAllDetailEntities(om.objectType);
+                for (String detail : details) {
+                    ObjectMatch dm = new ObjectMatch();
+                    dm.objectType = detail;
+                    dm.title = analyzerService.getObjectTitles().getOrDefault(detail, detail);
+                    dm.score = om.score * 0.95; // 子表匹配度略低于主表
+                    dm.matchSource = om.matchSource;
+                    dm.parentEntity = om.objectType;
+                    fillObjectContext(dm);
+                    detailMatches.add(dm);
+                }
+            }
+            result.objectMatches = detailMatches;
+            // 子表查询不再嵌套字段匹配
+            return result;
+        }
+
+        // 填充上下文并匹配字段
+        for (ObjectMatch om : objectMatches) {
+            fillObjectContext(om);
+            if (includeFields && fieldPart != null && !fieldPart.isEmpty()) {
+                om.fieldMatches = matchFields(om.objectType, fieldPart);
+            }
+        }
+
+        result.objectMatches = objectMatches;
+        return result;
+    }
+
+    /**
+     * 多路对象匹配：精确英文名 → 同义词 → 中文标题精确 → 中文标题包含
+     */
+    private List<ObjectMatch> matchObjects(String input, int maxResults) {
+        List<ObjectMatch> matches = new ArrayList<>();
+        if (input == null || input.isEmpty()) return matches;
+
+        Map<String, String> titles = analyzerService.getObjectTitles();
+        Map<String, List<String>> synonyms = analyzerService.getGlobalSynonyms();
+        Set<String> allTypes = analyzerService.getAllObjectTypes();
+        Set<String> matched = new LinkedHashSet<>(); // 去重
+
+        // 1. 精确英文名匹配（PascalCase）
+        for (String type : allTypes) {
+            if (type.equalsIgnoreCase(input)) {
+                addObjectMatch(matches, matched, type, titles, 1.0, ResolveModels.MatchSource.EXACT_NAME);
+            }
+        }
+
+        // 2. 同义词精确匹配
+        for (Map.Entry<String, List<String>> entry : synonyms.entrySet()) {
+            for (String syn : entry.getValue()) {
+                if (syn.equals(input)) {
+                    addObjectMatch(matches, matched, entry.getKey(), titles, 0.9, ResolveModels.MatchSource.SYNONYM);
+                }
+            }
+        }
+
+        // 3. 中文标题精确匹配
+        for (Map.Entry<String, String> entry : titles.entrySet()) {
+            if (entry.getValue().equals(input)) {
+                addObjectMatch(matches, matched, entry.getKey(), titles, 0.8, ResolveModels.MatchSource.TITLE_EXACT);
+            }
+        }
+
+        // 4. 中文标题包含匹配（输入包含标题 或 标题包含输入）
+        for (Map.Entry<String, String> entry : titles.entrySet()) {
+            if (matched.contains(entry.getKey())) continue;
+            String titleVal = entry.getValue();
+            if (titleVal.contains(input) || input.contains(titleVal)) {
+                addObjectMatch(matches, matched, entry.getKey(), titles, 0.6, ResolveModels.MatchSource.TITLE_CONTAINS);
+            }
+        }
+
+        // 按 score 降序排序，截取 maxResults
+        matches.sort((a, b) -> Double.compare(b.score, a.score));
+        if (matches.size() > maxResults) {
+            matches = new ArrayList<>(matches.subList(0, maxResults));
+        }
+        return matches;
+    }
+
+    private void addObjectMatch(List<ObjectMatch> matches, Set<String> matched,
+                                String objectType, Map<String, String> titles,
+                                double score, ResolveModels.MatchSource source) {
+        if (matched.contains(objectType)) return;
+        matched.add(objectType);
+        ObjectMatch om = new ObjectMatch();
+        om.objectType = objectType;
+        om.title = titles.getOrDefault(objectType, objectType);
+        om.score = score;
+        om.matchSource = source;
+        matches.add(om);
+    }
+
+    /**
+     * 填充对象上下文：子表列表、主表关系、入站/出站回写
+     */
+    private void fillObjectContext(ObjectMatch om) {
+        // 子表列表
+        Set<String> details = analyzerService.getMainToDetails().get(om.objectType);
+        if (details != null) {
+            om.detailEntities = new ArrayList<>(details);
+        }
+        // 主表关系
+        if (om.parentEntity == null) {
+            String parent = analyzerService.getDetailToMain().get(om.objectType);
+            if (parent != null) {
+                om.parentEntity = parent;
+            }
+        }
+    }
+
+    /**
+     * 在指定对象内匹配字段：标题精确匹配 → 标题包含匹配
+     */
+    private List<FieldMatch> matchFields(String objectType, String fieldInput) {
+        List<FieldMatch> matches = new ArrayList<>();
+        if (fieldInput == null || fieldInput.isEmpty()) return matches;
+
+        List<BaseappObjectField> fields = analyzerService.getFieldDetailsForObject(objectType);
+        Set<String> matched = new LinkedHashSet<>();
+
+        // 精确英文名
+        for (BaseappObjectField f : fields) {
+            String name = canonicalName(f);
+            if (name.equalsIgnoreCase(fieldInput)) {
+                addFieldMatch(matches, matched, f, 1.0, ResolveModels.MatchSource.EXACT_NAME);
+            }
+        }
+
+        // 标题精确匹配
+        for (BaseappObjectField f : fields) {
+            String title = f.getTitle();
+            if (title != null && title.equals(fieldInput)) {
+                addFieldMatch(matches, matched, f, 0.8, ResolveModels.MatchSource.TITLE_EXACT);
+            }
+        }
+
+        // 标题包含匹配
+        for (BaseappObjectField f : fields) {
+            String name = canonicalName(f);
+            if (matched.contains(name)) continue;
+            String title = f.getTitle();
+            if (title != null && (title.contains(fieldInput) || fieldInput.contains(title))) {
+                addFieldMatch(matches, matched, f, 0.6, ResolveModels.MatchSource.TITLE_CONTAINS);
+            }
+        }
+
+        matches.sort((a, b) -> Double.compare(b.score, a.score));
+        return matches;
+    }
+
+    private void addFieldMatch(List<FieldMatch> matches, Set<String> matched,
+                               BaseappObjectField f, double score, ResolveModels.MatchSource source) {
+        String name = canonicalName(f);
+        if (matched.contains(name)) return;
+        matched.add(name);
+
+        FieldMatch fm = new FieldMatch();
+        fm.field = name;
+        fm.title = f.getTitle();
+        fm.score = score;
+        fm.matchSource = source;
+        fm.bizType = f.getBizType();
+        fm.hasWriteBack = isWriteBackField(f);
+        fm.hasTrigger = isTriggerField(f);
+
+        // 字段分类
+        if (isWriteBackField(f)) {
+            fm.category = ResolveModels.FieldCategory.WRITE_BACK;
+        } else if (isVirtualField(f)) {
+            fm.category = ResolveModels.FieldCategory.VIRTUAL;
+        } else if (isTriggerField(f)) {
+            fm.category = ResolveModels.FieldCategory.TRIGGER;
+        } else if (isAmountField(f)) {
+            fm.category = ResolveModels.FieldCategory.AMOUNT;
+        } else if (isQtyField(f)) {
+            fm.category = ResolveModels.FieldCategory.QTY;
+        } else {
+            fm.category = ResolveModels.FieldCategory.BASE;
+        }
+
+        matches.add(fm);
     }
 
     // =========================================================

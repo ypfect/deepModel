@@ -724,6 +724,20 @@ public class ImpactAnalyzerService {
         return out;
     }
 
+    /**
+     * 获取对象中文标题映射（objectType → 中文标题）。
+     */
+    public Map<String, String> getObjectTitles() {
+        return Collections.unmodifiableMap(objectTitles);
+    }
+
+    /**
+     * 获取全局同义词映射（objectType → 同义词列表）。
+     */
+    public Map<String, List<String>> getGlobalSynonyms() {
+        return Collections.unmodifiableMap(GLOBAL_SYNONYMS);
+    }
+
     // Meta APIs for Frontend
     public Set<String> getAllObjectTypes() {
         // 仅保留 baseapp_object_type 中 type='bill' 的对象；若配置为空则退回全部

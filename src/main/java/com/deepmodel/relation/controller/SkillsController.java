@@ -1,5 +1,6 @@
 package com.deepmodel.relation.controller;
 
+import com.deepmodel.relation.model.ResolveModels.ResolveResult;
 import com.deepmodel.relation.service.SkillsService;
 import com.deepmodel.relation.service.SkillsService.*;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +19,7 @@ import java.util.List;
  *  GET  /api/skills/patternCheck    — 标准金额/数量字段完整性检查
  *  POST /api/skills/changeScope     — 改动影响范围预估
  *  GET  /api/skills/searchFields    — 跨对象字段模糊搜索
+ *  GET  /api/skills/resolve         — 自然语言元数据匹配
  */
 @RestController
 @RequestMapping("/api/skills")
@@ -129,5 +131,32 @@ public class SkillsController {
             @RequestParam(defaultValue = "200") int limit) {
         limit = Math.min(limit, 1000);
         return ResponseEntity.ok(skillsService.searchFields(namePattern, objectType, bizType, limit));
+    }
+
+    /**
+     * 自然语言元数据匹配。
+     *
+     * 接收自然语言输入（中文业务术语或英文技术名），返回分层结构的匹配结果：
+     * 对象匹配列表，每个对象下嵌套字段匹配列表，每项带置信度评分和业务上下文信息。
+     *
+     * 示例：
+     *  - “应收合同” → 返回 ArContract (score=0.9, SYNONYM)
+     *  - “应收合同的原始金额” → 返回 ArContract 下嵌套 originAmount
+     *  - “应收合同的子表” → 返回 ArContract 的所有子表对象
+     *
+     * @param query         用户输入的自然语言文本
+     * @param maxResults    最多返回对象匹配数，默认 5
+     * @param includeFields 是否同时返回字段匹配，默认 true
+     */
+    @GetMapping("/resolve")
+    public ResponseEntity<ResolveResult> resolve(
+            @RequestParam String query,
+            @RequestParam(defaultValue = "5") int maxResults,
+            @RequestParam(defaultValue = "true") boolean includeFields) {
+        if (query == null || query.trim().isEmpty()) {
+            return ResponseEntity.badRequest().build();
+        }
+        maxResults = Math.min(Math.max(maxResults, 1), 20);
+        return ResponseEntity.ok(skillsService.resolve(query.trim(), maxResults, includeFields));
     }
 }
