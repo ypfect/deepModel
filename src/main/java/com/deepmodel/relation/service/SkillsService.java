@@ -569,11 +569,11 @@ public class SkillsService {
             fillObjectContext(om);
             if (includeFields) {
                 if (fieldPart != null && !fieldPart.isEmpty()) {
-                    // 有明确字段查询词：返回匹配的字段
+                    // 有明确字段查询词：只返回匹配的字段
                     om.fieldMatches = matchFields(om.objectType, fieldPart);
                 } else {
-                    // 无字段查询词：返回该对象的全部字段（AI 需要完整候选池）
-                    om.fieldMatches = getAllFields(om.objectType);
+                    // 无明确字段查询词：用原始 query 做模糊匹配，再补充高价值字段
+                    om.fieldMatches = matchFieldsWithFallback(om.objectType, query);
                 }
             }
         }
@@ -721,40 +721,39 @@ public class SkillsService {
         return matches;
     }
     /**
-     * 返回对象的高价值字段（无查询词时，给 AI 提供候选池）。
-     * 按分类优先级排序：回写 > 触发 > 金额 > 数量 > 虚拟 > 普通，限制最多 50 个。
+     * 用原始 query 对字段做模糊匹配，再补充高价值字段至上限 50 个。
+     * 策略：先用 query 匹配（标题/英文名），匹配到的 score 高；
+     * 再按分类优先级补充未匹配的高价值字段（回写 > 触发 > 金额 > 数量）。
      */
-    private List<FieldMatch> getAllFields(String objectType) {
+    private List<FieldMatch> matchFieldsWithFallback(String objectType, String query) {
+        // 第一步：用 query 做字段匹配
+        List<FieldMatch> matched = matchFields(objectType, query);
+        Set<String> matchedNames = new LinkedHashSet<>();
+        for (FieldMatch fm : matched) matchedNames.add(fm.field);
+
+        // 第二步：补充高价值字段（不重复已匹配的）
         List<BaseappObjectField> fields = analyzerService.getFieldDetailsForObject(objectType);
-        List<FieldMatch> result = new ArrayList<>();
-        Set<String> seen = new LinkedHashSet<>();
+        List<FieldMatch> supplements = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>(matchedNames);
 
-        // 按分类优先级分组
-        List<BaseappObjectField> writeBackFields = new ArrayList<>();
-        List<BaseappObjectField> triggerFields = new ArrayList<>();
-        List<BaseappObjectField> amountFields = new ArrayList<>();
-        List<BaseappObjectField> qtyFields = new ArrayList<>();
-        List<BaseappObjectField> virtualFields = new ArrayList<>();
-        List<BaseappObjectField> baseFields = new ArrayList<>();
-
+        // 按优先级分组补充
         for (BaseappObjectField f : fields) {
-            if (isWriteBackField(f)) writeBackFields.add(f);
-            else if (isTriggerField(f)) triggerFields.add(f);
-            else if (isAmountField(f)) amountFields.add(f);
-            else if (isQtyField(f)) qtyFields.add(f);
-            else if (isVirtualField(f)) virtualFields.add(f);
-            else baseFields.add(f);
+            if (isWriteBackField(f))    addFieldMatch(supplements, seen, f, 0.4, ResolveModels.MatchSource.TITLE_CONTAINS);
+        }
+        for (BaseappObjectField f : fields) {
+            if (isTriggerField(f))      addFieldMatch(supplements, seen, f, 0.35, ResolveModels.MatchSource.TITLE_CONTAINS);
+        }
+        for (BaseappObjectField f : fields) {
+            if (isAmountField(f))       addFieldMatch(supplements, seen, f, 0.3, ResolveModels.MatchSource.TITLE_CONTAINS);
+        }
+        for (BaseappObjectField f : fields) {
+            if (isQtyField(f))          addFieldMatch(supplements, seen, f, 0.3, ResolveModels.MatchSource.TITLE_CONTAINS);
         }
 
-        // 按优先级依次添加
-        for (BaseappObjectField f : writeBackFields) addFieldMatch(result, seen, f, 0.7, ResolveModels.MatchSource.TITLE_CONTAINS);
-        for (BaseappObjectField f : triggerFields)   addFieldMatch(result, seen, f, 0.65, ResolveModels.MatchSource.TITLE_CONTAINS);
-        for (BaseappObjectField f : amountFields)    addFieldMatch(result, seen, f, 0.6, ResolveModels.MatchSource.TITLE_CONTAINS);
-        for (BaseappObjectField f : qtyFields)       addFieldMatch(result, seen, f, 0.6, ResolveModels.MatchSource.TITLE_CONTAINS);
-        for (BaseappObjectField f : virtualFields)   addFieldMatch(result, seen, f, 0.55, ResolveModels.MatchSource.TITLE_CONTAINS);
-        for (BaseappObjectField f : baseFields)      addFieldMatch(result, seen, f, 0.5, ResolveModels.MatchSource.TITLE_CONTAINS);
+        // 合并：匹配结果在前，补充在后
+        List<FieldMatch> result = new ArrayList<>(matched);
+        result.addAll(supplements);
 
-        // 限制总数
         if (result.size() > 50) {
             result = new ArrayList<>(result.subList(0, 50));
         }
