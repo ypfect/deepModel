@@ -6,42 +6,77 @@
     <title>DeepModel Insight - 元数据匹配</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
     <style>
-        body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, sans-serif; background: #f8fafc; height: 100vh; }
-        #app { height: 100%; display: flex; flex-direction: column; }
-        .header { background: #fff; height: 56px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; padding: 0 24px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); flex-shrink: 0; }
-        .logo { font-size: 18px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 10px; }
-        .logo-mark { width: 26px; height: 26px; border-radius: 8px; background: radial-gradient(circle at 0 0,#38bdf8,#6366f1 45%,#a855f7 100%); box-shadow: 0 0 0 1px rgba(15,23,42,0.15), 0 8px 18px rgba(15,23,42,0.35); }
-        .main-content { flex: 1; display: flex; flex-direction: column; padding: 32px; max-width: 900px; margin: 0 auto; width: 100%; box-sizing: border-box; overflow-y: auto; }
-        .search-area { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; margin-bottom: 24px; }
-        .search-row { display: flex; gap: 12px; align-items: flex-end; }
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif; background: #f0f2f5; min-height: 100vh; }
+        #app { min-height: 100vh; display: flex; flex-direction: column; }
+
+        /* Header */
+        .header { background: linear-gradient(135deg, #1e293b, #0f172a); height: 52px; display: flex; align-items: center; padding: 0 24px; flex-shrink: 0; }
+        .logo { font-size: 15px; font-weight: 600; color: #e2e8f0; display: flex; align-items: center; gap: 10px; }
+        .logo-mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, #38bdf8, #818cf8); }
+
+        /* Layout */
+        .main-content { flex: 1; padding: 24px; max-width: 880px; margin: 0 auto; width: 100%; }
+
+        /* Search */
+        .search-area { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 20px; }
+        .search-row { display: flex; gap: 10px; }
         .search-input { flex: 1; }
-        .result-area { flex: 1; }
-        .object-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; margin-bottom: 16px; }
-        .object-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-        .object-name { font-size: 18px; font-weight: 700; color: #0f172a; }
-        .object-title { font-size: 14px; color: #64748b; }
-        .score-badge { display: inline-flex; padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; }
-        .score-high { background: #d1fae5; color: #065f46; }
-        .score-mid { background: #dbeafe; color: #1e40af; }
-        .score-low { background: #fef3c7; color: #92400e; }
-        .source-badge { display: inline-flex; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 500; background: #f1f5f9; color: #475569; margin-left: 6px; }
-        .meta-row { display: flex; gap: 16px; font-size: 13px; color: #64748b; flex-wrap: wrap; margin-bottom: 8px; }
-        .meta-row span { display: flex; align-items: center; gap: 4px; }
-        .field-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-        .field-table th { text-align: left; font-size: 12px; color: #64748b; font-weight: 600; padding: 8px 12px; border-bottom: 2px solid #e2e8f0; text-transform: uppercase; }
-        .field-table td { font-size: 13px; color: #334155; padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
-        .field-table tr:hover td { background: #f8fafc; }
-        .category-badge { display: inline-flex; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 500; }
-        .cat-AMOUNT { background: #fef3c7; color: #92400e; }
-        .cat-QTY { background: #dbeafe; color: #1e40af; }
-        .cat-WRITE_BACK { background: #d1fae5; color: #065f46; }
-        .cat-TRIGGER { background: #ede9fe; color: #5b21b6; }
-        .cat-VIRTUAL { background: #fce7f3; color: #9d174d; }
-        .cat-BASE { background: #f1f5f9; color: #475569; }
-        .hint-text { font-size: 13px; color: #94a3b8; margin-top: 8px; }
-        .examples { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-        .example-chip { padding: 4px 12px; border-radius: 99px; font-size: 13px; background: #f1f5f9; color: #475569; cursor: pointer; border: 1px solid #e2e8f0; transition: all 0.15s; }
-        .example-chip:hover { background: #e0f2fe; color: #0284c7; border-color: #7dd3fc; }
+        .examples { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+        .example-chip { padding: 3px 10px; border-radius: 99px; font-size: 12px; background: #f1f5f9; color: #64748b; cursor: pointer; border: 1px solid #e2e8f0; transition: all 0.15s; }
+        .example-chip:hover { background: #eff6ff; color: #2563eb; border-color: #93c5fd; }
+
+        /* Object Card */
+        .obj-card { background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #e5e7eb; margin-bottom: 16px; overflow: hidden; }
+        .obj-head { padding: 14px 18px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #f1f5f9; }
+        .obj-name { font-size: 15px; font-weight: 700; color: #1e293b; font-family: 'SF Mono', 'Menlo', monospace; }
+        .obj-title { font-size: 13px; color: #64748b; }
+        .obj-meta { padding: 0 18px; display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: #94a3b8; padding-top: 8px; }
+        .obj-meta span { display: flex; align-items: center; gap: 3px; }
+
+        /* Tags */
+        .tag { display: inline-flex; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 500; line-height: 18px; }
+        .tag-score-high { background: #dcfce7; color: #166534; }
+        .tag-score-mid { background: #dbeafe; color: #1e40af; }
+        .tag-score-low { background: #fef9c3; color: #854d0e; }
+        .tag-source { background: #f1f5f9; color: #475569; }
+        .tag-type { background: #ede9fe; color: #6d28d9; }
+        .tag-disabled { background: #fee2e2; color: #991b1b; }
+        .tag-cat { background: #f1f5f9; color: #475569; }
+        .tag-cat-AMOUNT { background: #fef3c7; color: #92400e; }
+        .tag-cat-WRITE_BACK { background: #d1fae5; color: #065f46; }
+        .tag-cat-TRIGGER { background: #ede9fe; color: #5b21b6; }
+        .tag-cat-VIRTUAL { background: #fce7f3; color: #9d174d; }
+
+        /* Field List */
+        .field-section { padding: 10px 18px 14px; }
+        .field-section-title { font-size: 12px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .field-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 12px; border-radius: 8px; margin-bottom: 4px; transition: background 0.1s; }
+        .field-item:hover { background: #f8fafc; }
+        .field-rank { width: 22px; height: 22px; border-radius: 50%; background: #f1f5f9; color: #64748b; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+        .field-rank-1 { background: #fef3c7; color: #92400e; }
+        .field-rank-2 { background: #e0e7ff; color: #3730a3; }
+        .field-rank-3 { background: #d1fae5; color: #065f46; }
+        .field-main { flex: 1; min-width: 0; }
+        .field-name-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .field-title { font-size: 14px; font-weight: 600; color: #1e293b; }
+        .field-apiname { font-size: 12px; color: #94a3b8; font-family: 'SF Mono', 'Menlo', monospace; }
+        .field-ref-path { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; color: #7c3aed; background: #f5f3ff; padding: 3px 8px; border-radius: 6px; border: 1px solid #ede9fe; line-height: 1.3; }
+        .field-ref-path .ref-icon { font-size: 10px; opacity: 0.7; }
+        .field-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+        .field-score { font-size: 12px; font-weight: 600; color: #94a3b8; flex-shrink: 0; margin-top: 2px; min-width: 40px; text-align: right; }
+
+        /* Match Type Tags */
+        .tag-mt-DIRECT { background: #dbeafe; color: #1e40af; }
+        .tag-mt-CHAIN { background: #f3e8ff; color: #7c3aed; }
+        .tag-mt-CASCADE { background: #fef3c7; color: #92400e; }
+
+        /* Empty & Loading */
+        .empty-state { text-align: center; padding: 60px 20px; color: #94a3b8; }
+        .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
+
+        /* JSON Preview */
+        .json-toggle { margin-top: 16px; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/element-plus@2.4.4/dist/index.full.js"></script>
@@ -50,87 +85,100 @@
 <body>
 <div id="app">
     <header class="header">
-        <div class="logo"><div class="logo-mark"></div><span>元数据匹配测试</span></div>
+        <div class="logo"><div class="logo-mark"></div><span>DeepModel Insight · 元数据匹配</span></div>
     </header>
     <div class="main-content">
+        <!-- 搜索区 -->
         <div class="search-area">
             <div class="search-row">
                 <div class="search-input">
-                    <div style="font-size:13px;color:#64748b;margin-bottom:6px;font-weight:600;">输入自然语言查询</div>
-                    <el-input v-model="query" placeholder="输入中文业务术语或英文技术名..." size="large"
+                    <el-input v-model="query" placeholder="输入业务术语，如「应收合同标的的项目的分类」" size="large"
                               @keyup.enter="doResolve" clearable>
                         <template #prefix><el-icon><Search /></el-icon></template>
                     </el-input>
                 </div>
-                <el-button type="primary" size="large" @click="doResolve" :loading="loading" icon="Search"
-                           style="border-radius:8px;min-width:100px;">匹配</el-button>
+                <el-button type="primary" size="large" @click="doResolve" :loading="loading"
+                           style="border-radius:8px;min-width:90px;">匹配</el-button>
             </div>
-            <div class="hint-text">试试这些示例：</div>
             <div class="examples">
                 <span class="example-chip" v-for="ex in examples" :key="ex" @click="query=ex;doResolve()">{{ ex }}</span>
             </div>
         </div>
 
-        <!-- 结果区域 -->
-        <div class="result-area">
-            <el-empty v-if="!result && !loading" description="输入查询后点击匹配" :image-size="80"></el-empty>
-
-            <div v-if="result && result.objectMatches.length === 0 && !loading"
-                 style="text-align:center;padding:40px;color:#94a3b8;">
-                未找到匹配结果，请换个关键词试试
-            </div>
-
-            <div v-for="om in (result?.objectMatches || [])" :key="om.objectType" class="object-card">
-                <div class="object-header">
-                    <span class="object-name">{{ om.objectType }}</span>
-                    <span class="object-title" v-if="om.title && om.title !== om.objectType">{{ om.title }}</span>
-                    <span class="score-badge" :class="scoreClass(om.score)">{{ om.score.toFixed(2) }}</span>
-                    <span class="source-badge">{{ om.matchSource }}</span>
-                </div>
-                <div class="meta-row">
-                    <span v-if="om.parentEntity">📎 主表: {{ om.parentEntity }}</span>
-                    <span v-if="om.detailEntities && om.detailEntities.length > 0">📋 子表: {{ om.detailEntities.join(', ') }}</span>
-                </div>
-
-                <!-- 字段匹配表格 -->
-                <div v-if="om.fieldMatches && om.fieldMatches.length > 0">
-                    <div style="font-size:13px;font-weight:600;color:#334155;margin-top:16px;margin-bottom:8px;">
-                        匹配到 {{ om.fieldMatches.length }} 个字段
-                    </div>
-                    <table class="field-table">
-                        <thead>
-                            <tr>
-                                <th>字段名</th>
-                                <th>标题</th>
-                                <th>分类</th>
-                                <th>Score</th>
-                                <th>来源</th>
-                                <th>回写</th>
-                                <th>触发</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="fm in om.fieldMatches" :key="fm.field">
-                                <td style="font-weight:600;">{{ fm.field }}</td>
-                                <td>{{ fm.title || '-' }}</td>
-                                <td><span class="category-badge" :class="'cat-' + fm.category">{{ fm.category }}</span></td>
-                                <td><span class="score-badge" :class="scoreClass(fm.score)" style="font-size:11px;">{{ fm.score.toFixed(2) }}</span></td>
-                                <td><span class="source-badge">{{ fm.matchSource }}</span></td>
-                                <td>{{ fm.hasWriteBack ? '✅' : '-' }}</td>
-                                <td>{{ fm.hasTrigger ? '✅' : '-' }}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- JSON 原始响应 -->
-            <el-collapse v-if="result" style="margin-top:16px;">
-                <el-collapse-item title="查看原始 JSON 响应">
-                    <pre style="font-size:12px;background:#f1f5f9;padding:16px;border-radius:8px;overflow-x:auto;max-height:400px;">{{ JSON.stringify(result, null, 2) }}</pre>
-                </el-collapse-item>
-            </el-collapse>
+        <!-- 结果区 -->
+        <div v-if="!result && !loading" class="empty-state">
+            <div class="empty-icon">🔍</div>
+            <div>输入查询后点击匹配</div>
         </div>
+
+        <div v-if="result && result.objectMatches.length === 0 && !loading" class="empty-state">
+            <div class="empty-icon">😶</div>
+            <div>未找到匹配结果，换个关键词试试</div>
+        </div>
+
+        <!-- 对象卡片 -->
+        <div v-for="(om, oi) in (result?.objectMatches || [])" :key="om.objectType" class="obj-card">
+            <!-- 对象头部 -->
+            <div class="obj-head">
+                <span class="obj-name">{{ om.objectType }}</span>
+                <span class="obj-title" v-if="om.title && om.title !== om.objectType">{{ om.title }}</span>
+                <span class="tag" :class="scoreTagClass(om.score)">{{ om.score.toFixed(2) }}</span>
+                <span class="tag tag-source">{{ sourceLabel(om.matchSource) }}</span>
+                <span class="tag tag-type" v-if="om.type">{{ om.type }}</span>
+                <span class="tag tag-disabled" v-if="om.isDisabled">已停用</span>
+            </div>
+            <div class="obj-meta" v-if="om.description || om.parentEntity || (om.detailEntities && om.detailEntities.length)">
+                <span v-if="om.description">📄 {{ om.description }}</span>
+                <span v-if="om.parentEntity">📎 主表: {{ om.parentEntity }}</span>
+                <span v-if="om.detailEntities && om.detailEntities.length">📋 子表: {{ om.detailEntities.join(', ') }}</span>
+            </div>
+
+            <!-- 字段列表 -->
+            <div v-if="om.fieldMatches && om.fieldMatches.length" class="field-section">
+                <div class="field-section-title">匹配字段 ({{ om.fieldMatches.length }})</div>
+
+                <div v-for="(fm, fi) in om.fieldMatches" :key="fm.field + (fm.refPath || '')" class="field-item">
+                    <!-- 排名 -->
+                    <div class="field-rank" :class="'field-rank-' + (fi + 1)">{{ fi + 1 }}</div>
+
+                    <!-- 主内容 -->
+                    <div class="field-main">
+                        <div class="field-name-row">
+                            <span class="field-title">{{ fm.title || fm.field }}</span>
+                            <span class="field-apiname">{{ fm.field }}</span>
+                        </div>
+
+                        <!-- 引用路径 -->
+                        <div v-if="fm.refPath" class="field-ref-path">
+                            <span class="ref-icon">🔗</span> {{ fm.refPath }}
+                        </div>
+
+                        <!-- 标签行 -->
+                        <div class="field-tags">
+                            <span class="tag" :class="matchTypeClass(fm.matchType)">{{ matchTypeLabel(fm.matchType) }}</span>
+                            <span class="tag" :class="'tag-cat-' + fm.category" v-if="fm.category">{{ categoryLabel(fm.category) }}</span>
+                            <span class="tag tag-source">{{ sourceLabel(fm.matchSource) }}</span>
+                            <span class="tag tag-cat" v-if="fm.enumType">枚举: {{ fm.enumType }}</span>
+                            <span class="tag tag-cat-WRITE_BACK" v-if="fm.hasWriteBack">回写</span>
+                            <span class="tag tag-cat-TRIGGER" v-if="fm.hasTrigger">触发</span>
+                            <span class="tag tag-disabled" v-if="fm.isDisabled">停用</span>
+                        </div>
+                    </div>
+
+                    <!-- 分数 -->
+                    <div class="field-score" :style="{color: fm.score >= 0.5 ? '#16a34a' : fm.score >= 0.1 ? '#2563eb' : '#94a3b8'}">
+                        {{ fm.score.toFixed(2) }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- JSON 原始响应 -->
+        <el-collapse v-if="result" class="json-toggle">
+            <el-collapse-item title="查看原始 JSON">
+                <pre style="font-size:11px;background:#1e293b;color:#e2e8f0;padding:16px;border-radius:8px;overflow-x:auto;max-height:400px;">{{ JSON.stringify(result, null, 2) }}</pre>
+            </el-collapse-item>
+        </el-collapse>
     </div>
 </div>
 
@@ -141,13 +189,50 @@ const app = createApp({
         const query = ref('');
         const loading = ref(false);
         const result = ref(null);
-        const examples = ['应收合同', '应收合同的原始金额', '应收合同的子表', 'ArContract', '采购订单', '合同金额', '付款状态', '收款单'];
+        const examples = [
+            '应收合同标的的项目的分类',
+            '应收合同的原始金额',
+            '应收合同的子表',
+            'ArContract',
+            '采购订单',
+            '付款状态',
+        ];
 
-        const scoreClass = (score) => {
-            if (score >= 0.8) return 'score-high';
-            if (score >= 0.6) return 'score-mid';
-            return 'score-low';
+        const scoreTagClass = (score) => {
+            if (score >= 0.8) return 'tag-score-high';
+            if (score >= 0.4) return 'tag-score-mid';
+            return 'tag-score-low';
         };
+
+        const sourceLabel = (src) => {
+            const map = {
+                'EXACT_NAME': '精确名称',
+                'SYNONYM': '同义词',
+                'TITLE_EXACT': '标题精确',
+                'TITLE_CONTAINS': '标题包含',
+                'DESCRIPTION': '描述匹配',
+            };
+            return map[src] || src;
+        };
+
+        const categoryLabel = (cat) => {
+            const map = {
+                'AMOUNT': '金额',
+                'QTY': '数量',
+                'WRITE_BACK': '回写',
+                'TRIGGER': '触发',
+                'VIRTUAL': '虚拟',
+                'BASE': '基础',
+            };
+            return map[cat] || cat;
+        };
+
+        const matchTypeLabel = (mt) => {
+            const map = { 'DIRECT': '直接匹配', 'CHAIN': '链式引用', 'CASCADE': '级联搜索' };
+            return map[mt] || mt || '直接匹配';
+        };
+
+        const matchTypeClass = (mt) => 'tag-mt-' + (mt || 'DIRECT');
 
         const doResolve = async () => {
             if (!query.value.trim()) return;
@@ -167,7 +252,7 @@ const app = createApp({
             }
         };
 
-        return { query, loading, result, examples, scoreClass, doResolve };
+        return { query, loading, result, examples, scoreTagClass, sourceLabel, categoryLabel, matchTypeLabel, matchTypeClass, doResolve };
     }
 });
 app.use(ElementPlus);

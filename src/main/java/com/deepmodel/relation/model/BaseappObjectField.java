@@ -23,6 +23,12 @@ public class BaseappObjectField {
     // Extension
     private String appName; // jsonb as text
 
+    // Resolve 增强字段
+    private String description;
+    private String enumType;
+    private Boolean isDisabled;
+    private Boolean isMasterField;
+
     public String getId() {
         return id;
     }
@@ -141,5 +147,37 @@ public class BaseappObjectField {
 
     public void setSourceInfo(String sourceInfo) {
         this.sourceInfo = sourceInfo;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public String getEnumType() {
+        return enumType;
+    }
+
+    public void setEnumType(String enumType) {
+        this.enumType = enumType;
+    }
+
+    public Boolean getIsDisabled() {
+        return isDisabled;
+    }
+
+    public void setIsDisabled(Boolean isDisabled) {
+        this.isDisabled = isDisabled;
+    }
+
+    public Boolean getIsMasterField() {
+        return isMasterField;
+    }
+
+    public void setIsMasterField(Boolean isMasterField) {
+        this.isMasterField = isMasterField;
     }
 }

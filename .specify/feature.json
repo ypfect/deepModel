@@ -1,4 +1,3 @@
 {
-  "feature_directory": "specs/004-agent-metadata-matching/bugs/003-fix-resolve-poor-recall",
-  "parent_iteration": "specs/004-agent-metadata-matching"
+  "feature_directory": "specs/005-enhance-metadata-resolve"
 }

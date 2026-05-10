@@ -1,9 +1,11 @@
 package com.deepmodel.relation.service;
 
 import com.deepmodel.relation.model.BaseappObjectField;
+import com.deepmodel.relation.model.ObjectTypeMeta;
 import com.deepmodel.relation.model.ResolveModels;
 import com.deepmodel.relation.model.ResolveModels.*;
 import com.deepmodel.relation.model.WriteBackExpr;
+import com.deepmodel.relation.util.JiebaUtils;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import org.slf4j.Logger;
@@ -482,6 +484,77 @@ public class SkillsService {
     private static final List<String> FIELD_SEPARATORS = Arrays.asList("的", ".", "。");
 
     /**
+     * 用 Jieba 分词 + 规则解析查询字符串，识别对象部分、子表关键词、字段部分。
+     * 优先使用 Jieba 分词结果识别业务术语边界，回退到分隔符切割。
+     */
+    static ParsedQuery parseQuery(String query) {
+        ParsedQuery pq = new ParsedQuery();
+        pq.objectPart = query;
+
+        // 1. 检查是否包含子表关键词
+        for (String kw : DETAIL_KEYWORDS) {
+            int kwIdx = query.indexOf(kw);
+            if (kwIdx >= 0) {
+                pq.isDetailQuery = true;
+                pq.detailNavWord = kw;
+                String beforeKw = query.substring(0, kwIdx).trim();
+                String afterKw = query.substring(kwIdx + kw.length()).trim();
+                // 去掉分隔符
+                for (String sep : FIELD_SEPARATORS) {
+                    if (beforeKw.endsWith(sep))
+                        beforeKw = beforeKw.substring(0, beforeKw.length() - sep.length()).trim();
+                    if (afterKw.startsWith(sep))
+                        afterKw = afterKw.substring(sep.length()).trim();
+                }
+                pq.objectPart = beforeKw;
+                pq.fieldPart = afterKw.isEmpty() ? null : afterKw;
+                return pq;
+            }
+        }
+
+        // 2. 尝试 Jieba 分词识别对象和字段边界
+        try {
+            List<String> tokens = JiebaUtils.getSegmenter().sentenceProcess(query);
+            // 从分词结果中识别分隔符位置
+            if (tokens.size() >= 2) {
+                int sepIdx = -1;
+                for (int i = 0; i < tokens.size(); i++) {
+                    String tok = tokens.get(i).trim();
+                    if (FIELD_SEPARATORS.contains(tok)) {
+                        sepIdx = i;
+                        break;
+                    }
+                }
+                if (sepIdx > 0 && sepIdx < tokens.size() - 1) {
+                    StringBuilder objSb = new StringBuilder();
+                    for (int i = 0; i < sepIdx; i++) objSb.append(tokens.get(i));
+                    StringBuilder fldSb = new StringBuilder();
+                    for (int i = sepIdx + 1; i < tokens.size(); i++) fldSb.append(tokens.get(i));
+                    pq.objectPart = objSb.toString().trim();
+                    pq.fieldPart = fldSb.toString().trim();
+                    if (pq.fieldPart.isEmpty()) pq.fieldPart = null;
+                    return pq;
+                }
+            }
+        } catch (Exception e) {
+            // Jieba 分词失败，回退到分隔符切割
+        }
+
+        // 3. 回退：按分隔符硬切
+        for (String sep : FIELD_SEPARATORS) {
+            int idx = query.indexOf(sep);
+            if (idx > 0 && idx < query.length() - sep.length()) {
+                pq.objectPart = query.substring(0, idx).trim();
+                pq.fieldPart = query.substring(idx + sep.length()).trim();
+                if (pq.fieldPart.isEmpty()) pq.fieldPart = null;
+                return pq;
+            }
+        }
+
+        return pq;
+    }
+
+    /**
      * 自然语言元数据匹配：接收用户输入文本，返回分层匹配结果。
      *
      * @param query         用户输入的自然语言文本
@@ -507,72 +580,66 @@ public class SkillsService {
         }
         query = query.trim();
 
-        // 检查是否包含子表关键词
-        boolean isDetailQuery = false;
-        String objectPartForDetail = null;
-        for (String kw : DETAIL_KEYWORDS) {
-            if (query.contains(kw)) {
-                isDetailQuery = true;
-                objectPartForDetail = query.replace(kw, "").trim();
-                // 去掉分隔符
-                for (String sep : FIELD_SEPARATORS) {
-                    if (objectPartForDetail.endsWith(sep)) {
-                        objectPartForDetail = objectPartForDetail.substring(0, objectPartForDetail.length() - sep.length()).trim();
-                    }
-                }
-                break;
-            }
-        }
-
-        // 分割对象部分和字段部分
-        String objectPart = query;
-        String fieldPart = null;
-        if (!isDetailQuery) {
-            for (String sep : FIELD_SEPARATORS) {
-                int idx = query.indexOf(sep);
-                if (idx > 0 && idx < query.length() - sep.length()) {
-                    objectPart = query.substring(0, idx).trim();
-                    fieldPart = query.substring(idx + sep.length()).trim();
-                    break;
-                }
-            }
-        } else {
-            objectPart = objectPartForDetail;
-        }
+        // 分词解析查询
+        ParsedQuery pq = parseQuery(query);
+        boolean isDetailQuery = pq.isDetailQuery;
+        String objectPart = pq.objectPart;
+        String fieldPart = pq.fieldPart;
 
         // 对象匹配
         List<ObjectMatch> objectMatches = matchObjects(objectPart, maxResults);
 
-        // 如果是子表查询，为每个匹配的对象返回其子表
+        // 子表查询：展开为子表对象，并在子表范围内匹配字段
         if (isDetailQuery) {
             List<ObjectMatch> detailMatches = new ArrayList<>();
             for (ObjectMatch om : objectMatches) {
                 Set<String> details = analyzerService.getAllDetailEntities(om.objectType);
+                // 如果 fieldPart 中包含子表名称片段（导航词），优先匹配该子表
+                String targetDetail = findDetailByNavWord(details, fieldPart);
+
                 for (String detail : details) {
                     ObjectMatch dm = new ObjectMatch();
                     dm.objectType = detail;
                     dm.title = analyzerService.getObjectTitles().getOrDefault(detail, detail);
-                    dm.score = om.score * 0.95; // 子表匹配度略低于主表
+                    // 如果该子表是导航词命中的，给更高分
+                    dm.score = detail.equals(targetDetail) ? om.score * 0.98 : om.score * 0.95;
                     dm.matchSource = om.matchSource;
                     dm.parentEntity = om.objectType;
                     fillObjectContext(dm);
+
+                    // 在子表范围内匹配字段
+                    if (includeFields && fieldPart != null && !fieldPart.isEmpty()) {
+                        // 从 fieldPart 中去掉子表导航词部分后做字段匹配
+                        String cleanFieldPart = removeDetailNavFromField(fieldPart, detail);
+                        if (cleanFieldPart != null && !cleanFieldPart.isEmpty()) {
+                            dm.fieldMatches = matchFields(detail, cleanFieldPart);
+                        }
+                    }
                     detailMatches.add(dm);
                 }
             }
             result.objectMatches = detailMatches;
-            // 子表查询不再嵌套字段匹配
             return result;
         }
 
-        // 填充上下文并匹配字段
+        // 非子表查询：填充上下文并匹配字段
         for (ObjectMatch om : objectMatches) {
             fillObjectContext(om);
             if (includeFields) {
                 if (fieldPart != null && !fieldPart.isEmpty()) {
-                    // 有明确字段查询词：只返回匹配的字段
-                    om.fieldMatches = matchFields(om.objectType, fieldPart);
+                    // 三路字段搜索，各自标记 matchType
+                    List<FieldMatch> directMatches = matchFields(om.objectType, fieldPart);
+                    for (FieldMatch fm : directMatches) fm.matchType = "DIRECT";
+
+                    List<FieldMatch> chainResults = resolveFieldChain(om.objectType, fieldPart);
+                    for (FieldMatch fm : chainResults) fm.matchType = "CHAIN";
+
+                    List<FieldMatch> cascadeResults = cascadeFieldSearch(om.objectType, fieldPart, 0, new HashSet<>());
+                    for (FieldMatch fm : cascadeResults) fm.matchType = "CASCADE";
+
+                    // 合并去重，限制 top 5
+                    om.fieldMatches = mergeAndDedup(5, directMatches, chainResults, cascadeResults);
                 } else {
-                    // 无明确字段查询词：用原始 query 做模糊匹配，再补充高价值字段
                     om.fieldMatches = matchFieldsWithFallback(om.objectType, query);
                 }
             }
@@ -583,66 +650,309 @@ public class SkillsService {
     }
 
     /**
-     * 多路对象匹配：精确英文名 → 同义词 → 中文标题精确 → 中文标题包含
+     * 在子表集合中查找与 fieldPart 中子表名称片段匹配的子表。
+     * 例如 fieldPart="标的的收款金额"，子表 title 含"标的" → 返回该子表。
+     */
+    private String findDetailByNavWord(Set<String> details, String fieldPart) {
+        if (fieldPart == null || details == null) return null;
+        Map<String, ObjectTypeMeta> metas = analyzerService.getObjectTypeMetas();
+        for (String detail : details) {
+            ObjectTypeMeta meta = metas.get(detail);
+            if (meta == null || meta.getTitle() == null) continue;
+            // 子表标题中的关键词出现在 fieldPart 中
+            String detailTitle = meta.getTitle();
+            if (fieldPart.contains(detailTitle) || detailTitle.contains(fieldPart)) {
+                return detail;
+            }
+            // 子表标题的简短部分（去掉主表名前缀）
+            for (Map.Entry<String, ObjectTypeMeta> e : metas.entrySet()) {
+                String mainTitle = e.getValue().getTitle();
+                if (mainTitle != null && detailTitle.startsWith(mainTitle)) {
+                    String suffix = detailTitle.substring(mainTitle.length());
+                    if (!suffix.isEmpty() && fieldPart.contains(suffix)) {
+                        return detail;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 从 fieldPart 中去掉子表导航词部分，保留纯字段查询。
+     * 例如 fieldPart="标的的收款金额"，子表标题含"标的" → 返回 "收款金额"。
+     */
+    private String removeDetailNavFromField(String fieldPart, String detailType) {
+        if (fieldPart == null) return null;
+        ObjectTypeMeta meta = analyzerService.getObjectTypeMetas().get(detailType);
+        if (meta == null || meta.getTitle() == null) return fieldPart;
+        String title = meta.getTitle();
+        // 尝试去掉子表标题
+        String result = fieldPart.replace(title, "").trim();
+        // 去掉分隔符
+        for (String sep : FIELD_SEPARATORS) {
+            if (result.startsWith(sep)) result = result.substring(sep.length()).trim();
+            if (result.endsWith(sep)) result = result.substring(0, result.length() - sep.length()).trim();
+        }
+        return result.isEmpty() ? fieldPart : result;
+    }
+
+    /**
+     * 合并多路字段匹配结果并去重（按 field+refPath 去重，保留最高分），限制返回数量
+     */
+    @SafeVarargs
+    private final List<FieldMatch> mergeAndDedup(int maxResults, List<FieldMatch>... sources) {
+        // key = field + "|" + refPath
+        Map<String, FieldMatch> best = new LinkedHashMap<>();
+        for (List<FieldMatch> source : sources) {
+            for (FieldMatch fm : source) {
+                String key = fm.field + "|" + (fm.refPath != null ? fm.refPath : "");
+                FieldMatch existing = best.get(key);
+                if (existing == null || fm.score > existing.score) {
+                    best.put(key, fm);
+                }
+            }
+        }
+        List<FieldMatch> result = new ArrayList<>(best.values());
+        result.sort((a, b) -> Double.compare(b.score, a.score));
+        if (result.size() > maxResults) {
+            result = new ArrayList<>(result.subList(0, maxResults));
+        }
+        return result;
+    }
+
+    /**
+     * 级联字段搜索：沿 mainToDetails 和 referInfo.referEntityName 递归搜索字段。
+     * 深度上限 2 层，每层 score × 0.5，共享 visited 防环。
+     */
+    private List<FieldMatch> cascadeFieldSearch(String objectType, String fieldQuery,
+                                                int depth, Set<String> visited) {
+        if (depth >= 2 || visited.contains(objectType)) return Collections.emptyList();
+        visited.add(objectType);
+        List<FieldMatch> results = new ArrayList<>();
+        double depthPenalty = Math.pow(0.5, depth + 1);
+
+        // 搜索子表
+        Set<String> details = analyzerService.getMainToDetails().get(objectType);
+        if (details != null) {
+            for (String detail : details) {
+                if (visited.contains(detail)) continue;
+                String detailTitle = analyzerService.getObjectTitles().getOrDefault(detail, detail);
+                List<FieldMatch> detailMatches = matchFields(detail, fieldQuery);
+                for (FieldMatch fm : detailMatches) {
+                    fm.score *= depthPenalty;
+                    fm.refPath = "子表 → " + detailTitle + "(" + detail + ")";
+                    results.add(fm);
+                }
+                results.addAll(cascadeFieldSearch(detail, fieldQuery, depth + 1, visited));
+            }
+        }
+
+        // 搜索引用对象（referInfo.referEntityName）
+        List<BaseappObjectField> fields = analyzerService.getFieldDetailsForObject(objectType);
+        for (BaseappObjectField f : fields) {
+            String refObj = f.getRefObjectType();
+            if (refObj == null || refObj.isEmpty() || visited.contains(refObj)) continue;
+            String fieldTitle = f.getTitle() != null ? f.getTitle() : canonicalName(f);
+            List<FieldMatch> refMatches = matchFields(refObj, fieldQuery);
+            for (FieldMatch fm : refMatches) {
+                fm.score *= depthPenalty;
+                fm.refPath = fieldTitle + "(" + canonicalName(f) + ") → " + refObj;
+                results.add(fm);
+            }
+            results.addAll(cascadeFieldSearch(refObj, fieldQuery, depth + 1, visited));
+        }
+
+        results.sort((a, b) -> Double.compare(b.score, a.score));
+        return results;
+    }
+
+    /**
+     * 链式引用字段解析：
+     * 1. 显式：fieldPart 含"的"时（如"项目的分类"），按"的"拆分逐级跳转
+     * 2. 隐式：fieldPart 不含"的"时（如"项目分类"），用引用字段 title 做前缀匹配拆分
+     */
+    private List<FieldMatch> resolveFieldChain(String objectType, String fieldPart) {
+        if (fieldPart == null || fieldPart.isEmpty()) return Collections.emptyList();
+
+        // 显式链式（含"的"）
+        if (fieldPart.contains("的")) {
+            return resolveExplicitChain(objectType, fieldPart);
+        }
+
+        // 隐式链式：用引用字段 title 做前缀匹配拆分
+        return resolveImplicitChain(objectType, fieldPart);
+    }
+
+    /** 显式链式：按"的"拆分逐级跳转 */
+    private List<FieldMatch> resolveExplicitChain(String objectType, String fieldPart) {
+        String[] segments = fieldPart.split("的");
+        if (segments.length < 2) return Collections.emptyList();
+
+        String currentObject = objectType;
+        double chainScore = 1.0;
+        StringBuilder pathBuilder = new StringBuilder();
+
+        for (int i = 0; i < segments.length - 1; i++) {
+            String seg = segments[i].trim();
+            if (seg.isEmpty()) continue;
+
+            BaseappObjectField refField = findReferField(currentObject, seg);
+            if (refField == null) return Collections.emptyList();
+
+            String refObj = refField.getRefObjectType();
+            if (refObj == null || refObj.isEmpty()) return Collections.emptyList();
+
+            String title = refField.getTitle();
+            int score = Math.max(
+                    calculateMatchScore(seg, canonicalName(refField)),
+                    title != null ? calculateMatchScore(seg, title) : 0
+            );
+            chainScore *= (score / 1000.0);
+
+            if (pathBuilder.length() > 0) pathBuilder.append(" → ");
+            String fieldLabel = title != null ? title + "(" + canonicalName(refField) + ")" : canonicalName(refField);
+            pathBuilder.append(fieldLabel).append(" → ").append(refObj);
+            currentObject = refObj;
+        }
+
+        String lastSeg = segments[segments.length - 1].trim();
+        if (lastSeg.isEmpty()) return Collections.emptyList();
+
+        String refPath = pathBuilder.toString();
+        List<FieldMatch> results = matchFields(currentObject, lastSeg);
+        for (FieldMatch fm : results) {
+            fm.score *= chainScore;
+            fm.refPath = refPath;
+        }
+        return results;
+    }
+
+    /** 隐式链式：遍历引用字段，用 title 做前缀拆分（如"项目分类" → "项目" + "分类"） */
+    private List<FieldMatch> resolveImplicitChain(String objectType, String fieldPart) {
+        List<BaseappObjectField> fields = analyzerService.getFieldDetailsForObject(objectType);
+        List<FieldMatch> bestResults = Collections.emptyList();
+        double bestScore = 0;
+
+        for (BaseappObjectField f : fields) {
+            String refObj = f.getRefObjectType();
+            if (refObj == null || refObj.isEmpty()) continue;
+
+            String title = f.getTitle();
+            if (title == null || title.isEmpty()) continue;
+
+            // 检查引用字段 title 是否是 fieldPart 的前缀
+            if (!fieldPart.startsWith(title) || fieldPart.equals(title)) continue;
+            String remainder = fieldPart.substring(title.length());
+            if (remainder.isEmpty()) continue;
+
+            // 在被引用对象中匹配剩余部分
+            List<FieldMatch> refResults = matchFields(refObj, remainder);
+            if (refResults.isEmpty()) continue;
+
+            // 计算链式分数
+            int titleScore = calculateMatchScore(title, title); // 精确前缀
+            double chainScore = titleScore / 1000.0;
+            String refPath = title + "(" + canonicalName(f) + ") → " + refObj;
+
+            for (FieldMatch fm : refResults) {
+                fm.score *= chainScore;
+                fm.refPath = refPath;
+            }
+
+            // 保留分数最高的一组
+            if (!refResults.isEmpty() && refResults.get(0).score > bestScore) {
+                bestScore = refResults.get(0).score;
+                bestResults = refResults;
+            }
+        }
+        return bestResults;
+    }
+
+    /**
+     * 在指定对象中查找标题或名字匹配的引用字段（有 referInfo 的字段）
+     */
+    private BaseappObjectField findReferField(String objectType, String fieldQuery) {
+        List<BaseappObjectField> fields = analyzerService.getFieldDetailsForObject(objectType);
+        BaseappObjectField bestMatch = null;
+        int bestScore = 0;
+
+        for (BaseappObjectField f : fields) {
+            // 只看有 referInfo 的字段
+            if (f.getRefObjectType() == null || f.getRefObjectType().isEmpty()) continue;
+
+            String name = canonicalName(f);
+            int nameScore = calculateMatchScore(fieldQuery, name);
+            String title = f.getTitle();
+            int titleScore = title != null ? calculateMatchScore(fieldQuery, title) : 0;
+            int score = Math.max(nameScore, titleScore);
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestMatch = f;
+            }
+        }
+        return bestMatch;
+    }
+
+    /**
+     * 多路对象匹配：精确英文名 → 反向索引标题 → 同义词 → 中文标题包含
      */
     private List<ObjectMatch> matchObjects(String input, int maxResults) {
         List<ObjectMatch> matches = new ArrayList<>();
         if (input == null || input.isEmpty()) return matches;
 
-        Map<String, String> titles = analyzerService.getObjectTitles();
+        Map<String, ObjectTypeMeta> metas = analyzerService.getObjectTypeMetas();
+        Map<String, List<String>> titleIndex = analyzerService.getTitleToObjectTypes();
         Map<String, List<String>> synonyms = analyzerService.getGlobalSynonyms();
         Set<String> allTypes = analyzerService.getAllObjectTypes();
-        Set<String> matched = new LinkedHashSet<>(); // 去重
+        Set<String> matched = new LinkedHashSet<>();
 
         // 1. 精确英文名匹配（PascalCase）
         for (String type : allTypes) {
             if (type.equalsIgnoreCase(input)) {
-                addObjectMatch(matches, matched, type, titles, 1.0, ResolveModels.MatchSource.EXACT_NAME);
+                addObjectMatch(matches, matched, type, metas, 1.0, ResolveModels.MatchSource.EXACT_NAME);
             }
         }
 
-        // 1b. 英文名子串匹配（输入 "contract" → 匹配 ArContract、ApContract 等）
-        String inputLower = input.toLowerCase();
-        for (String type : allTypes) {
-            if (matched.contains(type)) continue;
-            if (type.toLowerCase().contains(inputLower)) {
-                // score 按子串占比计算：输入越长占比越高
-                double ratio = (double) input.length() / type.length();
-                double score = 0.5 + ratio * 0.4; // 0.5 ~ 0.9
-                addObjectMatch(matches, matched, type, titles, Math.min(score, 0.85), ResolveModels.MatchSource.EXACT_NAME);
+        // 2. 反向索引标题精确匹配（替代硬编码同义词）
+        List<String> titleMatched = titleIndex.get(input);
+        if (titleMatched != null) {
+            for (String type : titleMatched) {
+                addObjectMatch(matches, matched, type, metas,
+                        calculateMatchScore(input, input) / 1000.0, ResolveModels.MatchSource.TITLE_EXACT);
             }
         }
 
-        // 2. 同义词精确匹配
+        // 3. 同义词精确匹配（GLOBAL_SYNONYMS 作为补充）
         for (Map.Entry<String, List<String>> entry : synonyms.entrySet()) {
             for (String syn : entry.getValue()) {
                 if (syn.equals(input)) {
-                    addObjectMatch(matches, matched, entry.getKey(), titles, 0.9, ResolveModels.MatchSource.SYNONYM);
+                    addObjectMatch(matches, matched, entry.getKey(), metas, 0.9, ResolveModels.MatchSource.SYNONYM);
                 }
             }
         }
 
-        // 3. 中文标题精确匹配
-        for (Map.Entry<String, String> entry : titles.entrySet()) {
-            if (entry.getValue().equals(input)) {
-                addObjectMatch(matches, matched, entry.getKey(), titles, 0.8, ResolveModels.MatchSource.TITLE_EXACT);
+        // 4. 英文名子串匹配
+        String inputLower = input.toLowerCase();
+        for (String type : allTypes) {
+            if (matched.contains(type)) continue;
+            if (type.toLowerCase().contains(inputLower)) {
+                int rawScore = calculateMatchScore(inputLower, type.toLowerCase());
+                addObjectMatch(matches, matched, type, metas, rawScore / 1000.0, ResolveModels.MatchSource.EXACT_NAME);
             }
         }
 
-        // 4. 中文标题包含匹配（输入包含标题 或 标题包含输入），score 按长度比例调整
-        for (Map.Entry<String, String> entry : titles.entrySet()) {
+        // 5. 中文标题包含匹配
+        for (Map.Entry<String, ObjectTypeMeta> entry : metas.entrySet()) {
             if (matched.contains(entry.getKey())) continue;
-            String titleVal = entry.getValue();
+            String titleVal = entry.getValue().getTitle();
             if (titleVal != null && (titleVal.contains(input) || input.contains(titleVal))) {
-                int matchLen = Math.min(input.length(), titleVal.length());
-                int maxLen = Math.max(input.length(), titleVal.length());
-                double ratio = (double) matchLen / maxLen;
-                double score = 0.4 + ratio * 0.35; // 0.4 ~ 0.75，按匹配比例
-                addObjectMatch(matches, matched, entry.getKey(), titles, score, ResolveModels.MatchSource.TITLE_CONTAINS);
+                int rawScore = calculateMatchScore(input, titleVal);
+                addObjectMatch(matches, matched, entry.getKey(), metas, rawScore / 1000.0, ResolveModels.MatchSource.TITLE_CONTAINS);
             }
         }
 
-        // 按 score 降序排序，截取 maxResults
         matches.sort((a, b) -> Double.compare(b.score, a.score));
         if (matches.size() > maxResults) {
             matches = new ArrayList<>(matches.subList(0, maxResults));
@@ -650,14 +960,62 @@ public class SkillsService {
         return matches;
     }
 
+    /**
+     * 5 档评分算法 + 紧凑度修正。
+     * 返回原始整数分（0~1000），调用方除以 1000 归一化。
+     */
+    static int calculateMatchScore(String query, String target) {
+        if (query == null || target == null || query.isEmpty() || target.isEmpty()) return 0;
+        String q = query.toLowerCase();
+        String t = target.toLowerCase();
+
+        int baseScore;
+        if (t.equals(q)) {
+            baseScore = 1000; // 精确匹配
+        } else if (t.endsWith(q)) {
+            baseScore = 600;  // 后缀匹配
+        } else if (t.startsWith(q)) {
+            baseScore = 500;  // 前缀匹配
+        } else if (t.contains(q)) {
+            baseScore = 400;  // 包含匹配
+        } else if (q.contains(t)) {
+            baseScore = 200;  // 模糊匹配（查询包含目标）
+        } else {
+            return 0;
+        }
+
+        // 紧凑度修正：匹配长度占比越高分数越高
+        int matchLen = Math.min(q.length(), t.length());
+        int maxLen = Math.max(q.length(), t.length());
+        double compactness = 0.8 + 0.2 * ((double) matchLen / maxLen);
+        return (int) Math.round(baseScore * compactness);
+    }
+
     private void addObjectMatch(List<ObjectMatch> matches, Set<String> matched,
-                                String objectType, Map<String, String> titles,
+                                String objectType, Map<String, ObjectTypeMeta> metas,
                                 double score, ResolveModels.MatchSource source) {
         if (matched.contains(objectType)) return;
+        // 排除视图对象（名字以 View 结尾）
+        if (objectType.endsWith("View")) return;
+        // 只匹配单据(bill)对象：排除枚举、setting 等非单据对象
+        ObjectTypeMeta meta = metas.get(objectType);
+        if (meta != null) {
+            String type = meta.getType();
+            if (type != null && !type.isEmpty() && !"bill".equals(type)) {
+                return;
+            }
+        }
         matched.add(objectType);
         ObjectMatch om = new ObjectMatch();
         om.objectType = objectType;
-        om.title = titles.getOrDefault(objectType, objectType);
+        if (meta != null) {
+            om.title = meta.getTitle() != null ? meta.getTitle() : objectType;
+            om.description = meta.getDescription();
+            om.type = meta.getType();
+            om.isDisabled = meta.getIsDisabled();
+        } else {
+            om.title = analyzerService.getObjectTitles().getOrDefault(objectType, objectType);
+        }
         om.score = score;
         om.matchSource = source;
         matches.add(om);
@@ -682,7 +1040,7 @@ public class SkillsService {
     }
 
     /**
-     * 在指定对象内匹配字段：标题精确匹配 → 标题包含匹配
+     * 在指定对象内匹配字段：精确英文名 → 标题精确 → 标题包含，使用 calculateMatchScore 评分
      */
     private List<FieldMatch> matchFields(String objectType, String fieldInput) {
         List<FieldMatch> matches = new ArrayList<>();
@@ -691,29 +1049,39 @@ public class SkillsService {
         List<BaseappObjectField> fields = analyzerService.getFieldDetailsForObject(objectType);
         Set<String> matched = new LinkedHashSet<>();
 
-        // 精确英文名
-        for (BaseappObjectField f : fields) {
-            String name = canonicalName(f);
-            if (name.equalsIgnoreCase(fieldInput)) {
-                addFieldMatch(matches, matched, f, 1.0, ResolveModels.MatchSource.EXACT_NAME);
-            }
-        }
-
-        // 标题精确匹配
-        for (BaseappObjectField f : fields) {
-            String title = f.getTitle();
-            if (title != null && title.equals(fieldInput)) {
-                addFieldMatch(matches, matched, f, 0.8, ResolveModels.MatchSource.TITLE_EXACT);
-            }
-        }
-
-        // 标题包含匹配
         for (BaseappObjectField f : fields) {
             String name = canonicalName(f);
             if (matched.contains(name)) continue;
+
+            // 尝试英文名匹配
+            int nameScore = calculateMatchScore(fieldInput, name);
+            // 尝试标题匹配
             String title = f.getTitle();
-            if (title != null && (title.contains(fieldInput) || fieldInput.contains(title))) {
-                addFieldMatch(matches, matched, f, 0.6, ResolveModels.MatchSource.TITLE_CONTAINS);
+            int titleScore = title != null ? calculateMatchScore(fieldInput, title) : 0;
+            // 尝试 description 匹配（最低优先级）
+            String desc = f.getDescription();
+            int descScore = desc != null ? calculateMatchScore(fieldInput, desc) : 0;
+            // description 匹配的分数上限为 100（最低优先级）
+            if (descScore > 100) descScore = 100;
+
+            int bestScore = Math.max(nameScore, Math.max(titleScore, descScore));
+            if (bestScore > 0) {
+                ResolveModels.MatchSource source;
+                if (nameScore >= titleScore && nameScore >= 1000) {
+                    source = ResolveModels.MatchSource.EXACT_NAME;
+                } else if (titleScore >= 1000) {
+                    source = ResolveModels.MatchSource.TITLE_EXACT;
+                } else if (titleScore > 0) {
+                    source = ResolveModels.MatchSource.TITLE_CONTAINS;
+                } else {
+                    source = ResolveModels.MatchSource.EXACT_NAME;
+                }
+                double score = bestScore / 1000.0;
+                // isMasterField 加分：主字段 score × 1.2（上限 1.0）
+                if (Boolean.TRUE.equals(f.getIsMasterField())) {
+                    score = Math.min(score * 1.2, 1.0);
+                }
+                addFieldMatch(matches, matched, f, score, source);
             }
         }
 
@@ -772,6 +1140,9 @@ public class SkillsService {
         fm.score = score;
         fm.matchSource = source;
         fm.bizType = f.getBizType();
+        fm.description = f.getDescription();
+        fm.enumType = f.getEnumType();
+        fm.isDisabled = f.getIsDisabled();
         fm.hasWriteBack = isWriteBackField(f);
         fm.hasTrigger = isTriggerField(f);
 

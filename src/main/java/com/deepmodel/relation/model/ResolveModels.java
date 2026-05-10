@@ -37,6 +37,9 @@ public class ResolveModels {
     public static class ObjectMatch {
         public String objectType;
         public String title;
+        public String description;
+        public String type;
+        public Boolean isDisabled;
         public double score;
         public MatchSource matchSource;
         public List<String> detailEntities = new ArrayList<>();
@@ -48,11 +51,30 @@ public class ResolveModels {
     public static class FieldMatch {
         public String field;
         public String title;
+        public String description;
+        public String enumType;
+        public Boolean isDisabled;
         public double score;
         public MatchSource matchSource;
         public String bizType;
         public FieldCategory category;
         public boolean hasWriteBack;
         public boolean hasTrigger;
+        /** 引用链路径（如 "projectId → Project"），null 表示直接匹配 */
+        public String refPath;
+        /** 匹配类型：DIRECT=直接匹配, CHAIN=链式引用, CASCADE=级联搜索 */
+        public String matchType;
+    }
+
+    /** 分词解析后的查询结构 */
+    public static class ParsedQuery {
+        /** 对象部分（如 "应收合同"） */
+        public String objectPart;
+        /** 是否为子表查询 */
+        public boolean isDetailQuery;
+        /** 子表导航词（如 "子表"、"明细"） */
+        public String detailNavWord;
+        /** 字段部分（如 "收款金额"） */
+        public String fieldPart;
     }
 }

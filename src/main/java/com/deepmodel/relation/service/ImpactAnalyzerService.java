@@ -3,6 +3,7 @@ package com.deepmodel.relation.service;
 import com.deepmodel.relation.dao.BaseappObjectFieldMapper;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.GraphModels;
+import com.deepmodel.relation.model.ObjectTypeMeta;
 import com.deepmodel.relation.model.WriteBackExpr;
 import com.deepmodel.relation.util.ExprUtils;
 import com.fasterxml.jackson.core.JsonParser;
@@ -41,8 +42,12 @@ public class ImpactAnalyzerService {
     // 缓存
     private volatile List<BaseappObjectField> allRows = Collections.emptyList();
     private final Map<String, List<BaseappObjectField>> rowsByObject = new ConcurrentHashMap<String, List<BaseappObjectField>>();
-    // 缓存对象标题: objectType -> title
+    // 缓存对象标题: objectType -> title（兼容旧接口）
     private final Map<String, String> objectTitles = new ConcurrentHashMap<>();
+    // 扩展：对象类型元信息缓存
+    private final Map<String, ObjectTypeMeta> objectTypeMetas = new ConcurrentHashMap<>();
+    // 扩展：中文标题 -> 对象名列表 反向索引
+    private final Map<String, List<String>> titleToObjectTypes = new ConcurrentHashMap<>();
     // 枚举定义缓存: enumName -> Set<validValue>
     private final Map<String, Set<String>> enumValueMap = new ConcurrentHashMap<>();
     private final Map<String, String> objectLabels = new HashMap<>(); // objectName -> 描述标签
@@ -125,22 +130,54 @@ public class ImpactAnalyzerService {
         rowsByObject.putAll(byObj);
         allRows = rows;
 
+        // 解析 referInfo JSON，设置 refObjectType（供链式引用解析和级联搜索使用）
+        int refCount = 0;
+        for (BaseappObjectField f : rows) {
+            String ref = extractRefFromReferInfo(f.getReferInfo());
+            if (ref != null && !ref.isEmpty()) {
+                f.setRefObjectType(ref);
+                refCount++;
+            }
+        }
+        log.info("Parsed {} referInfo → refObjectType mappings", refCount);
+
+        // 统计停用字段数量
+        long disabledFieldCount = rows.stream()
+                .filter(f -> Boolean.TRUE.equals(f.getIsDisabled()))
+                .count();
+        if (disabledFieldCount > 0) {
+            log.info("Loaded {} fields ({} disabled)", rows.size(), disabledFieldCount);
+        }
+
         // 重新加载视图字段（因为 allRows 覆盖了）
         long tViewsStart = System.currentTimeMillis();
         loadViews();
         long tViewsEnd = System.currentTimeMillis();
 
-        // 加载对象标题
+        // 加载对象标题和元信息
         long tTitleStart = System.currentTimeMillis();
         objectTitles.clear();
+        objectTypeMetas.clear();
+        titleToObjectTypes.clear();
         try {
-            List<BaseappObjectField> titles = mapper.selectObjectTitles();
-            for (BaseappObjectField t : titles) {
-                if (t.getName() != null && t.getTitle() != null) {
-                    objectTitles.put(t.getName(), t.getTitle());
+            List<ObjectTypeMeta> metas = mapper.selectObjectTitles();
+            Map<String, List<String>> titleIndex = new HashMap<>();
+            int disabledCount = 0;
+            for (ObjectTypeMeta m : metas) {
+                if (m.getName() != null) {
+                    objectTypeMetas.put(m.getName(), m);
+                    if (m.getTitle() != null) {
+                        objectTitles.put(m.getName(), m.getTitle());
+                        titleIndex.computeIfAbsent(m.getTitle(), k -> new ArrayList<>()).add(m.getName());
+                    }
+                    if (Boolean.TRUE.equals(m.getIsDisabled())) {
+                        disabledCount++;
+                    }
                 }
             }
-            log.info("Loaded {} object titles", objectTitles.size());
+            titleToObjectTypes.putAll(titleIndex);
+            log.info("Loaded {} object metas ({} disabled), {} title reverse-index entries",
+                    objectTypeMetas.size(), disabledCount, titleToObjectTypes.size());
         } catch (Exception e) {
             log.warn("Failed to load object titles", e);
         }
@@ -204,6 +241,11 @@ public class ImpactAnalyzerService {
         long tEnumStart = System.currentTimeMillis();
         loadEnumDefinitions();
         long tEnumEnd = System.currentTimeMillis();
+
+        // 从元数据 JSON 补充字段级属性（description/enumType/isDisabled/isMasterField）
+        long tEnrichStart = System.currentTimeMillis();
+        enrichFieldMetadata();
+        long tEnrichEnd = System.currentTimeMillis();
 
         // 清除分析结果缓存（因为数据源已更新）
         long tCacheStart = System.currentTimeMillis();
@@ -401,6 +443,72 @@ public class ImpactAnalyzerService {
      */
     public Map<String, Set<String>> getEnumValueMap() {
         return enumValueMap;
+    }
+
+    /**
+     * 从 baseapp_system_metadata 的 entity content JSON 中解析字段级属性，
+     * 补充到已加载的 BaseappObjectField 上（description/enumType/isDisabled/isMasterField）。
+     */
+    private void enrichFieldMetadata() {
+        try {
+            List<Map<String, Object>> metaList = mapper.selectEntityMetadataContents();
+            int enrichedCount = 0;
+            for (Map<String, Object> meta : metaList) {
+                String entityName = (String) meta.get("name");
+                String content = (String) meta.get("content");
+                if (entityName == null || content == null) continue;
+
+                List<BaseappObjectField> fields = rowsByObject.get(entityName);
+                if (fields == null || fields.isEmpty()) continue;
+
+                // 构建 apiName → BaseappObjectField 的快速查找
+                Map<String, BaseappObjectField> fieldMap = new HashMap<>();
+                for (BaseappObjectField f : fields) {
+                    String key = f.getApiName() != null ? f.getApiName() : f.getName();
+                    if (key != null) fieldMap.put(key, f);
+                }
+
+                try {
+                    JsonNode root = objectMapper.readTree(content);
+                    JsonNode fieldsNode = root.path("fields");
+                    if (!fieldsNode.isArray()) continue;
+
+                    for (JsonNode fn : fieldsNode) {
+                        String apiName = fn.path("apiName").asText(null);
+                        if (apiName == null) apiName = fn.path("name").asText(null);
+                        if (apiName == null) continue;
+
+                        BaseappObjectField bf = fieldMap.get(apiName);
+                        if (bf == null) continue;
+
+                        // 补充 description
+                        String desc = fn.path("description").asText(null);
+                        if (desc != null && !desc.isEmpty() && bf.getDescription() == null) {
+                            bf.setDescription(desc);
+                        }
+                        // 补充 enumType
+                        String enumType = fn.path("enumType").asText(null);
+                        if (enumType != null && !enumType.isEmpty() && bf.getEnumType() == null) {
+                            bf.setEnumType(enumType);
+                        }
+                        // 补充 isDisabled
+                        if (bf.getIsDisabled() == null && fn.has("isDisabled")) {
+                            bf.setIsDisabled(fn.path("isDisabled").asBoolean(false));
+                        }
+                        // 补充 isMasterField
+                        if (bf.getIsMasterField() == null && fn.has("isMasterField")) {
+                            bf.setIsMasterField(fn.path("isMasterField").asBoolean(false));
+                        }
+                        enrichedCount++;
+                    }
+                } catch (Exception e) {
+                    log.debug("解析实体 {} 元数据 JSON 失败: {}", entityName, e.getMessage());
+                }
+            }
+            log.info("Enriched {} field metadata entries from entity content JSON", enrichedCount);
+        } catch (Exception e) {
+            log.warn("Failed to enrich field metadata from system_metadata", e);
+        }
     }
 
     private void loadViews() {
@@ -729,6 +837,20 @@ public class ImpactAnalyzerService {
      */
     public Map<String, String> getObjectTitles() {
         return Collections.unmodifiableMap(objectTitles);
+    }
+
+    /**
+     * 获取对象类型元信息映射（objectType → ObjectTypeMeta）。
+     */
+    public Map<String, ObjectTypeMeta> getObjectTypeMetas() {
+        return Collections.unmodifiableMap(objectTypeMetas);
+    }
+
+    /**
+     * 获取中文标题到对象名的反向索引（title → List&lt;objectType&gt;）。
+     */
+    public Map<String, List<String>> getTitleToObjectTypes() {
+        return Collections.unmodifiableMap(titleToObjectTypes);
     }
 
     /**

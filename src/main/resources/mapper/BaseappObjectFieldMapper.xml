@@ -17,6 +17,18 @@
     <result property="referInfo" column="refer_info" jdbcType="OTHER"/>
     <result property="sourceInfo" column="source_info" jdbcType="OTHER"/>
     <result property="appName" column="app_name"/>
+    <result property="description" column="description"/>
+    <result property="enumType" column="enum_type"/>
+    <result property="isDisabled" column="is_disabled"/>
+    <result property="isMasterField" column="is_master_field"/>
+  </resultMap>
+
+  <resultMap id="ObjectTypeMetaMap" type="com.deepmodel.relation.model.ObjectTypeMeta">
+    <result property="name" column="name"/>
+    <result property="title" column="title"/>
+    <result property="type" column="type"/>
+    <result property="description" column="description"/>
+    <result property="isDisabled" column="is_disabled"/>
   </resultMap>
 
   <select id="selectByObjectType" resultMap="BaseappObjectFieldMap">
@@ -72,6 +84,10 @@
            f.write_back_expr::text as write_back_expr,
            f.refer_info::text as refer_info,
            f.source_info::text as source_info,
+           null as description,
+           null as enum_type,
+           null as is_disabled,
+           null as is_master_field,
            t.app_name
     from baseapp_object_field f
     left join baseapp_object_type t on f.object_type = t.name
@@ -95,8 +111,8 @@
     limit 1
   </select>
 
-  <select id="selectObjectTitles" resultMap="BaseappObjectFieldMap">
-    select name, title
+  <select id="selectObjectTitles" resultMap="ObjectTypeMetaMap">
+    select name, title, type, description, is_disabled
     from baseapp_object_type
   </select>
 
@@ -159,6 +175,15 @@
     where m.is_deleted = false
       and m.type_id = 'MetaType.entity'
       and m.content::jsonb->>'isSupportChangeBill' = 'true'
+  </select>
+
+  <!-- 查询所有 entity 类型的元数据 content（用于解析字段级属性） -->
+  <select id="selectEntityMetadataContents" resultType="map">
+    select m.name, m.content::text as content
+    from baseapp_system_metadata m
+    where m.is_deleted = false
+      and m.type_id = 'MetaType.entity'
+      and m.content is not null
   </select>
 
   <!-- ===== FuncUnit Customizer 查询 ===== -->

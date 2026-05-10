@@ -1,6 +1,7 @@
 package com.deepmodel.relation.dao;
 
 import com.deepmodel.relation.model.BaseappObjectField;
+import com.deepmodel.relation.model.ObjectTypeMeta;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
@@ -24,9 +25,9 @@ public interface BaseappObjectFieldMapper {
     String selectAppNameByObjectType(@Param("objectType") String objectType);
 
     /**
-     * 查询所有对象类型的标题映射
+     * 查询所有对象类型的元信息（名称、标题、类型、描述、停用状态）
      */
-    List<BaseappObjectField> selectObjectTitles();
+    List<ObjectTypeMeta> selectObjectTitles();
 
     /**
      * 查询 type='bill' 的对象类型名称列表
@@ -54,6 +55,11 @@ public interface BaseappObjectFieldMapper {
      * 查询支持变更单的实体名称列表（content->>'isSupportChangeBill'='true'）
      */
     List<String> selectChangeBillSupportedEntities();
+
+    /**
+     * 查询所有 entity 类型的元数据 content JSON（用于解析字段级 description/enumType/isDisabled/isMasterField）
+     */
+    List<Map<String, Object>> selectEntityMetadataContents();
 
     // ===== FuncUnit Customizer 查询 =====
 
