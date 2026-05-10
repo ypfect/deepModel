@@ -30,6 +30,9 @@ import java.util.stream.*;
 public class DecisionTableSimulatorService {
     private static final Logger log = LoggerFactory.getLogger(DecisionTableSimulatorService.class);
 
+    @Value("${decision-table.enabled:false}")
+    private boolean enabled;
+
     @Value("${decision-table.scan-path:}")
     private String scanPath;
 
@@ -51,7 +54,7 @@ public class DecisionTableSimulatorService {
 
     @PostConstruct
     public void init() {
-        if (scanPath == null || scanPath.isBlank()) return;
+        if (!enabled || scanPath == null || scanPath.isBlank()) return;
         long start = System.currentTimeMillis();
         scanRulesDirectories();
         log.info("[Simulator] 索引构建完成: {} 个 Service 文件夹, {} 个操作方法, 耗时 {}ms",

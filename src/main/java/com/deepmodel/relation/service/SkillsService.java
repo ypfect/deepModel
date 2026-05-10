@@ -483,6 +483,14 @@ public class SkillsService {
     /** 对象+字段分隔符关键词 */
     private static final List<String> FIELD_SEPARATORS = Arrays.asList("的", ".", "。");
 
+    /** 公共子表后缀黑名单：每个单据都有的通用子表（评论/附件/日志等），搜索时排除 */
+    private static final List<String> PUBLIC_DETAIL_SUFFIXES = Arrays.asList(
+            "Comment", "Attachment", "AttachmentDetail", "OperateLog", "OperationLog",
+            "ChangeLog", "Follow", "Tag", "TagRelation",
+            "Remark", "BpmRecord", "ProcessInstance", "ApprovalRecord",
+            "FieldSyncExtend", "FieldSync"
+    );
+
     /**
      * 用 Jieba 分词 + 规则解析查询字符串，识别对象部分、子表关键词、字段部分。
      * 优先使用 Jieba 分词结果识别业务术语边界，回退到分隔符切割。
@@ -602,6 +610,8 @@ public class SkillsService {
                 String targetDetail = findDetailByNavWord(details, fieldPart);
 
                 for (String detail : details) {
+                    // 跳过公共子表（评论/附件/日志等）
+                    if (isPublicDetail(detail)) continue;
                     ObjectMatch dm = new ObjectMatch();
                     dm.objectType = detail;
                     dm.title = analyzerService.getObjectTitles().getOrDefault(detail, detail);
@@ -704,6 +714,14 @@ public class SkillsService {
             }
         }
         return inferred;
+    }
+
+    /** 判断是否为公共子表（评论/附件/操作日志等每个单据都有的通用子表） */
+    private static boolean isPublicDetail(String objectType) {
+        for (String suffix : PUBLIC_DETAIL_SUFFIXES) {
+            if (objectType.endsWith(suffix)) return true;
+        }
+        return false;
     }
 
     /**

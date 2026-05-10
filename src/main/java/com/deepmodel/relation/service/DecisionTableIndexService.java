@@ -33,6 +33,9 @@ public class DecisionTableIndexService {
 
     private static final Logger log = LoggerFactory.getLogger(DecisionTableIndexService.class);
 
+    @Value("${decision-table.enabled:false}")
+    private boolean enabled;
+
     @Value("${decision-table.scan-path:}")
     private String scanPath;
 
@@ -50,6 +53,10 @@ public class DecisionTableIndexService {
 
     @PostConstruct
     public void init() {
+        if (!enabled) {
+            log.info("[DecisionTable] 决策表分析功能未启用 (decision-table.enabled=false)");
+            return;
+        }
         if (scanPath != null && !scanPath.trim().isEmpty()) {
             buildIndex();
         } else {
