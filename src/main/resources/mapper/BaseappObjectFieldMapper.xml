@@ -163,7 +163,7 @@
            f.source_info::text as source_info,
            f.refer_info::text as refer_info
     FROM baseapp_object_field f
-    WHERE f.type = 'LIST'
+    WHERE lower(f.type) = 'list'
       AND f.source_info IS NOT NULL
       AND f.source_info::text != 'null'
   </select>

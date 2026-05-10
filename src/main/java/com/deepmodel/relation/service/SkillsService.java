@@ -587,13 +587,17 @@ public class SkillsService {
         String fieldPart = pq.fieldPart;
 
         // 对象匹配
-        List<ObjectMatch> objectMatches = matchObjects(objectPart, maxResults);
+        List<ObjectMatch> objectMatches = matchObjects(objectPart, maxResults, !isDetailQuery);
 
         // 子表查询：展开为子表对象，并在子表范围内匹配字段
         if (isDetailQuery) {
             List<ObjectMatch> detailMatches = new ArrayList<>();
             for (ObjectMatch om : objectMatches) {
                 Set<String> details = analyzerService.getAllDetailEntities(om.objectType);
+                // 兜底：当 detail relations 未加载时，用命名约定推导子表（XXXItem）
+                if (details.isEmpty()) {
+                    details = inferDetailsByNaming(om.objectType);
+                }
                 // 如果 fieldPart 中包含子表名称片段（导航词），优先匹配该子表
                 String targetDetail = findDetailByNavWord(details, fieldPart);
 
@@ -607,12 +611,20 @@ public class SkillsService {
                     dm.parentEntity = om.objectType;
                     fillObjectContext(dm);
 
-                    // 在子表范围内匹配字段
+                    // 在子表范围内匹配字段（三路搜索）
                     if (includeFields && fieldPart != null && !fieldPart.isEmpty()) {
-                        // 从 fieldPart 中去掉子表导航词部分后做字段匹配
                         String cleanFieldPart = removeDetailNavFromField(fieldPart, detail);
                         if (cleanFieldPart != null && !cleanFieldPart.isEmpty()) {
-                            dm.fieldMatches = matchFields(detail, cleanFieldPart);
+                            List<FieldMatch> directMatches = matchFields(detail, cleanFieldPart);
+                            for (FieldMatch fm : directMatches) fm.matchType = "DIRECT";
+
+                            List<FieldMatch> chainResults = resolveFieldChain(detail, cleanFieldPart);
+                            for (FieldMatch fm : chainResults) fm.matchType = "CHAIN";
+
+                            List<FieldMatch> cascadeResults = cascadeFieldSearch(detail, cleanFieldPart, 0, new HashSet<>());
+                            for (FieldMatch fm : cascadeResults) fm.matchType = "CASCADE";
+
+                            dm.fieldMatches = mergeAndDedup(5, directMatches, chainResults, cascadeResults);
                         }
                     }
                     detailMatches.add(dm);
@@ -676,6 +688,22 @@ public class SkillsService {
             }
         }
         return null;
+    }
+
+    /**
+     * 命名约定推导子表：在所有已知对象中查找以主表名开头+Item 结尾的对象。
+     * 如 RevenueConfirmation → RevenueConfirmationItem
+     */
+    private Set<String> inferDetailsByNaming(String mainObjectType) {
+        Set<String> inferred = new LinkedHashSet<>();
+        Map<String, ObjectTypeMeta> metas = analyzerService.getObjectTypeMetas();
+        for (String name : metas.keySet()) {
+            if (name.startsWith(mainObjectType) && name.length() > mainObjectType.length()
+                    && !name.equals(mainObjectType) && !name.endsWith("View")) {
+                inferred.add(name);
+            }
+        }
+        return inferred;
     }
 
     /**
@@ -898,9 +926,10 @@ public class SkillsService {
     /**
      * 多路对象匹配：精确英文名 → 反向索引标题 → 同义词 → 中文标题包含
      */
-    private List<ObjectMatch> matchObjects(String input, int maxResults) {
+    private List<ObjectMatch> matchObjects(String input, int maxResults, boolean filterBillOnly) {
         List<ObjectMatch> matches = new ArrayList<>();
         if (input == null || input.isEmpty()) return matches;
+
 
         Map<String, ObjectTypeMeta> metas = analyzerService.getObjectTypeMetas();
         Map<String, List<String>> titleIndex = analyzerService.getTitleToObjectTypes();
@@ -911,16 +940,17 @@ public class SkillsService {
         // 1. 精确英文名匹配（PascalCase）
         for (String type : allTypes) {
             if (type.equalsIgnoreCase(input)) {
-                addObjectMatch(matches, matched, type, metas, 1.0, ResolveModels.MatchSource.EXACT_NAME);
+                addObjectMatch(matches, matched, type, metas, 1.0, ResolveModels.MatchSource.EXACT_NAME, filterBillOnly);
             }
         }
 
         // 2. 反向索引标题精确匹配（替代硬编码同义词）
         List<String> titleMatched = titleIndex.get(input);
+
         if (titleMatched != null) {
             for (String type : titleMatched) {
                 addObjectMatch(matches, matched, type, metas,
-                        calculateMatchScore(input, input) / 1000.0, ResolveModels.MatchSource.TITLE_EXACT);
+                        calculateMatchScore(input, input) / 1000.0, ResolveModels.MatchSource.TITLE_EXACT, filterBillOnly);
             }
         }
 
@@ -928,7 +958,7 @@ public class SkillsService {
         for (Map.Entry<String, List<String>> entry : synonyms.entrySet()) {
             for (String syn : entry.getValue()) {
                 if (syn.equals(input)) {
-                    addObjectMatch(matches, matched, entry.getKey(), metas, 0.9, ResolveModels.MatchSource.SYNONYM);
+                    addObjectMatch(matches, matched, entry.getKey(), metas, 0.9, ResolveModels.MatchSource.SYNONYM, filterBillOnly);
                 }
             }
         }
@@ -939,7 +969,7 @@ public class SkillsService {
             if (matched.contains(type)) continue;
             if (type.toLowerCase().contains(inputLower)) {
                 int rawScore = calculateMatchScore(inputLower, type.toLowerCase());
-                addObjectMatch(matches, matched, type, metas, rawScore / 1000.0, ResolveModels.MatchSource.EXACT_NAME);
+                addObjectMatch(matches, matched, type, metas, rawScore / 1000.0, ResolveModels.MatchSource.EXACT_NAME, filterBillOnly);
             }
         }
 
@@ -949,7 +979,7 @@ public class SkillsService {
             String titleVal = entry.getValue().getTitle();
             if (titleVal != null && (titleVal.contains(input) || input.contains(titleVal))) {
                 int rawScore = calculateMatchScore(input, titleVal);
-                addObjectMatch(matches, matched, entry.getKey(), metas, rawScore / 1000.0, ResolveModels.MatchSource.TITLE_CONTAINS);
+                addObjectMatch(matches, matched, entry.getKey(), metas, rawScore / 1000.0, ResolveModels.MatchSource.TITLE_CONTAINS, filterBillOnly);
             }
         }
 
@@ -993,13 +1023,13 @@ public class SkillsService {
 
     private void addObjectMatch(List<ObjectMatch> matches, Set<String> matched,
                                 String objectType, Map<String, ObjectTypeMeta> metas,
-                                double score, ResolveModels.MatchSource source) {
+                                double score, ResolveModels.MatchSource source, boolean filterBillOnly) {
         if (matched.contains(objectType)) return;
         // 排除视图对象（名字以 View 结尾）
         if (objectType.endsWith("View")) return;
-        // 只匹配单据(bill)对象：排除枚举、setting 等非单据对象
+        // filterBillOnly=true 时只匹配单据(bill)对象
         ObjectTypeMeta meta = metas.get(objectType);
-        if (meta != null) {
+        if (filterBillOnly && meta != null) {
             String type = meta.getType();
             if (type != null && !type.isEmpty() && !"bill".equals(type)) {
                 return;
