@@ -1,10 +1,7 @@
 package com.deepmodel.relation.service;
 
-import com.deepmodel.relation.model.BaseappObjectField;
-import com.deepmodel.relation.model.ObjectTypeMeta;
-import com.deepmodel.relation.model.ResolveModels;
+import com.deepmodel.relation.model.*;
 import com.deepmodel.relation.model.ResolveModels.*;
-import com.deepmodel.relation.model.WriteBackExpr;
 import com.deepmodel.relation.util.JiebaUtils;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
@@ -60,6 +57,25 @@ public class SkillsService {
     // ===================== 业务类型关键词 =====================
     private static final List<String> AMOUNT_BIZTYPES = Arrays.asList("Amount", "Currency", "Money");
     private static final List<String> QTY_BIZTYPES    = Arrays.asList("Qty", "Quantity");
+
+    // ===================== 对象特性关键词映射 (US1) =====================
+    private static final Map<String, String> TRAIT_KEYWORDS = new LinkedHashMap<>();
+    static {
+        TRAIT_KEYWORDS.put("树型", "isTree"); TRAIT_KEYWORDS.put("树状", "isTree"); TRAIT_KEYWORDS.put("树形", "isTree");
+        TRAIT_KEYWORDS.put("子表", "isDetail"); TRAIT_KEYWORDS.put("明细", "isDetail");
+        TRAIT_KEYWORDS.put("变更单", "isSupportChangeLog");
+        TRAIT_KEYWORDS.put("自定义", "isCustomizedEntity");
+        TRAIT_KEYWORDS.put("多版本", "isMultiDataVersion");
+    }
+
+    // ===================== bizType 中文关键词映射 (US2) =====================
+    private static final Map<String, String> BIZTYPE_KEYWORDS = new LinkedHashMap<>();
+    static {
+        BIZTYPE_KEYWORDS.put("金额", "amount"); BIZTYPE_KEYWORDS.put("数量", "quantity");
+        BIZTYPE_KEYWORDS.put("价格", "price"); BIZTYPE_KEYWORDS.put("比率", "ratio");
+        BIZTYPE_KEYWORDS.put("百分比", "percent"); BIZTYPE_KEYWORDS.put("邮箱", "email");
+        BIZTYPE_KEYWORDS.put("手机", "mobile"); BIZTYPE_KEYWORDS.put("电话", "phone");
+    }
 
     private final ImpactAnalyzerService analyzerService;
 
@@ -483,12 +499,20 @@ public class SkillsService {
     /** 对象+字段分隔符关键词 */
     private static final List<String> FIELD_SEPARATORS = Arrays.asList("的", ".", "。");
 
+    // ===================== 反向引用查询关键词 (US5) =====================
+    private static final List<String> REVERSE_REF_PREFIXES = Arrays.asList(
+            "哪些对象引用了", "引用了", "被哪些对象使用", "谁引用了", "谁使用了",
+            "被谁引用", "被谁使用", "关联了"
+    );
+
     /** 公共子表后缀黑名单：每个单据都有的通用子表（评论/附件/日志等），搜索时排除 */
     private static final List<String> PUBLIC_DETAIL_SUFFIXES = Arrays.asList(
-            "Comment", "Attachment", "AttachmentDetail", "OperateLog", "OperationLog",
-            "ChangeLog", "Follow", "Tag", "TagRelation",
+            "Comment", "CommentReceiver", "Attachment", "AttachmentDetail",
+            "OperateLog", "OperationLog", "ChangeLog",
+            "Follow", "Tag", "TagRelation",
             "Remark", "BpmRecord", "ProcessInstance", "ApprovalRecord",
-            "FieldSyncExtend", "FieldSync"
+            "FieldSyncExtend", "FieldSync",
+            "BillParticipant", "FreeProcNode"
     );
 
     /**
@@ -503,8 +527,6 @@ public class SkillsService {
         for (String kw : DETAIL_KEYWORDS) {
             int kwIdx = query.indexOf(kw);
             if (kwIdx >= 0) {
-                pq.isDetailQuery = true;
-                pq.detailNavWord = kw;
                 String beforeKw = query.substring(0, kwIdx).trim();
                 String afterKw = query.substring(kwIdx + kw.length()).trim();
                 // 去掉分隔符
@@ -514,9 +536,15 @@ public class SkillsService {
                     if (afterKw.startsWith(sep))
                         afterKw = afterKw.substring(sep.length()).trim();
                 }
-                pq.objectPart = beforeKw;
-                pq.fieldPart = afterKw.isEmpty() ? null : afterKw;
-                return pq;
+                // 仅当有明确的主表部分时才视为子表查询（如"应收合同子表"）
+                // 纯"子表"输入不走子表展开，由 detectTraitFilter 处理为特性筛选
+                if (!beforeKw.isEmpty()) {
+                    pq.isDetailQuery = true;
+                    pq.detailNavWord = kw;
+                    pq.objectPart = beforeKw;
+                    pq.fieldPart = afterKw.isEmpty() ? null : afterKw;
+                    return pq;
+                }
             }
         }
 
@@ -590,12 +618,47 @@ public class SkillsService {
 
         // 分词解析查询
         ParsedQuery pq = parseQuery(query);
+
+        // 当 parseQuery 未拆出 fieldPart 时，用已知对象标题做前缀拆分
+        // 例如 "应收合同收款状态" → objectPart="应收合同", fieldPart="收款状态"
+        if (pq.fieldPart == null && !pq.isDetailQuery && pq.objectPart != null && pq.objectPart.length() > 1) {
+            splitByKnownTitle(pq);
+        }
+
         boolean isDetailQuery = pq.isDetailQuery;
         String objectPart = pq.objectPart;
         String fieldPart = pq.fieldPart;
 
-        // 对象匹配
-        List<ObjectMatch> objectMatches = matchObjects(objectPart, maxResults, !isDetailQuery);
+        // 特性关键词检测（US1）
+        detectTraitFilter(pq, query);
+        // bizType 关键词检测（US2）
+        detectBizTypeFilter(pq);
+        // 反向引用查询意图检测（US5）
+        detectReverseRefQuery(pq, query);
+
+        // 反向引用查询：直接走 EntityReferenceService
+        if (pq.reverseRefTarget != null) {
+            result.objectMatches = matchReverseReferences(pq.reverseRefTarget);
+            result.objectMatches.sort((a, b) -> Double.compare(b.score, a.score));
+            return result;
+        }
+
+        // 枚举搜索（US3）
+        result.enumMatches = matchEnums(query);
+
+        // 对象匹配（如果有特性过滤或 bizType 过滤，不限制 bill only）
+        boolean filterBill = !isDetailQuery && pq.traitFilter == null && pq.bizTypeFilter == null;
+        List<ObjectMatch> objectMatches = matchObjects(objectPart, maxResults, filterBill);
+
+        // 纯 bizType 搜索（无对象名）：从全量对象中采样有该 bizType 字段的对象
+        if (objectMatches.isEmpty() && pq.bizTypeFilter != null) {
+            objectMatches = sampleObjectsByBizType(pq.bizTypeFilter, maxResults);
+        }
+
+        // 特性过滤（US1）
+        if (pq.traitFilter != null) {
+            objectMatches = filterByTrait(objectMatches, pq.traitFilter);
+        }
 
         // 子表查询：展开为子表对象，并在子表范围内匹配字段
         if (isDetailQuery) {
@@ -625,7 +688,7 @@ public class SkillsService {
                     if (includeFields && fieldPart != null && !fieldPart.isEmpty()) {
                         String cleanFieldPart = removeDetailNavFromField(fieldPart, detail);
                         if (cleanFieldPart != null && !cleanFieldPart.isEmpty()) {
-                            List<FieldMatch> directMatches = matchFields(detail, cleanFieldPart);
+                            List<FieldMatch> directMatches = matchFields(detail, cleanFieldPart, pq.bizTypeFilter);
                             for (FieldMatch fm : directMatches) fm.matchType = "DIRECT";
 
                             List<FieldMatch> chainResults = resolveFieldChain(detail, cleanFieldPart);
@@ -635,12 +698,14 @@ public class SkillsService {
                             for (FieldMatch fm : cascadeResults) fm.matchType = "CASCADE";
 
                             dm.fieldMatches = mergeAndDedup(5, directMatches, chainResults, cascadeResults);
+                            enrichFieldSummaries(dm.objectType, dm.fieldMatches);
                         }
                     }
                     detailMatches.add(dm);
                 }
             }
-            result.objectMatches = detailMatches;
+            sortByScoreWithFieldTiebreak(detailMatches);
+            result.objectMatches = deduplicateAndFilterPublic(detailMatches);
             return result;
         }
 
@@ -648,9 +713,25 @@ public class SkillsService {
         for (ObjectMatch om : objectMatches) {
             fillObjectContext(om);
             if (includeFields) {
-                if (fieldPart != null && !fieldPart.isEmpty()) {
-                    // 三路字段搜索，各自标记 matchType
-                    List<FieldMatch> directMatches = matchFields(om.objectType, fieldPart);
+                if (pq.customizedFieldFilter) {
+                    // "XX的自定义字段" → 列出所有 isCustomizedField=true 的字段
+                    List<FieldMatch> customFields = listCustomizedFields(om.objectType);
+                    if (fieldPart != null && !fieldPart.isEmpty()) {
+                        // "XX的自定义XX字段" → 在自定义字段中再按名称匹配
+                        List<FieldMatch> filtered = new ArrayList<>();
+                        for (FieldMatch fm : customFields) {
+                            if (fm.title != null && fm.title.contains(fieldPart)) {
+                                filtered.add(fm);
+                            } else if (fm.field != null && fm.field.toLowerCase().contains(fieldPart.toLowerCase())) {
+                                filtered.add(fm);
+                            }
+                        }
+                        om.fieldMatches = filtered.isEmpty() ? customFields : filtered;
+                    } else {
+                        om.fieldMatches = customFields;
+                    }
+                } else if (fieldPart != null && !fieldPart.isEmpty()) {
+                    List<FieldMatch> directMatches = matchFields(om.objectType, fieldPart, pq.bizTypeFilter);
                     for (FieldMatch fm : directMatches) fm.matchType = "DIRECT";
 
                     List<FieldMatch> chainResults = resolveFieldChain(om.objectType, fieldPart);
@@ -659,16 +740,59 @@ public class SkillsService {
                     List<FieldMatch> cascadeResults = cascadeFieldSearch(om.objectType, fieldPart, 0, new HashSet<>());
                     for (FieldMatch fm : cascadeResults) fm.matchType = "CASCADE";
 
-                    // 合并去重，限制 top 5
                     om.fieldMatches = mergeAndDedup(5, directMatches, chainResults, cascadeResults);
                 } else {
                     om.fieldMatches = matchFieldsWithFallback(om.objectType, query);
                 }
+                // 填充依赖/回写/枚举摘要（US3/US4）
+                enrichFieldSummaries(om.objectType, om.fieldMatches);
             }
         }
 
-        result.objectMatches = objectMatches;
+        // 按匹配度降序排序（score 相同时用最佳字段匹配分 tiebreak）
+        sortByScoreWithFieldTiebreak(objectMatches);
+        // 过滤公共子表 + objectType 去重
+        result.objectMatches = deduplicateAndFilterPublic(objectMatches);
         return result;
+    }
+
+    /** 过滤公共子表 + objectType 去重（已排序，保留首次出现即最高分的） */
+    private List<ObjectMatch> deduplicateAndFilterPublic(List<ObjectMatch> sorted) {
+        Set<String> seen = new LinkedHashSet<>();
+        List<ObjectMatch> result = new ArrayList<>();
+        for (ObjectMatch om : sorted) {
+            if (isPublicDetail(om.objectType)) continue;
+            if (seen.add(om.objectType)) {
+                result.add(om);
+            }
+        }
+        return result;
+    }
+
+    /** 按有效排序分降序排序（对象 score + 字段匹配直接度加成） */
+    private void sortByScoreWithFieldTiebreak(List<ObjectMatch> matches) {
+        matches.sort((a, b) -> Double.compare(effectiveSortScore(b), effectiveSortScore(a)));
+    }
+
+    /**
+     * 计算用于排序的有效分：对象 score + 匹配直接度加成。
+     * DIRECT 匹配加成 0.1，CHAIN 加成 0.05，CASCADE 无加成。
+     * 确保字段匹配层级越直接的对象排名越靠前。
+     */
+    private double effectiveSortScore(ObjectMatch om) {
+        if (om.fieldMatches == null || om.fieldMatches.isEmpty()) return om.score;
+        int bestLevel = 3; // 0=DIRECT, 1=CHAIN, 2=CASCADE
+        double bestFieldScore = 0;
+        for (FieldMatch fm : om.fieldMatches) {
+            int level = "DIRECT".equals(fm.matchType) ? 0
+                      : "CHAIN".equals(fm.matchType) ? 1 : 2;
+            if (level < bestLevel || (level == bestLevel && fm.score > bestFieldScore)) {
+                bestLevel = level;
+                bestFieldScore = fm.score;
+            }
+        }
+        double bonus = bestLevel == 0 ? 0.1 : bestLevel == 1 ? 0.05 : 0;
+        return om.score + bonus;
     }
 
     /**
@@ -718,8 +842,8 @@ public class SkillsService {
 
     /** 判断是否为公共子表（评论/附件/操作日志等每个单据都有的通用子表） */
     private static boolean isPublicDetail(String objectType) {
-        for (String suffix : PUBLIC_DETAIL_SUFFIXES) {
-            if (objectType.endsWith(suffix)) return true;
+        for (String name : PUBLIC_DETAIL_SUFFIXES) {
+            if (objectType.equals(name) || objectType.endsWith(name)) return true;
         }
         return false;
     }
@@ -1029,7 +1153,25 @@ public class SkillsService {
         } else if (q.contains(t)) {
             baseScore = 200;  // 模糊匹配（查询包含目标）
         } else {
-            return 0;
+            // 公共字符匹配（如 "原始金额" vs "原币金额"）
+            int commonChars = 0;
+            boolean[] used = new boolean[t.length()];
+            for (int i = 0; i < q.length(); i++) {
+                for (int j = 0; j < t.length(); j++) {
+                    if (!used[j] && q.charAt(i) == t.charAt(j)) {
+                        commonChars++;
+                        used[j] = true;
+                        break;
+                    }
+                }
+            }
+            int maxLen = Math.max(q.length(), t.length());
+            double ratio = (double) commonChars / maxLen;
+            if (ratio >= 0.5 && commonChars >= 2) {
+                baseScore = (int) (150 * ratio); // 最多 150 分
+            } else {
+                return 0;
+            }
         }
 
         // 紧凑度修正：匹配长度占比越高分数越高
@@ -1091,25 +1233,38 @@ public class SkillsService {
      * 在指定对象内匹配字段：精确英文名 → 标题精确 → 标题包含，使用 calculateMatchScore 评分
      */
     private List<FieldMatch> matchFields(String objectType, String fieldInput) {
+        return matchFields(objectType, fieldInput, null);
+    }
+
+    private List<FieldMatch> matchFields(String objectType, String fieldInput, String bizTypeFilter) {
         List<FieldMatch> matches = new ArrayList<>();
         if (fieldInput == null || fieldInput.isEmpty()) return matches;
 
         List<BaseappObjectField> fields = analyzerService.getFieldDetailsForObject(objectType);
-        Set<String> matched = new LinkedHashSet<>();
+        // key=fieldName → best FieldMatch（取最高分）
+        Map<String, FieldMatch> bestByField = new LinkedHashMap<>();
 
+        // bizType 精确匹配路径（US2）：score = 0.8
+        if (bizTypeFilter != null) {
+            for (BaseappObjectField f : fields) {
+                String name = canonicalName(f);
+                String bt = f.getBizType();
+                if (bt != null && bt.toLowerCase().contains(bizTypeFilter.toLowerCase())) {
+                    FieldMatch fm = buildFieldMatchObj(f, 0.8, ResolveModels.MatchSource.EXACT_NAME);
+                    bestByField.put(name, fm);
+                }
+            }
+        }
+
+        // 标题/英文名/description 匹配：独立评分，与 bizType 互不阻断
         for (BaseappObjectField f : fields) {
             String name = canonicalName(f);
-            if (matched.contains(name)) continue;
 
-            // 尝试英文名匹配
             int nameScore = calculateMatchScore(fieldInput, name);
-            // 尝试标题匹配
             String title = f.getTitle();
             int titleScore = title != null ? calculateMatchScore(fieldInput, title) : 0;
-            // 尝试 description 匹配（最低优先级）
             String desc = f.getDescription();
             int descScore = desc != null ? calculateMatchScore(fieldInput, desc) : 0;
-            // description 匹配的分数上限为 100（最低优先级）
             if (descScore > 100) descScore = 100;
 
             int bestScore = Math.max(nameScore, Math.max(titleScore, descScore));
@@ -1125,14 +1280,19 @@ public class SkillsService {
                     source = ResolveModels.MatchSource.EXACT_NAME;
                 }
                 double score = bestScore / 1000.0;
-                // isMasterField 加分：主字段 score × 1.2（上限 1.0）
                 if (Boolean.TRUE.equals(f.getIsMasterField())) {
                     score = Math.min(score * 1.2, 1.0);
                 }
-                addFieldMatch(matches, matched, f, score, source);
+                FieldMatch fm = buildFieldMatchObj(f, score, source);
+                // 取较高分
+                FieldMatch existing = bestByField.get(name);
+                if (existing == null || fm.score > existing.score) {
+                    bestByField.put(name, fm);
+                }
             }
         }
 
+        matches.addAll(bestByField.values());
         matches.sort((a, b) -> Double.compare(b.score, a.score));
         return matches;
     }
@@ -1176,12 +1336,30 @@ public class SkillsService {
         return result;
     }
 
+    /** 列出指定对象的所有自定义字段（isCustomizedField=true） */
+    private List<FieldMatch> listCustomizedFields(String objectType) {
+        List<FieldMatch> result = new ArrayList<>();
+        List<BaseappObjectField> fields = analyzerService.getFieldsByObject(objectType);
+        if (fields == null) return result;
+        for (BaseappObjectField f : fields) {
+            if (Boolean.TRUE.equals(f.getIsCustomizedField())) {
+                result.add(buildFieldMatchObj(f, 1.0, ResolveModels.MatchSource.EXACT_NAME));
+            }
+        }
+        return result;
+    }
+
     private void addFieldMatch(List<FieldMatch> matches, Set<String> matched,
                                BaseappObjectField f, double score, ResolveModels.MatchSource source) {
         String name = canonicalName(f);
         if (matched.contains(name)) return;
         matched.add(name);
+        matches.add(buildFieldMatchObj(f, score, source));
+    }
 
+    /** 构建 FieldMatch 对象（不操作集合，纯构建） */
+    private FieldMatch buildFieldMatchObj(BaseappObjectField f, double score, ResolveModels.MatchSource source) {
+        String name = canonicalName(f);
         FieldMatch fm = new FieldMatch();
         fm.field = name;
         fm.title = f.getTitle();
@@ -1191,6 +1369,7 @@ public class SkillsService {
         fm.description = f.getDescription();
         fm.enumType = f.getEnumType();
         fm.isDisabled = f.getIsDisabled();
+        fm.isCustomizedField = f.getIsCustomizedField();
         fm.hasWriteBack = isWriteBackField(f);
         fm.hasTrigger = isTriggerField(f);
 
@@ -1208,13 +1387,74 @@ public class SkillsService {
         } else {
             fm.category = ResolveModels.FieldCategory.BASE;
         }
-
-        matches.add(fm);
+        // 填充枚举值（US3）
+        if (fm.enumType != null && !fm.enumType.isEmpty()) {
+            EnumTypeMeta enumMeta = analyzerService.getEnumTypeIndex().get(fm.enumType);
+            if (enumMeta != null) {
+                fm.enumValues = enumMeta.getValues();
+            }
+        }
+        // 填充依赖摘要（US4）
+        String objectType = f.getObjectType();
+        if (objectType != null) {
+            try {
+                String qualifiedName = objectType + "." + f.getName();
+                // 先直接查当前 objectType，若未命中（子表场景），尝试查主表
+                ExpressionFieldInfo info = analyzerService.getExpressionFieldService()
+                        .getExpressionFieldInfo(objectType);
+                if (info == null) {
+                    // 子表的依赖索引在主表下，通过 detailToMain 反查
+                    String mainObj = analyzerService.getDetailToMain().get(objectType);
+                    if (mainObj != null) {
+                        info = analyzerService.getExpressionFieldService()
+                                .getExpressionFieldInfo(mainObj);
+                    }
+                }
+                if (info != null) {
+                    Map<String, Set<String>> fieldToExpr = info.getFieldToExprFields();
+                    if (fieldToExpr != null) {
+                        Set<String> depBy = fieldToExpr.get(qualifiedName);
+                        if (depBy != null && !depBy.isEmpty()) {
+                            fm.dependedByCount = depBy.size();
+                            fm.dependedByFields = new ArrayList<>(depBy);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // 依赖信息为非关键路径，出错时静默跳过
+            }
+        }
+        return fm;
     }
 
     // =========================================================
     // 内部工具方法
     // =========================================================
+
+    /**
+     * 用已知对象标题做前缀拆分。
+     * 遍历所有对象中文标题，找最长前缀匹配，在标题边界处切出 fieldPart。
+     * 例如 "应收合同收款状态" → "应收合同"(标题) + "收款状态"(fieldPart)
+     */
+    private void splitByKnownTitle(ParsedQuery pq) {
+        String input = pq.objectPart;
+        Map<String, List<String>> titleIndex = analyzerService.getTitleToObjectTypes();
+
+        String bestTitle = null;
+        for (String title : titleIndex.keySet()) {
+            if (title.length() >= input.length()) continue; // 标题必须比输入短才有剩余部分
+            if (input.startsWith(title)) {
+                if (bestTitle == null || title.length() > bestTitle.length()) {
+                    bestTitle = title;
+                }
+            }
+        }
+        if (bestTitle != null) {
+            pq.objectPart = bestTitle;
+            pq.fieldPart = input.substring(bestTitle.length()).trim();
+            if (pq.fieldPart.isEmpty()) pq.fieldPart = null;
+        }
+    }
 
     private String canonicalName(BaseappObjectField f) {
         if (f.getApiName() != null && !f.getApiName().trim().isEmpty()) return f.getApiName().trim();
@@ -1407,5 +1647,374 @@ public class SkillsService {
         public boolean hasWriteBack;
         public boolean hasTrigger;
         public boolean isVirtual;
+    }
+
+    // =========================================================
+    // US1: 对象特性过滤
+    // =========================================================
+
+    /** 检测查询中是否包含特性关键词，设置 traitFilter */
+    private void detectTraitFilter(ParsedQuery pq, String query) {
+        for (Map.Entry<String, String> e : TRAIT_KEYWORDS.entrySet()) {
+            if (query.contains(e.getKey())) {
+                // 如果已被识别为子表查询，不要将"子表"/"明细"当作特性过滤
+                if (pq.isDetailQuery && "isDetail".equals(e.getValue())) {
+                    continue;
+                }
+                // "自定义" 出现在 fieldPart 中（如 "收入确认单的自定义字段"）→ 字段级过滤
+                if ("isCustomizedEntity".equals(e.getValue())
+                        && pq.fieldPart != null && pq.fieldPart.contains(e.getKey())
+                        && pq.objectPart != null && !pq.objectPart.contains(e.getKey())) {
+                    pq.customizedFieldFilter = true;
+                    // 清除 fieldPart 中的 "自定义字段"/"自定义" 关键词
+                    pq.fieldPart = pq.fieldPart.replace("自定义字段", "").replace("自定义", "").trim();
+                    if (pq.fieldPart.isEmpty()) pq.fieldPart = null;
+                    return;
+                }
+                pq.traitFilter = e.getValue();
+                // 从 objectPart 中移除特性关键词，避免干扰对象匹配
+                if (pq.objectPart != null) {
+                    pq.objectPart = pq.objectPart.replace(e.getKey(), "").trim();
+                    if (pq.objectPart.isEmpty()) {
+                        pq.objectPart = "";
+                    }
+                }
+                return;
+            }
+        }
+    }
+
+    /** 按特性标记过滤对象列表；若过滤后为空则扫描所有对象 */
+    private List<ObjectMatch> filterByTrait(List<ObjectMatch> matches, String traitName) {
+        // 先从已匹配对象中过滤
+        Map<String, ObjectTypeMeta> metas = analyzerService.getObjectTypeMetas();
+        if (!matches.isEmpty()) {
+            List<ObjectMatch> filtered = new ArrayList<>();
+            for (ObjectMatch om : matches) {
+                ObjectTypeMeta meta = metas.get(om.objectType);
+                if (meta != null && matchTrait(meta, traitName)) {
+                    fillObjectTraits(om, meta);
+                    filtered.add(om);
+                }
+            }
+            if (!filtered.isEmpty()) return filtered;
+        }
+        // fallback：全量扫描所有对象
+        List<ObjectMatch> allMatches = new ArrayList<>();
+        for (Map.Entry<String, ObjectTypeMeta> e : metas.entrySet()) {
+            if (e.getKey().endsWith("View")) continue;
+            if (!matchTrait(e.getValue(), traitName)) continue;
+            ObjectMatch om = new ObjectMatch();
+            om.objectType = e.getKey();
+            om.title = e.getValue().getTitle() != null ? e.getValue().getTitle() : e.getKey();
+            om.description = e.getValue().getDescription();
+            om.type = e.getValue().getType();
+            om.isDisabled = e.getValue().getIsDisabled();
+            om.score = 0.5;
+            om.matchSource = ResolveModels.MatchSource.TITLE_CONTAINS;
+            fillObjectTraits(om, e.getValue());
+            allMatches.add(om);
+        }
+        return allMatches;
+    }
+
+    /**
+     * 纯 bizType 搜索：遍历所有 bill 对象，返回有该 bizType 字段的对象（限制数量）
+     */
+    private List<ObjectMatch> sampleObjectsByBizType(String bizType, int maxResults) {
+        List<ObjectMatch> results = new ArrayList<>();
+        Map<String, ObjectTypeMeta> metas = analyzerService.getObjectTypeMetas();
+        for (Map.Entry<String, ObjectTypeMeta> e : metas.entrySet()) {
+            if (e.getKey().endsWith("View")) continue;
+            ObjectTypeMeta meta = e.getValue();
+            if (meta.getType() != null && !meta.getType().isEmpty() && !"bill".equals(meta.getType())) continue;
+            // 检查该对象是否有该 bizType 的字段
+            List<BaseappObjectField> fields = analyzerService.getFieldDetailsForObject(e.getKey());
+            boolean hasField = false;
+            for (BaseappObjectField f : fields) {
+                if (bizType.equalsIgnoreCase(f.getBizType())) { hasField = true; break; }
+            }
+            if (!hasField) continue;
+            ObjectMatch om = new ObjectMatch();
+            om.objectType = e.getKey();
+            om.title = meta.getTitle() != null ? meta.getTitle() : e.getKey();
+            om.description = meta.getDescription();
+            om.type = meta.getType();
+            om.isDisabled = meta.getIsDisabled();
+            om.score = 0.5;
+            om.matchSource = ResolveModels.MatchSource.TITLE_CONTAINS;
+            results.add(om);
+            if (results.size() >= maxResults) break;
+        }
+        return results;
+    }
+
+    private boolean matchTrait(ObjectTypeMeta meta, String traitName) {
+        switch (traitName) {
+            case "isTree": return Boolean.TRUE.equals(meta.getIsTree());
+            case "isDetail": return Boolean.TRUE.equals(meta.getIsDetail());
+            case "isSupportChangeLog": return Boolean.TRUE.equals(meta.getIsSupportChangeLog());
+            case "isCustomizedEntity": return Boolean.TRUE.equals(meta.getIsCustomizedEntity());
+            case "isMultiDataVersion": return Boolean.TRUE.equals(meta.getIsMultiDataVersion());
+            default: return false;
+        }
+    }
+
+    /** 将 ObjectTypeMeta 中的特性字段同步到 ObjectMatch */
+    private void fillObjectTraits(ObjectMatch om, ObjectTypeMeta meta) {
+        om.isTree = meta.getIsTree();
+        om.isDetail = meta.getIsDetail();
+        om.isSupportChangeLog = meta.getIsSupportChangeLog();
+        om.isCustomizedEntity = meta.getIsCustomizedEntity();
+        om.isMultiDataVersion = meta.getIsMultiDataVersion();
+        om.appName = meta.getAppName();
+    }
+
+    // =========================================================
+    // US2: bizType 关键词检测
+    // =========================================================
+
+    /**
+     * 检测是否为 bizType 过滤意图。
+     * 先检查 fieldPart，再检查 objectPart（兼容纯 "金额字段" 无分隔符的场景）。
+     * 只在内容几乎等同于 bizType 关键词时触发（如 "金额"/"金额字段"），
+     * 不对 "收款金额" 这类包含业务语义前缀的情况触发。
+     */
+    private void detectBizTypeFilter(ParsedQuery pq) {
+        // 优先从 fieldPart 检测
+        String target = pq.fieldPart;
+        // 如果 fieldPart 为空，从 objectPart 检测（纯 "金额字段" 场景）
+        if (target == null && pq.objectPart != null) {
+            target = pq.objectPart;
+        }
+        if (target == null) return;
+        for (Map.Entry<String, String> e : BIZTYPE_KEYWORDS.entrySet()) {
+            String kw = e.getKey();
+            if (target.contains(kw)) {
+                // 去掉关键词和通用修饰词后，看是否还有实质性内容
+                String remainder = target.replace(kw, "").replace("字段", "").replace("类型", "").trim();
+                if (remainder.isEmpty()) {
+                    pq.bizTypeFilter = e.getValue();
+                    // 纯 bizType 查询时清空 objectPart，后续走全量对象采样
+                    if (pq.fieldPart == null) {
+                        pq.objectPart = "";
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    // =========================================================
+    // US5: 反向引用查询
+    // =========================================================
+
+    /** 检测查询中是否包含反向引用查询关键词，提取目标对象名 */
+    private void detectReverseRefQuery(ParsedQuery pq, String query) {
+        for (String prefix : REVERSE_REF_PREFIXES) {
+            if (query.contains(prefix)) {
+                String remainder = query.substring(query.indexOf(prefix) + prefix.length()).trim();
+                if (!remainder.isEmpty()) {
+                    pq.reverseRefTarget = remainder;
+                    return;
+                }
+            }
+        }
+    }
+
+    /** 通过 EntityReferenceService 查询反向引用，构建 ObjectMatch 列表 */
+    private List<ObjectMatch> matchReverseReferences(String targetInput) {
+        // 先把用户输入解析为实际的 objectType
+        List<ObjectMatch> targetMatches = matchObjects(targetInput, 1, false);
+        String targetObjectType;
+        if (!targetMatches.isEmpty()) {
+            targetObjectType = targetMatches.get(0).objectType;
+        } else {
+            // 无法匹配到对象，直接用输入作为 objectType 尝试
+            targetObjectType = targetInput;
+        }
+
+        Map<String, Map<String, Boolean>> referRelations =
+                analyzerService.getEntityReferenceService().getReferRelations(targetObjectType);
+        if (referRelations.isEmpty()) return Collections.emptyList();
+
+        Map<String, ObjectTypeMeta> metas = analyzerService.getObjectTypeMetas();
+        List<ObjectMatch> results = new ArrayList<>();
+        for (Map.Entry<String, Map<String, Boolean>> entry : referRelations.entrySet()) {
+            String refObjectType = entry.getKey();
+            if (refObjectType.endsWith("View")) continue;
+            ObjectMatch om = new ObjectMatch();
+            om.objectType = refObjectType;
+            ObjectTypeMeta meta = metas.get(refObjectType);
+            if (meta != null) {
+                om.title = meta.getTitle() != null ? meta.getTitle() : refObjectType;
+                om.description = meta.getDescription();
+                om.type = meta.getType();
+                om.isDisabled = meta.getIsDisabled();
+            } else {
+                om.title = analyzerService.getObjectTitles().getOrDefault(refObjectType, refObjectType);
+            }
+            om.score = 0.8;
+            om.matchSource = ResolveModels.MatchSource.EXACT_NAME;
+            // 填充引用字段信息到 fieldMatches
+            List<FieldMatch> refFields = new ArrayList<>();
+            for (String fkField : entry.getValue().keySet()) {
+                FieldMatch fm = new FieldMatch();
+                fm.field = fkField;
+                fm.score = 0.8;
+                fm.refPath = fkField + " → " + targetObjectType;
+                fm.matchType = "REVERSE_REF";
+                refFields.add(fm);
+            }
+            om.fieldMatches = refFields;
+            fillObjectContext(om);
+            results.add(om);
+        }
+        results.sort((a, b) -> a.objectType.compareTo(b.objectType));
+        return results;
+    }
+
+    // =========================================================
+    // US3: 枚举搜索
+    // =========================================================
+
+    /** 匹配枚举类型：英文名精确 → 标题精确 → 标题包含 */
+    private List<EnumMatch> matchEnums(String query) {
+        List<EnumMatch> matches = new ArrayList<>();
+        if (query == null || query.isEmpty()) return matches;
+
+        Map<String, EnumTypeMeta> typeIndex = analyzerService.getEnumTypeIndex();
+        Map<String, List<String>> titleIndex = analyzerService.getEnumTitleIndex();
+        Map<String, List<String>> fieldIndex = analyzerService.getEnumFieldIndex();
+        Set<String> matched = new LinkedHashSet<>();
+
+        // 1. 英文名精确匹配
+        EnumTypeMeta exact = typeIndex.get(query);
+        if (exact != null) {
+            addEnumMatch(matches, matched, exact, 1.0, ResolveModels.MatchSource.EXACT_NAME, fieldIndex);
+        }
+
+        // 2. 标题精确匹配
+        List<String> titleExact = titleIndex.get(query);
+        if (titleExact != null) {
+            for (String enumName : titleExact) {
+                EnumTypeMeta meta = typeIndex.get(enumName);
+                if (meta != null) {
+                    addEnumMatch(matches, matched, meta, 0.9, ResolveModels.MatchSource.TITLE_EXACT, fieldIndex);
+                }
+            }
+        }
+
+        // 3. 标题包含匹配
+        for (Map.Entry<String, EnumTypeMeta> e : typeIndex.entrySet()) {
+            if (matched.contains(e.getKey())) continue;
+            EnumTypeMeta meta = e.getValue();
+            String title = meta.getTitle();
+            if (title != null && (title.contains(query) || query.contains(title))) {
+                addEnumMatch(matches, matched, meta, 0.6, ResolveModels.MatchSource.TITLE_CONTAINS, fieldIndex);
+            }
+            // 英文名子串
+            if (e.getKey().toLowerCase().contains(query.toLowerCase())) {
+                addEnumMatch(matches, matched, meta, 0.5, ResolveModels.MatchSource.EXACT_NAME, fieldIndex);
+            }
+        }
+
+        // 4. 标题模糊匹配（公共字符评分兜底）
+        if (matches.size() < 3 && query.length() >= 2) {
+            for (Map.Entry<String, EnumTypeMeta> e : typeIndex.entrySet()) {
+                if (matched.contains(e.getKey())) continue;
+                EnumTypeMeta meta = e.getValue();
+                String title = meta.getTitle();
+                if (title != null) {
+                    int score = calculateMatchScore(query, title);
+                    if (score >= 100) {
+                        addEnumMatch(matches, matched, meta, score / 1000.0 * 0.5,
+                                ResolveModels.MatchSource.TITLE_CONTAINS, fieldIndex);
+                    }
+                }
+            }
+        }
+
+        matches.sort((a, b) -> Double.compare(b.getScore(), a.getScore()));
+        if (matches.size() > 10) matches = new ArrayList<>(matches.subList(0, 10));
+        return matches;
+    }
+
+    private void addEnumMatch(List<EnumMatch> matches, Set<String> matched,
+                              EnumTypeMeta meta, double score, ResolveModels.MatchSource source,
+                              Map<String, List<String>> fieldIndex) {
+        if (matched.contains(meta.getName())) return;
+        matched.add(meta.getName());
+        EnumMatch em = new EnumMatch();
+        em.setEnumType(meta.getName());
+        em.setTitle(meta.getTitle());
+        em.setDescription(meta.getDescription());
+        em.setScore(score);
+        em.setMatchSource(source);
+        em.setValues(meta.getValues());
+        List<String> usedBy = fieldIndex.get(meta.getName());
+        if (usedBy != null) em.setUsedByFields(usedBy);
+        matches.add(em);
+    }
+
+    // =========================================================
+    // US4: 表达式依赖/回写摘要填充
+    // =========================================================
+
+    /** 为字段匹配结果填充依赖摘要和回写来源 */
+    private void enrichFieldSummaries(String objectType, List<FieldMatch> fieldMatches) {
+        if (fieldMatches == null) return;
+        for (FieldMatch fm : fieldMatches) {
+            // 依赖摘要
+            try {
+                ExpressionFieldInfo info = analyzerService.getExpressionFieldService()
+                        .getExpressionFieldInfo(objectType);
+                if (info != null) {
+                    Map<String, Set<String>> fieldToExpr = info.getFieldToExprFields();
+                    if (fieldToExpr != null) {
+                        Set<String> depFields = fieldToExpr.get(fm.field);
+                        if (depFields != null && !depFields.isEmpty()) {
+                            fm.dependedByCount = depFields.size();
+                            fm.dependedByFields = new ArrayList<>(depFields);
+                            if (fm.dependedByFields.size() > 5) {
+                                fm.dependedByFields = fm.dependedByFields.subList(0, 5);
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // 依赖图未就绪，跳过
+            }
+            // 回写来源摘要
+            try {
+                List<BaseappObjectField> objFields = analyzerService.getFieldDetailsForObject(objectType);
+                for (BaseappObjectField bf : objFields) {
+                    String name = canonicalName(bf);
+                    if (name.equals(fm.field) && bf.getWriteBackExpr() != null && !bf.getWriteBackExpr().isEmpty()) {
+                        fm.writeBackSource = summarizeWriteBack(bf.getWriteBackExpr());
+                        break;
+                    }
+                }
+            } catch (Exception e) {
+                // 跳过
+            }
+        }
+    }
+
+    /** 从 writeBackExpr JSON 提取简要摘要 */
+    private String summarizeWriteBack(String wbExpr) {
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(wbExpr);
+            String srcObj = root.path("srcObjectType").asText(null);
+            String expr = root.path("expression").asText(null);
+            if (srcObj != null && expr != null) {
+                return srcObj + "." + expr;
+            }
+            if (expr != null) return expr;
+        } catch (Exception e) {
+            // 非 JSON 格式的 writeBackExpr
+        }
+        if (wbExpr.length() > 60) return wbExpr.substring(0, 60) + "...";
+        return wbExpr;
     }
 }

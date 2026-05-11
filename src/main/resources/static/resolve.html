@@ -176,7 +176,10 @@
         <!-- JSON 原始响应 -->
         <el-collapse v-if="result" class="json-toggle">
             <el-collapse-item title="查看原始 JSON">
-                <pre style="font-size:11px;background:#1e293b;color:#e2e8f0;padding:16px;border-radius:8px;overflow-x:auto;max-height:400px;">{{ JSON.stringify(result, null, 2) }}</pre>
+                <div style="position:relative;">
+                    <el-button size="small" style="position:absolute;top:8px;right:8px;z-index:1;" @click="copyJson">📋 复制</el-button>
+                    <pre style="font-size:11px;background:#1e293b;color:#e2e8f0;padding:16px;border-radius:8px;overflow-x:auto;max-height:400px;">{{ JSON.stringify(result, null, 2) }}</pre>
+                </div>
             </el-collapse-item>
         </el-collapse>
     </div>
@@ -252,7 +255,16 @@ const app = createApp({
             }
         };
 
-        return { query, loading, result, examples, scoreTagClass, sourceLabel, categoryLabel, matchTypeLabel, matchTypeClass, doResolve };
+        const copyJson = async () => {
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(result.value, null, 2));
+                ElementPlus.ElMessage.success('已复制到剪贴板');
+            } catch (e) {
+                ElementPlus.ElMessage.error('复制失败: ' + e.message);
+            }
+        };
+
+        return { query, loading, result, examples, scoreTagClass, sourceLabel, categoryLabel, matchTypeLabel, matchTypeClass, doResolve, copyJson };
     }
 });
 app.use(ElementPlus);

@@ -1,3 +1,4 @@
 {
-  "feature_directory": "specs/005-enhance-metadata-resolve"
+  "feature_directory": "specs/006-enhance-metadata-resolve/bugs/001-fix-enum-field-index",
+  "parent_iteration": "specs/006-enhance-metadata-resolve"
 }

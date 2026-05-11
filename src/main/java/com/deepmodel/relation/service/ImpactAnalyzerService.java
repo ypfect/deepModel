@@ -4,6 +4,8 @@ import com.deepmodel.relation.dao.BaseappObjectFieldMapper;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.GraphModels;
 import com.deepmodel.relation.model.ObjectTypeMeta;
+import com.deepmodel.relation.model.EnumTypeMeta;
+import com.deepmodel.relation.model.EnumValueMeta;
 import com.deepmodel.relation.model.WriteBackExpr;
 import com.deepmodel.relation.util.ExprUtils;
 import com.fasterxml.jackson.core.JsonParser;
@@ -50,6 +52,12 @@ public class ImpactAnalyzerService {
     private final Map<String, List<String>> titleToObjectTypes = new ConcurrentHashMap<>();
     // 枚举定义缓存: enumName -> Set<validValue>
     private final Map<String, Set<String>> enumValueMap = new ConcurrentHashMap<>();
+    // 枚举类型索引: enumName -> EnumTypeMeta（含 title 和枚举值列表）
+    private final Map<String, EnumTypeMeta> enumTypeIndex = new ConcurrentHashMap<>();
+    // 枚举标题反向索引: enumTitle -> List<enumName>
+    private final Map<String, List<String>> enumTitleIndex = new ConcurrentHashMap<>();
+    // 枚举字段索引: enumName -> List<objectType.fieldName>
+    private final Map<String, List<String>> enumFieldIndex = new ConcurrentHashMap<>();
     private final Map<String, String> objectLabels = new HashMap<>(); // objectName -> 描述标签
 
     // bill 类型对象集合（来自 baseapp_object_type.type='bill'）
@@ -243,9 +251,15 @@ public class ImpactAnalyzerService {
         long tEnumEnd = System.currentTimeMillis();
 
         // 从元数据 JSON 补充字段级属性（description/enumType/isDisabled/isMasterField）
+        // 同时提取对象级特性到 ObjectTypeMeta
         long tEnrichStart = System.currentTimeMillis();
         enrichFieldMetadata();
         long tEnrichEnd = System.currentTimeMillis();
+
+        // 构建枚举字段索引（需在 enrichFieldMetadata 之后，因为 enumType 在此步骤补充）
+        long tEnumFieldStart = System.currentTimeMillis();
+        buildEnumFieldIndex();
+        long tEnumFieldEnd = System.currentTimeMillis();
 
         // 清除分析结果缓存（因为数据源已更新）
         long tCacheStart = System.currentTimeMillis();
@@ -407,6 +421,8 @@ public class ImpactAnalyzerService {
      */
     private void loadEnumDefinitions() {
         enumValueMap.clear();
+        enumTypeIndex.clear();
+        enumTitleIndex.clear();
         try {
             List<String> enumJsonList = mapper.selectEnumDefinitions();
             for (String json : enumJsonList) {
@@ -415,24 +431,42 @@ public class ImpactAnalyzerService {
                     String enumName = root.path("name").asText();
                     if (enumName == null || enumName.isEmpty()) continue;
 
+                    String enumTitle = root.path("title").asText(null);
+                    String enumDesc = root.path("description").asText(null);
+
                     JsonNode valueDefs = root.path("enumValueDefs");
                     if (!valueDefs.isArray()) continue;
 
                     Set<String> values = new HashSet<>();
+                    List<EnumValueMeta> valueMetas = new ArrayList<>();
                     for (JsonNode def : valueDefs) {
                         String val = def.path("value").asText();
                         if (val != null && !val.isEmpty()) {
                             values.add(val);
+                            valueMetas.add(new EnumValueMeta(
+                                    val,
+                                    def.path("title").asText(null),
+                                    def.has("ordinal") ? def.path("ordinal").asInt() : null,
+                                    def.has("isDisabled") ? def.path("isDisabled").asBoolean(false) : null
+                            ));
                         }
                     }
                     if (!values.isEmpty()) {
                         enumValueMap.put(enumName, values);
                     }
+                    // 构建 EnumTypeMeta
+                    EnumTypeMeta meta = new EnumTypeMeta(enumName, enumTitle, enumDesc);
+                    meta.setValues(valueMetas);
+                    enumTypeIndex.put(enumName, meta);
+                    // 标题反向索引
+                    if (enumTitle != null && !enumTitle.isEmpty()) {
+                        enumTitleIndex.computeIfAbsent(enumTitle, k -> new ArrayList<>()).add(enumName);
+                    }
                 } catch (Exception e) {
                     log.debug("解析枚举定义 JSON 失败，跳过: {}", e.getMessage());
                 }
             }
-            log.info("Loaded {} enum definitions", enumValueMap.size());
+            log.info("Loaded {} enum definitions, {} enum type metas", enumValueMap.size(), enumTypeIndex.size());
         } catch (Exception e) {
             log.warn("Failed to load enum definitions from DB", e);
         }
@@ -445,13 +479,93 @@ public class ImpactAnalyzerService {
         return enumValueMap;
     }
 
+    /** 获取枚举类型索引（resolve 枚举搜索用） */
+    public Map<String, EnumTypeMeta> getEnumTypeIndex() {
+        return enumTypeIndex;
+    }
+
+    /** 获取枚举标题反向索引（中文标题 → 枚举名列表） */
+    public Map<String, List<String>> getEnumTitleIndex() {
+        return enumTitleIndex;
+    }
+
+    /** 获取枚举字段索引（枚举名 → 使用该枚举的字段列表） */
+    public Map<String, List<String>> getEnumFieldIndex() {
+        return enumFieldIndex;
+    }
+
+    /** 获取 ExpressionFieldService（resolve 依赖摘要用） */
+    public ExpressionFieldService getExpressionFieldService() {
+        return expressionFieldService;
+    }
+
+    /** 获取 EntityReferenceService（resolve 反向引用查询用） */
+    public EntityReferenceService getEntityReferenceService() {
+        return entityReferenceService;
+    }
+
     /**
      * 从 baseapp_system_metadata 的 entity content JSON 中解析字段级属性，
      * 补充到已加载的 BaseappObjectField 上（description/enumType/isDisabled/isMasterField）。
      */
+    /**
+     * 从 content JSON 提取对象级特性到 ObjectTypeMeta。
+     * 在 enrichFieldMetadata 之前调用，因为需要 content JSON 的根节点属性。
+     */
+    private void enrichObjectTraits(List<Map<String, Object>> metaList) {
+        int traitCount = 0;
+        for (Map<String, Object> meta : metaList) {
+            String entityName = (String) meta.get("name");
+            String content = (String) meta.get("content");
+            if (entityName == null || content == null) continue;
+
+            ObjectTypeMeta otm = objectTypeMetas.get(entityName);
+            if (otm == null) continue;
+
+            try {
+                JsonNode root = objectMapper.readTree(content);
+                // isTree/isDetail/isSupportChangeLog/isCustomizedEntity/isMultiDataVersion
+                // 已从 baseapp_object_type 表直读（selectObjectTitles），此处仅补充表中没有的字段
+                if (root.has("businessModuleId")) otm.setBusinessModuleId(root.path("businessModuleId").asText(null));
+                traitCount++;
+            } catch (Exception e) {
+                log.debug("解析对象 {} 特性失败: {}", entityName, e.getMessage());
+            }
+        }
+        log.info("Enriched {} object type traits from content JSON", traitCount);
+    }
+
+    /**
+     * 构建 enumFieldIndex：遍历所有字段，将有 enumType 的字段注册到枚举字段索引。
+     */
+    private void buildEnumFieldIndex() {
+        enumFieldIndex.clear();
+        for (BaseappObjectField f : allRows) {
+            String enumType = f.getEnumType();
+            if (enumType != null && !enumType.isEmpty()) {
+                String fieldRef = f.getObjectType() + "." + f.getName();
+                enumFieldIndex.computeIfAbsent(enumType, k -> new ArrayList<>()).add(fieldRef);
+            }
+        }
+        log.info("Built enum field index with {} enum types", enumFieldIndex.size());
+    }
+
     private void enrichFieldMetadata() {
         try {
+            // 合并标准元数据 + 自定义元数据
             List<Map<String, Object>> metaList = mapper.selectEntityMetadataContents();
+            try {
+                List<Map<String, Object>> customizedList = mapper.selectCustomizedMetadataContents();
+                if (customizedList != null) {
+                    metaList.addAll(customizedList);
+                    log.info("Loaded {} customized metadata entries", customizedList.size());
+                }
+            } catch (Exception e) {
+                log.warn("Failed to load customized metadata (table may not exist): {}", e.getMessage());
+            }
+
+            // 先提取对象级特性（复用同一份 content JSON）
+            enrichObjectTraits(metaList);
             int enrichedCount = 0;
             for (Map<String, Object> meta : metaList) {
                 String entityName = (String) meta.get("name");
@@ -464,8 +578,8 @@ public class ImpactAnalyzerService {
                 // 构建 apiName → BaseappObjectField 的快速查找
                 Map<String, BaseappObjectField> fieldMap = new HashMap<>();
                 for (BaseappObjectField f : fields) {
-                    String key = f.getApiName() != null ? f.getApiName() : f.getName();
-                    if (key != null) fieldMap.put(key, f);
+                    String key = (f.getApiName() != null && !f.getApiName().isEmpty()) ? f.getApiName() : f.getName();
+                    if (key != null && !key.isEmpty()) fieldMap.put(key, f);
                 }
 
                 try {
@@ -483,11 +597,15 @@ public class ImpactAnalyzerService {
 
                         // 补充 description
                         String desc = fn.path("description").asText(null);
+                        if (desc == null || desc.isEmpty()) desc = fn.path("desc").asText(null);
                         if (desc != null && !desc.isEmpty() && bf.getDescription() == null) {
                             bf.setDescription(desc);
                         }
-                        // 补充 enumType
+                        // 补充 enumType（直接属性或 properties 子节点）
                         String enumType = fn.path("enumType").asText(null);
+                        if (enumType == null || enumType.isEmpty()) {
+                            enumType = fn.path("properties").path("enumType").asText(null);
+                        }
                         if (enumType != null && !enumType.isEmpty() && bf.getEnumType() == null) {
                             bf.setEnumType(enumType);
                         }
@@ -505,7 +623,9 @@ public class ImpactAnalyzerService {
                     log.debug("解析实体 {} 元数据 JSON 失败: {}", entityName, e.getMessage());
                 }
             }
-            log.info("Enriched {} field metadata entries from entity content JSON", enrichedCount);
+            // 统计 enumType 补充情况
+            long enumCount = allRows.stream().filter(f -> f.getEnumType() != null).count();
+            log.info("Enriched {} field metadata entries from entity content JSON, {} fields with enumType", enrichedCount, enumCount);
         } catch (Exception e) {
             log.warn("Failed to enrich field metadata from system_metadata", e);
         }
@@ -837,6 +957,13 @@ public class ImpactAnalyzerService {
      */
     public Map<String, String> getObjectTitles() {
         return Collections.unmodifiableMap(objectTitles);
+    }
+
+    /**
+     * 获取指定对象的字段列表。
+     */
+    public List<BaseappObjectField> getFieldsByObject(String objectType) {
+        return rowsByObject.getOrDefault(objectType, Collections.emptyList());
     }
 
     /**

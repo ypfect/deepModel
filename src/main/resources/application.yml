@@ -22,7 +22,7 @@ spring:
       password: ypfect93
   datasource:
 #    url: jdbc:postgresql://localhost:5432/testapp
-    url: jdbc:postgresql://postgres.test-tx-16.e7link.com:5432/tenant-public
+    url: jdbc:postgresql://postgres.test-tx-16.e7link.com:5432/tenant711FNX50G6V0009
 #    url: jdbc:postgresql://postgres.release-tx-1.e7link.com:5432/tenant-public
     password: stet44{czars
 #    password: 123

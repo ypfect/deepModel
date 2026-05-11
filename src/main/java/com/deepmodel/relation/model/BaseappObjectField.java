@@ -28,6 +28,7 @@ public class BaseappObjectField {
     private String enumType;
     private Boolean isDisabled;
     private Boolean isMasterField;
+    private Boolean isCustomizedField;
 
     public String getId() {
         return id;
@@ -179,5 +180,13 @@ public class BaseappObjectField {
 
     public void setIsMasterField(Boolean isMasterField) {
         this.isMasterField = isMasterField;
+    }
+
+    public Boolean getIsCustomizedField() {
+        return isCustomizedField;
+    }
+
+    public void setIsCustomizedField(Boolean isCustomizedField) {
+        this.isCustomizedField = isCustomizedField;
     }
 }

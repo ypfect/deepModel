@@ -1,8 +1,6 @@
 package com.deepmodel.relation.service;
 
-import com.deepmodel.relation.model.BaseappObjectField;
-import com.deepmodel.relation.model.ObjectTypeMeta;
-import com.deepmodel.relation.model.ResolveModels;
+import com.deepmodel.relation.model.*;
 import com.deepmodel.relation.model.ResolveModels.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -105,6 +103,53 @@ class SkillsServiceResolveTest {
                 buildField("ArContractSubjectMatterItem", "quantity", "数量", "Qty", null, null, null)
         );
         when(analyzerService.getFieldDetailsForObject("ArContractSubjectMatterItem")).thenReturn(smiFields);
+
+        // US1: 对象特性字段 mock
+        ObjectTypeMeta arMeta = metas.get("ArContract");
+        arMeta.setIsTree(false);
+        arMeta.setIsSupportChangeLog(true); // 应收合同支持变更单
+        ObjectTypeMeta projectMeta = metas.get("Project");
+        projectMeta.setIsTree(true); // 项目是树型对象
+
+        // US3: 枚举索引 mock
+        EnumTypeMeta approveStatusEnum = new EnumTypeMeta("ApproveStatus", "审批状态", "单据审批状态枚举");
+        approveStatusEnum.setValues(Arrays.asList(
+                new EnumValueMeta("draft", "草稿", 1, false),
+                new EnumValueMeta("approving", "审批中", 2, false),
+                new EnumValueMeta("approved", "已审批", 3, false)
+        ));
+        Map<String, EnumTypeMeta> enumTypeIdx = new HashMap<>();
+        enumTypeIdx.put("ApproveStatus", approveStatusEnum);
+        when(analyzerService.getEnumTypeIndex()).thenReturn(enumTypeIdx);
+
+        Map<String, List<String>> enumTitleIdx = new HashMap<>();
+        enumTitleIdx.put("审批状态", Collections.singletonList("ApproveStatus"));
+        when(analyzerService.getEnumTitleIndex()).thenReturn(enumTitleIdx);
+
+        Map<String, List<String>> enumFieldIdx = new HashMap<>();
+        enumFieldIdx.put("ApproveStatus", Arrays.asList("ArContract.approveStatusId", "ApContract.approveStatusId"));
+        when(analyzerService.getEnumFieldIndex()).thenReturn(enumFieldIdx);
+
+        // US4: ExpressionFieldService mock
+        ExpressionFieldService exprFieldService = mock(ExpressionFieldService.class);
+        when(analyzerService.getExpressionFieldService()).thenReturn(exprFieldService);
+        ExpressionFieldInfo arExprInfo = new ExpressionFieldInfo();
+        Map<String, Set<String>> fieldToExpr = new HashMap<>();
+        fieldToExpr.put("amount", new HashSet<>(Arrays.asList("taxAmount", "amountWithoutTax")));
+        arExprInfo.setFieldToExprFields(fieldToExpr);
+        when(exprFieldService.getExpressionFieldInfo("ArContract")).thenReturn(arExprInfo);
+
+        // US5: EntityReferenceService mock
+        EntityReferenceService entityRefService = mock(EntityReferenceService.class);
+        when(analyzerService.getEntityReferenceService()).thenReturn(entityRefService);
+        Map<String, Map<String, Boolean>> customerRefs = new HashMap<>();
+        Map<String, Boolean> arContractFks = new LinkedHashMap<>();
+        arContractFks.put("customerId", false);
+        customerRefs.put("ArContract", arContractFks);
+        Map<String, Boolean> projectFks = new LinkedHashMap<>();
+        projectFks.put("customerId", false);
+        customerRefs.put("Project", projectFks);
+        when(entityRefService.getReferRelations("Customer")).thenReturn(customerRefs);
     }
 
     // ======== calculateMatchScore 5 档评分 ========
@@ -553,6 +598,175 @@ class SkillsServiceResolveTest {
                     .filter(f -> "bizField".equals(f.field))
                     .findFirst();
             assertTrue(fm.get().score <= 0.12, "description 匹配 score 应 <= 0.12: " + fm.get().score);
+        }
+    }
+
+    // ======== T016: US1 对象特性筛选 ========
+
+    @Nested
+    class TraitFilterTest {
+
+        @Test
+        void resolve_树型对象_返回isTree为true的对象() {
+            ResolveResult result = skillsService.resolve("树型对象", 20, false);
+
+            assertFalse(result.objectMatches.isEmpty(), "应返回树型对象");
+            boolean allTree = result.objectMatches.stream()
+                    .allMatch(om -> Boolean.TRUE.equals(om.isTree));
+            assertTrue(allTree, "所有结果应为 isTree=true");
+            boolean hasProject = result.objectMatches.stream()
+                    .anyMatch(om -> "Project".equals(om.objectType));
+            assertTrue(hasProject, "Project 应在结果中（isTree=true）");
+        }
+
+        @Test
+        void resolve_变更单_返回isSupportChangeLog为true的对象() {
+            ResolveResult result = skillsService.resolve("变更单", 20, false);
+
+            assertFalse(result.objectMatches.isEmpty(), "应返回支持变更单的对象");
+            boolean allChangeLog = result.objectMatches.stream()
+                    .allMatch(om -> Boolean.TRUE.equals(om.isSupportChangeLog));
+            assertTrue(allChangeLog, "所有结果应为 isSupportChangeLog=true");
+        }
+    }
+
+    // ======== T020: US2 bizType 维度字段匹配 ========
+
+    @Nested
+    class BizTypeFilterTest {
+
+        @Test
+        void resolve_金额字段_返回bizTypeAmount的字段在首位() {
+            ResolveResult result = skillsService.resolve("ArContract的金额字段", 5, true);
+
+            assertFalse(result.objectMatches.isEmpty());
+            ObjectMatch top = result.objectMatches.get(0);
+            assertFalse(top.fieldMatches.isEmpty(), "应返回字段匹配结果");
+            // 第一个字段应为 bizType 含 Amount 的
+            FieldMatch first = top.fieldMatches.get(0);
+            assertTrue(first.bizType != null && first.bizType.toLowerCase().contains("amount"),
+                    "首个字段的 bizType 应包含 amount, 实际: " + first.bizType);
+        }
+    }
+
+    // ======== T024: US3 枚举类型搜索 ========
+
+    @Nested
+    class EnumSearchTest {
+
+        @Test
+        void resolve_审批状态_返回enumMatches() {
+            ResolveResult result = skillsService.resolve("审批状态", 5, false);
+
+            assertNotNull(result.enumMatches, "enumMatches 不应为 null");
+            assertFalse(result.enumMatches.isEmpty(), "应返回枚举匹配结果");
+            EnumMatch top = result.enumMatches.get(0);
+            assertEquals("ApproveStatus", top.getEnumType());
+            assertEquals("审批状态", top.getTitle());
+        }
+
+        @Test
+        void resolve_ApproveStatus英文名_精确匹配() {
+            ResolveResult result = skillsService.resolve("ApproveStatus", 5, false);
+
+            assertFalse(result.enumMatches.isEmpty());
+            EnumMatch top = result.enumMatches.get(0);
+            assertEquals("ApproveStatus", top.getEnumType());
+            assertEquals(ResolveModels.MatchSource.EXACT_NAME, top.getMatchSource());
+            assertEquals(1.0, top.getScore(), 0.01);
+        }
+
+        @Test
+        void resolve_枚举搜索_包含usedByFields() {
+            ResolveResult result = skillsService.resolve("审批状态", 5, false);
+
+            EnumMatch top = result.enumMatches.get(0);
+            assertNotNull(top.getUsedByFields());
+            assertFalse(top.getUsedByFields().isEmpty());
+            assertTrue(top.getUsedByFields().contains("ArContract.approveStatusId"));
+        }
+
+        @Test
+        void resolve_枚举搜索_包含枚举值列表() {
+            ResolveResult result = skillsService.resolve("ApproveStatus", 5, false);
+
+            EnumMatch top = result.enumMatches.get(0);
+            assertNotNull(top.getValues());
+            assertEquals(3, top.getValues().size());
+            assertTrue(top.getValues().stream().anyMatch(v -> "approved".equals(v.getValue())));
+        }
+    }
+
+    // ======== T027: US4 表达式依赖/回写摘要 ========
+
+    @Nested
+    class ExpressionSummaryTest {
+
+        @Test
+        void resolve_有表达式依赖的字段_返回dependedByCount() {
+            ResolveResult result = skillsService.resolve("ArContract的金额", 5, true);
+
+            ObjectMatch top = result.objectMatches.get(0);
+            Optional<FieldMatch> amountFm = top.fieldMatches.stream()
+                    .filter(fm -> "amount".equals(fm.field))
+                    .findFirst();
+            assertTrue(amountFm.isPresent());
+            assertNotNull(amountFm.get().dependedByCount, "amount 应有 dependedByCount");
+            assertTrue(amountFm.get().dependedByCount > 0, "amount 应被其他表达式字段依赖");
+        }
+
+        @Test
+        void resolve_有writeBackExpr的字段_返回writeBackSource() {
+            ResolveResult result = skillsService.resolve("应收合同子表的收款金额", 5, true);
+
+            assertFalse(result.objectMatches.isEmpty());
+            ObjectMatch detail = result.objectMatches.get(0);
+            Optional<FieldMatch> receiptFm = detail.fieldMatches.stream()
+                    .filter(fm -> "receiptAmount".equals(fm.field))
+                    .findFirst();
+            assertTrue(receiptFm.isPresent());
+            assertNotNull(receiptFm.get().writeBackSource, "receiptAmount 应有 writeBackSource");
+            assertTrue(receiptFm.get().writeBackSource.contains("PaymentItem"),
+                    "writeBackSource 应包含 PaymentItem");
+        }
+    }
+
+    // ======== T031: US5 反向引用查询 ========
+
+    @Nested
+    class ReverseRefQueryTest {
+
+        @Test
+        void resolve_哪些对象引用了Customer_返回引用方对象() {
+            ResolveResult result = skillsService.resolve("哪些对象引用了Customer", 5, true);
+
+            assertFalse(result.objectMatches.isEmpty(), "应返回引用 Customer 的对象");
+            boolean hasArContract = result.objectMatches.stream()
+                    .anyMatch(om -> "ArContract".equals(om.objectType));
+            assertTrue(hasArContract, "ArContract 引用了 Customer，应在结果中");
+        }
+
+        @Test
+        void resolve_反向引用_结果包含FK字段() {
+            ResolveResult result = skillsService.resolve("哪些对象引用了Customer", 5, true);
+
+            ObjectMatch arMatch = result.objectMatches.stream()
+                    .filter(om -> "ArContract".equals(om.objectType))
+                    .findFirst().orElse(null);
+            assertNotNull(arMatch);
+            assertFalse(arMatch.fieldMatches.isEmpty(), "应包含引用字段");
+            boolean hasCustomerId = arMatch.fieldMatches.stream()
+                    .anyMatch(fm -> "customerId".equals(fm.field));
+            assertTrue(hasCustomerId, "应包含 customerId FK 字段");
+        }
+
+        @Test
+        void resolve_反向引用_字段matchType为REVERSE_REF() {
+            ResolveResult result = skillsService.resolve("谁引用了Customer", 5, true);
+
+            assertFalse(result.objectMatches.isEmpty());
+            FieldMatch fm = result.objectMatches.get(0).fieldMatches.get(0);
+            assertEquals("REVERSE_REF", fm.matchType);
         }
     }
 

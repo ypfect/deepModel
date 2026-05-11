@@ -31,6 +31,8 @@ public class ResolveModels {
     public static class ResolveResult {
         public String query;
         public List<ObjectMatch> objectMatches = new ArrayList<>();
+        /** 枚举匹配结果，与 objectMatches 平级 */
+        public List<EnumMatch> enumMatches = new ArrayList<>();
     }
 
     /** 对象匹配项 */
@@ -45,6 +47,13 @@ public class ResolveModels {
         public List<String> detailEntities = new ArrayList<>();
         public String parentEntity;
         public List<FieldMatch> fieldMatches = new ArrayList<>();
+        // 对象特性（US1）
+        public Boolean isTree;
+        public Boolean isDetail;
+        public Boolean isSupportChangeLog;
+        public Boolean isCustomizedEntity;
+        public Boolean isMultiDataVersion;
+        public String appName;
     }
 
     /** 字段匹配项（嵌套在 ObjectMatch 下） */
@@ -64,6 +73,16 @@ public class ResolveModels {
         public String refPath;
         /** 匹配类型：DIRECT=直接匹配, CHAIN=链式引用, CASCADE=级联搜索 */
         public String matchType;
+        /** 被多少个表达式字段依赖，null 表示未计算 */
+        public Integer dependedByCount;
+        /** 依赖该字段的表达式字段名列表（最多 5 个） */
+        public List<String> dependedByFields;
+        /** 回写来源摘要（如 "RevenueConfirmationItem.sum(amount)"），无回写时为 null */
+        public String writeBackSource;
+        /** 字段关联的枚举值列表，无枚举时为 null */
+        public List<EnumValueMeta> enumValues;
+        /** 是否为自定义字段 */
+        public Boolean isCustomizedField;
     }
 
     /** 分词解析后的查询结构 */
@@ -76,5 +95,13 @@ public class ResolveModels {
         public String detailNavWord;
         /** 字段部分（如 "收款金额"） */
         public String fieldPart;
+        /** 特性过滤条件名（如 "isTree"），null 表示无特性过滤 */
+        public String traitFilter;
+        /** bizType 过滤值（如 "amount"），null 表示无 bizType 过滤 */
+        public String bizTypeFilter;
+        /** 反向引用查询目标对象（如 "Customer"），null 表示非反向查询 */
+        public String reverseRefTarget;
+        /** 是否为自定义字段过滤（如 "XX的自定义字段"） */
+        public boolean customizedFieldFilter;
     }
 }

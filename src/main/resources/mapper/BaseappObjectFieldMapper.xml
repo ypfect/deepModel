@@ -21,6 +21,7 @@
     <result property="enumType" column="enum_type"/>
     <result property="isDisabled" column="is_disabled"/>
     <result property="isMasterField" column="is_master_field"/>
+    <result property="isCustomizedField" column="is_customized_field"/>
   </resultMap>
 
   <resultMap id="ObjectTypeMetaMap" type="com.deepmodel.relation.model.ObjectTypeMeta">
@@ -29,6 +30,12 @@
     <result property="type" column="type"/>
     <result property="description" column="description"/>
     <result property="isDisabled" column="is_disabled"/>
+    <result property="appName" column="app_name"/>
+    <result property="isCustomizedEntity" column="is_customized_entity"/>
+    <result property="isDetail" column="is_detail"/>
+    <result property="isTree" column="is_tree"/>
+    <result property="isMultiDataVersion" column="is_multi_data_version"/>
+    <result property="isSupportChangeLog" column="is_support_change_bill"/>
   </resultMap>
 
   <select id="selectByObjectType" resultMap="BaseappObjectFieldMap">
@@ -85,9 +92,10 @@
            f.refer_info::text as refer_info,
            f.source_info::text as source_info,
            null as description,
-           null as enum_type,
-           null as is_disabled,
+           f.enum_type,
+           f.is_disabled,
            null as is_master_field,
+           f.is_customized_field,
            t.app_name
     from baseapp_object_field f
     left join baseapp_object_type t on f.object_type = t.name
@@ -112,7 +120,9 @@
   </select>
 
   <select id="selectObjectTitles" resultMap="ObjectTypeMetaMap">
-    select name, title, type, description, is_disabled
+    select name, title, type, description, is_disabled, app_name,
+           is_customized_entity, is_detail, is_tree, is_multi_data_version,
+           is_support_change_bill
     from baseapp_object_type
   </select>
 
@@ -181,6 +191,15 @@
   <select id="selectEntityMetadataContents" resultType="map">
     select m.name, m.content::text as content
     from baseapp_system_metadata m
+    where m.is_deleted = false
+      and m.type_id = 'MetaType.entity'
+      and m.content is not null
+  </select>
+
+  <!-- 查询自定义对象/字段的元数据 content（baseapp_customized_metadata） -->
+  <select id="selectCustomizedMetadataContents" resultType="map">
+    select m.name, m.content::text as content
+    from baseapp_customized_metadata m
     where m.is_deleted = false
       and m.type_id = 'MetaType.entity'
       and m.content is not null

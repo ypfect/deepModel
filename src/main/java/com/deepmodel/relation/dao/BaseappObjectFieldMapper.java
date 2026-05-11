@@ -61,6 +61,11 @@ public interface BaseappObjectFieldMapper {
      */
     List<Map<String, Object>> selectEntityMetadataContents();
 
+    /**
+     * 查询自定义对象/字段的元数据 content JSON（baseapp_customized_metadata）
+     */
+    List<Map<String, Object>> selectCustomizedMetadataContents();
+
     // ===== FuncUnit Customizer 查询 =====
 
     /**

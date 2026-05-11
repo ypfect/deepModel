@@ -1,6 +1,6 @@
 # deepModel Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-05-10
+Auto-generated from all feature plans. Last updated: 2026-05-11
 
 ## Active Technologies
 - Java 8, Spring Boot 2.7.x + MyBatis, Jackson, JSqlParser（已有） (002-metadata-services)
@@ -9,6 +9,8 @@ Auto-generated from all feature plans. Last updated: 2026-05-10
 - N/A（纯内存匹配，复用已加载的元数据） (004-agent-metadata-matching)
 - Java 8, Spring Boot 2.7.x, MyBatis + Jieba（已引入 com.huaban.analysis.jieba）、Guava Cache、Jackson (005-enhance-metadata-resolve)
 - PostgreSQL（baseapp_object_field / baseapp_object_type / baseapp_system_metadata） (005-enhance-metadata-resolve)
+- Java 8, Spring Boot 2.7.x, MyBatis + Jackson (JSON 解析), Guava (Cache), JSqlParser (006-enhance-metadata-resolve)
+- PostgreSQL（baseapp_system_metadata / baseapp_object_type / baseapp_object_field） (006-enhance-metadata-resolve)
 
 - Java 8 / Spring Boot 2.7 / MyBatis + JSqlParser (已有), OkHttp3 (待消除对回写SQL的依赖), Jackson, Guava Cache (001-native-expression-engine)
 
@@ -28,9 +30,9 @@ tests/
 Java 8 / Spring Boot 2.7 / MyBatis: Follow standard conventions
 
 ## Recent Changes
+- 006-enhance-metadata-resolve: Added Java 8, Spring Boot 2.7.x, MyBatis + Jackson (JSON 解析), Guava (Cache), JSqlParser
 - 005-enhance-metadata-resolve: Added Java 8, Spring Boot 2.7.x, MyBatis + Jieba（已引入 com.huaban.analysis.jieba）、Guava Cache、Jackson
 - 004-agent-metadata-matching: Added Java 8, Spring Boot 2.7.x + Spring Web (REST Controller), Guava Cache, ImpactAnalyzerService（已有内存索引）
-- 002-metadata-services: Added Java 8, Spring Boot 2.7.x + MyBatis, Jackson, JSqlParser（已有）
 
 
 <!-- MANUAL ADDITIONS START -->
