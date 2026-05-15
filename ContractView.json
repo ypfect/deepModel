@@ -1,0 +1,4577 @@
+{
+  "data": {
+    "Entities": [
+      {
+        "viewDef": [
+          {
+            "objectName": "Contract",
+            "sql": "SELECT M.src_object_type AS src_object_type, M.src_object_id AS src_object_id, arContract.origin_not_init_receipt_amount AS origin_not_init_receipt_amount, arContract.not_init_receipt_amount AS not_init_receipt_amount, M.permit_group_execute, M.is_has_free_gift, M.is_all_free_gift, M.all_sales_trace_contract_id AS ar_contract_id, M.bill_full_status, M.blue_bill_id, M.approved_user_id, M.approved_time, M.print_times, M.last_print_user_id, M.last_print_time, M.aborted_user_id, M.aborted_time, M.aborted_reason, M.finished_user_id, M.finished_time, M.finished_reason, M.closed_user_id, M.closed_time, M.closed_reason, M.closed_biz_reason_id, M.suspended_user_id, M.suspended_time, M.suspended_reason, M.suspended_biz_reason_id, M.suspend_type_id, M.last_submit_user_id, M.last_submit_time, M.is_auto_generated, M.is_merge_gen, M.code_seq, M.is_manual_code, M.web_edit_template_id, M.is_template_bill, M.src_template_bill_id, M.parent_id AS parent_id, M.id_path AS id_path, M.LEVEL AS LEVEL, M.is_leaf AS is_leaf, M.contract_id, M.contract_object_type, M.created_org_id AS created_org_id, M.purchase_org_id, M.sales_org_id AS sales_org_id, M.project_org_id AS project_org_id, apContract.payment_application_status_id AS payment_application_status_id, M.execute_status_id AS execute_status_id, M.execute_path AS execute_path, M.frame_contract_id AS frame_contract_id, M.is_init_bill AS is_init_bill, M.code, M.NAME, M.is_suspended, M.is_change_bill, M.business_date, M.business_type_id, M.bill_type_id, M.bill_io_type_id, M.bill_status, M.plan_basis_id, M.custom_version, M.contract_category_id, M.contract_group_id, M.contact_id, M.contact_telephone, M.settlement_method_id, M.bank_account_id, M.project_id, M.department_id, M.owner_user_id, M.start_date, M.end_date, M.currency_id, M.base_bill_id, M.exchange_rate, M.accounting_method_id AS accounting_method_id, M.ap_accounting_method_id, M.invoice_type_id, M.amount, M.origin_amount, M.description, M.has_bond, M.bond_currency_id, M.bond_amount, M.origin_bond_amount, M.quality_bond_amount, M.origin_quality_bond_amount, M.has_quality_bond_period, M.quality_bond_start_date, M.quality_bond_end_date, arContract.invoice_app_quantity AS invoice_app_quantity, arContract.invoice_app_amount AS invoice_app_amount, arContract.origin_invoice_app_amount AS origin_invoice_app_amount, arContract.invoice_app_amount_without_tax AS invoice_app_amount_without_tax, arContract.origin_invoice_app_amount_without_tax AS origin_invoice_app_amount_without_tax, ( CASE WHEN M.contract_object_type = 'ArContract' THEN arContract.invoice_quantity ELSE apContract.invoice_quantity END ) AS invoice_quantity, ( CASE WHEN M.contract_object_type = 'ArContract' THEN arContract.invoice_amount ELSE apContract.invoice_amount END ) AS invoice_amount, ( CASE WHEN M.contract_object_type = 'ArContract' THEN arContract.origin_invoice_amount ELSE apContract.origin_invoice_amount END ) AS origin_invoice_amount, ( CASE WHEN M.contract_object_type = 'ArContract' THEN arContract.invoice_amount_without_tax ELSE apContract.invoice_amount_without_tax END ) AS invoice_amount_without_tax, ( CASE WHEN M.contract_object_type = 'ArContract' THEN arContract.origin_invoice_amount_without_tax ELSE apContract.origin_invoice_amount_without_tax END ) AS origin_invoice_amount_without_tax, arContract.rc_quantity AS rc_quantity, arContract.rc_amount AS rc_amount, arContract.origin_rc_amount AS origin_rc_amount, arContract.rc_amount_without_tax AS rc_amount_without_tax, arContract.origin_rc_amount_without_tax AS origin_rc_amount_without_tax, arContract.receipt_amount AS receipt_amount, arContract.origin_receipt_amount AS origin_receipt_amount, arContract.bond_payment_amount AS bond_payment_amount, arContract.origin_bond_payment_amount AS origin_bond_payment_amount, arContract.bond_payment_return_amount AS bond_payment_return_amount, arContract.origin_bond_payment_return_amount AS origin_bond_payment_return_amount, arContract.quality_bond_receipt_amount AS quality_bond_receipt_amount, arContract.origin_quality_bond_receipt_amount AS origin_quality_bond_receipt_amount, arContract.rc_amount_more_or_less_rate AS rc_amount_more_or_less_rate, arContract.rc_quantity_more_or_less_rate AS rc_quantity_more_or_less_rate, arContract.rc_price_more_or_less_rate AS rc_price_more_or_less_rate, arContract.invoice_amount_more_or_less_rate AS invoice_amount_more_or_less_rate, arContract.invoice_quantity_more_or_less_rate AS invoice_quantity_more_or_less_rate, arContract.invoice_price_more_or_less_rate AS invoice_price_more_or_less_rate, arContract.invoice_app_amount_more_or_less_rate AS invoice_app_amount_more_or_less_rate, arContract.invoice_app_quantity_more_or_less_rate AS invoice_app_quantity_more_or_less_rate, arContract.invoice_app_price_more_or_less_rate AS invoice_app_price_more_or_less_rate, arContract.bond_more_or_less_rate AS bond_more_or_less_rate, arContract.receipt_amount_more_or_less_rate AS receipt_amount_more_or_less_rate, ( CASE WHEN contract_object_type = 'ArContract' THEN arContract.price_more_or_less_rate ELSE apContract.price_more_or_less_rate END ) AS price_more_or_less_rate, ( CASE WHEN contract_object_type = 'ArContract' THEN arContract.quantity_more_or_less_rate ELSE apContract.quantity_more_or_less_rate END ) AS quantity_more_or_less_rate, ( CASE WHEN contract_object_type = 'ArContract' THEN arContract.amount_more_or_less_rate ELSE apContract.amount_more_or_less_rate END ) AS amount_more_or_less_rate, arContract.receipt_status_id AS receipt_status_id, arContract.revenue_confirmation_status_id AS revenue_confirmation_status_id, M.rp_invoice_status_id AS invoice_status_id, M.closed_biz_date, M.object_type AS settle_object_type, M.settle_object_id AS settle_object_id, M.object_type, M.object_id, M.settle_vendor_id, apContract.ap_payment_biz_type_id AS ap_payment_biz_type_id, apContract.ap_payment_quantity AS ap_payment_quantity, apContract.init_ap_payment_quantity AS init_ap_payment_quantity, apContract.ap_write_back_quantity AS ap_write_back_quantity, apContract.ap_payment_amount AS ap_payment_amount, apContract.init_ap_payment_amount AS init_ap_payment_amount, apContract.ap_write_back_amount AS ap_write_back_amount, apContract.origin_ap_payment_amount AS origin_ap_payment_amount, apContract.origin_init_ap_payment_amount AS origin_init_ap_payment_amount, apContract.origin_ap_write_back_amount AS origin_ap_write_back_amount, apContract.ap_payment_amount_without_tax AS ap_payment_amount_without_tax, apContract.init_ap_payment_amount_without_tax AS init_ap_payment_amount_without_tax, apContract.ap_write_back_amount_without_tax AS ap_write_back_amount_without_tax, apContract.origin_ap_payment_amount_without_tax AS origin_ap_payment_amount_without_tax, apContract.origin_init_ap_payment_amount_without_tax AS origin_init_ap_payment_amount_without_tax, apContract.origin_ap_write_back_amount_without_tax AS origin_ap_write_back_amount_without_tax, apContract.deduc_after_tax_amount AS deduc_after_tax_amount, apContract.init_deduc_after_tax_amount AS init_deduc_after_tax_amount, apContract.ap_deduc_after_tax_amount AS ap_deduc_after_tax_amount, apContract.origin_deduc_after_tax_amount AS origin_deduc_after_tax_amount, apContract.origin_init_deduc_after_tax_amount AS origin_init_deduc_after_tax_amount, apContract.origin_ap_deduc_after_tax_amount AS origin_ap_deduc_after_tax_amount, apContract.payment_amount AS payment_amount, apContract.init_payment_amount AS init_payment_amount, apContract.not_init_payment_amount AS not_init_payment_amount, apContract.origin_payment_amount AS origin_payment_amount, apContract.origin_init_payment_amount AS origin_init_payment_amount, apContract.origin_not_init_payment_amount AS origin_not_init_payment_amount, apContract.bond_receipt_amount AS bond_receipt_amount, apContract.init_bond_receipt_amount AS init_bond_receipt_amount, apContract.not_init_bond_receipt_amount AS not_init_bond_receipt_amount, apContract.origin_bond_receipt_amount AS origin_bond_receipt_amount, apContract.origin_init_bond_receipt_amount AS origin_init_bond_receipt_amount, apContract.origin_not_init_bond_receipt_amount AS origin_not_init_bond_receipt_amount, apContract.bond_receipt_return_amount AS bond_receipt_return_amount, apContract.init_bond_receipt_return_amount AS init_bond_receipt_return_amount, apContract.not_init_bond_receipt_return_amount AS not_init_bond_receipt_return_amount, apContract.origin_bond_receipt_return_amount AS origin_bond_receipt_return_amount, apContract.origin_init_bond_receipt_return_amount AS origin_init_bond_receipt_return_amount, apContract.origin_not_init_bond_receipt_return_amount AS origin_not_init_bond_receipt_return_amount, apContract.quality_bond_payment_amount AS quality_bond_payment_amount, apContract.init_quality_bond_payment_amount AS init_quality_bond_payment_amount, apContract.not_init_quality_bond_payment_amount AS not_init_quality_bond_payment_amount, apContract.origin_quality_bond_payment_amount AS origin_quality_bond_payment_amount, apContract.origin_init_quality_bond_payment_amount AS origin_init_quality_bond_payment_amount, apContract.origin_not_init_quality_bond_payment_amount AS origin_not_init_quality_bond_payment_amount, apContract.ap_payment_amount_more_or_less_rate AS ap_payment_amount_more_or_less_rate, apContract.ap_payment_quantity_more_or_less_rate AS ap_payment_quantity_more_or_less_rate, apContract.ap_payment_price_more_or_less_rate AS ap_payment_price_more_or_less_rate, apContract.payment_amount_more_or_less_rate AS payment_amount_more_or_less_rate, M.more_or_less_object_type, M.more_or_less_object_type_str, M.control_fields, M.control_fields_str, apContract.payment_status_id AS payment_status_id, apContract.ap_payment_status_id AS ap_payment_status_id, arContract.bond_payment_app_amount AS bond_payment_app_amount, arContract.origin_bond_payment_app_amount AS origin_bond_payment_app_amount, arContract.bond_payed_app_amount AS bond_payed_app_amount, arContract.origin_bond_payed_app_amount AS origin_bond_payed_app_amount, apContract.payment_app_amount AS payment_app_amount, apContract.origin_payment_app_amount AS origin_payment_app_amount, apContract.payed_payment_app_amount AS payed_payment_app_amount, apContract.origin_payed_payment_app_amount AS origin_payed_payment_app_amount, apContract.balance_payment_amount AS balance_payment_amount, apContract.origin_balance_payment_amount AS origin_balance_payment_amount, arContract.bond_balance_payment_amount AS bond_balance_payment_amount, arContract.origin_bond_balance_payment_amount AS origin_bond_balance_payment_amount, M.has_deposit, M.deposit_amount, M.origin_deposit_amount, arContract.deposit_received_amount AS ar_deposit_received_amount, arContract.origin_deposit_received_amount AS origin_ar_deposit_received_amount, arContract.deposit_direct_receipt_amount, arContract.origin_deposit_direct_receipt_amount, arContract.deposit_un_received_amount, arContract.origin_deposit_un_received_amount, arContract.deposit_payment_app_amount AS ar_deposit_payment_app_amount, arContract.origin_deposit_payment_app_amount AS origin_ar_deposit_payment_app_amount, arContract.deposit_payment_payed_app_amount, arContract.origin_deposit_payment_payed_app_amount, arContract.deposit_return_amount, arContract.origin_deposit_return_amount, arContract.deposit_direct_return_amount, arContract.origin_deposit_direct_return_amount, arContract.deposit_reverse_rc_amount, arContract.origin_deposit_reverse_rc_amount, arContract.deposit_reverse_ar_amount, arContract.origin_deposit_reverse_ar_amount, arContract.deposit_ap_transfer_amount, arContract.origin_deposit_ap_transfer_amount, arContract.deposit_ap_red_blue_declared_amount, arContract.origin_deposit_ap_red_blue_declared_amount, arContract.deposit_received_un_return_amount, arContract.origin_deposit_received_un_return_amount, apContract.deposit_payment_app_amount AS ap_deposit_payment_app_amount, apContract.origin_deposit_payment_app_amount AS origin_ap_deposit_payment_app_amount, apContract.deposit_payed_payment_app_amount, apContract.origin_deposit_payed_payment_app_amount, apContract.deposit_payed_amount, apContract.origin_deposit_payed_amount, apContract.deposit_direct_payed_amount, apContract.origin_deposit_direct_payed_amount, apContract.deposit_un_payed_amount, apContract.origin_deposit_un_payed_amount, apContract.deposit_received_amount AS ap_deposit_received_amount, apContract.origin_deposit_received_amount AS origin_ap_deposit_received_amount, apContract.deposit_direct_received_amount, apContract.origin_deposit_direct_received_amount, apContract.deposit_reverse_ap_amount, apContract.origin_deposit_reverse_ap_amount, apContract.deposit_reverse_other_ap_amount, apContract.origin_deposit_reverse_other_ap_amount, apContract.deposit_ar_transfer_amount, apContract.origin_deposit_ar_transfer_amount, apContract.deposit_ar_red_blue_declared_amount, apContract.origin_deposit_ar_red_blue_declared_amount, apContract.deposit_payed_un_received_amount, apContract.origin_deposit_payed_un_received_amount, ${SystemFields} FROM contract_contract M LEFT JOIN contract_ar_contract arContract ON M.ID = arContract.ID AND M.contract_object_type = 'ArContract' LEFT JOIN contract_ap_contract apContract ON M.ID = apContract.ID AND M.contract_object_type = 'ApContract' WHERE M.is_deleted = FALSE AND ( arContract.is_deleted = FALSE OR apContract.is_deleted = FALSE )"
+          }
+        ],
+        "appName": "contract",
+        "name": "ContractView",
+        "title": "合同视图",
+        "fields": [
+          {
+            "name": "createdOrgId",
+            "title": "财务组织id",
+            "type": "String",
+            "properties": {
+              "modules": [
+                "multiOrg"
+              ],
+              "isMultiLineText": true
+            },
+            "ordinal": 0
+          },
+          {
+            "name": "id",
+            "length": 64,
+            "title": "ID",
+            "type": "String",
+            "isSystemField": true,
+            "ordinal": 1
+          },
+          {
+            "name": "parentId",
+            "title": "主合同",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 2
+          },
+          {
+            "name": "code",
+            "title": "合同编码",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 3
+          },
+          {
+            "bizType": "date",
+            "name": "businessDate",
+            "title": "单据日期",
+            "type": "Timestamp",
+            "ordinal": 5
+          },
+          {
+            "name": "billTypeId",
+            "title": "单据类型",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 6
+          },
+          {
+            "name": "businessTypeId",
+            "title": "业务类型",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 7
+          },
+          {
+            "enumType": "BillIoType",
+            "name": "billIoTypeId",
+            "title": "单据方向",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 8
+          },
+          {
+            "enumType": "BillStatus",
+            "name": "billStatus",
+            "title": "单据状态",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 50
+          },
+          {
+            "enumType": "BillStatus",
+            "name": "billFullStatus",
+            "length": 64,
+            "title": "单据完全状态",
+            "type": "String",
+            "isSystemField": true,
+            "ordinal": 51
+          },
+          {
+            "name": "blueBillId",
+            "title": "关联的蓝单",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 52
+          },
+          {
+            "name": "srcObjectType",
+            "title": "来源对象类型",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 53
+          },
+          {
+            "enumType": "ReApproveType",
+            "name": "reApproveTypeId",
+            "length": 64,
+            "title": "重审类型",
+            "type": "String",
+            "isSystemField": true,
+            "ordinal": 54
+          },
+          {
+            "name": "srcObjectId",
+            "title": "来源对象Id",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 55
+          },
+          {
+            "name": "isAutoGenerated",
+            "title": "是否为自动生成",
+            "type": "Boolean",
+            "isSystemField": true,
+            "ordinal": 57
+          },
+          {
+            "defaultValue": "EntrySrcSystem.systemInput",
+            "enumType": "EntrySrcSystem",
+            "name": "entrySrcSystemId",
+            "length": 64,
+            "title": "数据来源类型",
+            "type": "String",
+            "isSystemField": true,
+            "ordinal": 58
+          },
+          {
+            "name": "isMergeGen",
+            "title": "是否为合并生成的单据",
+            "type": "Boolean",
+            "isSystemField": true,
+            "ordinal": 59
+          },
+          {
+            "name": "isInitBill",
+            "title": "期初应收标志",
+            "type": "Boolean",
+            "ordinal": 60,
+            "desc": "期初应收生成的收入确认单为true，否则为false"
+          },
+          {
+            "name": "externalSystemCode",
+            "length": 128,
+            "title": "外部系统标识",
+            "type": "String",
+            "isSystemField": true,
+            "ordinal": 61
+          },
+          {
+            "name": "externalObjectType",
+            "length": 128,
+            "title": "外部系统对象类型",
+            "type": "String",
+            "isSystemField": true,
+            "ordinal": 62
+          },
+          {
+            "name": "externalObjectId",
+            "length": 128,
+            "title": "外部系统唯一标识",
+            "type": "String",
+            "isSystemField": true,
+            "ordinal": 63
+          },
+          {
+            "name": "traceIntCooperationId",
+            "title": "内部交易协同跟踪记录",
+            "type": "String",
+            "properties": {
+              "modules": [
+                "innertrans"
+              ],
+              "isMultiLineText": true
+            },
+            "isSystemField": false,
+            "ordinal": 65
+          },
+          {
+            "name": "parentCode",
+            "title": "主合同",
+            "type": "String",
+            "virtualExpr": "parentId.code",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 100
+          },
+          {
+            "name": "contractId",
+            "title": "合同id",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 101
+          },
+          {
+            "name": "contractObjectType",
+            "title": "合同类型",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 102
+          },
+          {
+            "name": "purchaseOrgId",
+            "title": "采购组织id",
+            "type": "String",
+            "properties": {
+              "modules": [
+                "multiOrg"
+              ],
+              "isMultiLineText": true
+            },
+            "ordinal": 103
+          },
+          {
+            "name": "salesOrgId",
+            "title": "销售组织id",
+            "type": "String",
+            "properties": {
+              "modules": [
+                "multiOrg"
+              ],
+              "isMultiLineText": true
+            },
+            "ordinal": 104
+          },
+          {
+            "name": "projectOrgId",
+            "title": "项目组织单元id",
+            "type": "String",
+            "properties": {
+              "modules": [
+                "multiOrg"
+              ],
+              "isMultiLineText": true
+            },
+            "ordinal": 105
+          },
+          {
+            "name": "name",
+            "length": 256,
+            "title": "名称",
+            "type": "String",
+            "ordinal": 106
+          },
+          {
+            "name": "isChangeBill",
+            "title": "是否为变更单",
+            "type": "Boolean",
+            "ordinal": 107
+          },
+          {
+            "name": "permitGroupExecute",
+            "title": "允许跨组织执行",
+            "type": "Boolean",
+            "ordinal": 108
+          },
+          {
+            "name": "baseBillId",
+            "title": "变跟单原单",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 109
+          },
+          {
+            "name": "customVersion",
+            "length": 64,
+            "title": "版本号",
+            "type": "String",
+            "ordinal": 110
+          },
+          {
+            "name": "contractCategoryId",
+            "title": "合同分类",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 111
+          },
+          {
+            "name": "contractGroupId",
+            "title": "合同分组",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 112
+          },
+          {
+            "enumType": "RPPlanBasis",
+            "name": "planBasisId",
+            "title": "收付款计划依据",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 113,
+            "desc": "枚举型-收付款计划依据，分为整单 or 标的"
+          },
+          {
+            "name": "contactId",
+            "title": "联系人",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 114
+          },
+          {
+            "name": "contactTelephone",
+            "title": "联系人电话",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 115
+          },
+          {
+            "name": "settlementMethodId",
+            "title": "结算方式",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 116
+          },
+          {
+            "name": "bankAccountId",
+            "title": "账户",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 117
+          },
+          {
+            "name": "projectId",
+            "title": "项目",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 118
+          },
+          {
+            "name": "departmentId",
+            "title": "部门",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 119
+          },
+          {
+            "isCustomizedField": false,
+            "name": "hisVerDepartmentId",
+            "title": "部门(历史)",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 120,
+            "isHisVerId": true
+          },
+          {
+            "name": "ownerUserId",
+            "title": "业务员",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 121
+          },
+          {
+            "name": "startDate",
+            "title": "合同开始日期",
+            "type": "Timestamp",
+            "ordinal": 122
+          },
+          {
+            "name": "endDate",
+            "title": "合同结束日期",
+            "type": "Timestamp",
+            "ordinal": 123
+          },
+          {
+            "name": "currencyId",
+            "title": "币种",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 124
+          },
+          {
+            "bizType": "ratio",
+            "name": "exchangeRate",
+            "title": "汇率",
+            "type": "BigDecimal",
+            "ordinal": 125
+          },
+          {
+            "enumType": "AccountingMethod",
+            "name": "accountingMethodId",
+            "title": "立账方式",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 126
+          },
+          {
+            "enumType": "ApAccountingMethod",
+            "name": "apAccountingMethodId",
+            "title": "应付立账方式",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 127
+          },
+          {
+            "name": "invoiceTypeId",
+            "title": "发票类型",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 128
+          },
+          {
+            "bizType": "amount",
+            "name": "amount",
+            "title": "金额",
+            "type": "BigDecimal",
+            "ordinal": 129
+          },
+          {
+            "bizType": "amount",
+            "name": "originAmount",
+            "title": "原币金额",
+            "type": "BigDecimal",
+            "ordinal": 130
+          },
+          {
+            "name": "description",
+            "title": "备注",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 131
+          },
+          {
+            "name": "hasBond",
+            "title": "保证金",
+            "type": "Boolean",
+            "ordinal": 132
+          },
+          {
+            "name": "bondCurrencyId",
+            "title": "币种",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 133
+          },
+          {
+            "bizType": "amount",
+            "name": "bondAmount",
+            "title": "保证金金额",
+            "type": "BigDecimal",
+            "ordinal": 134
+          },
+          {
+            "bizType": "amount",
+            "name": "originBondAmount",
+            "title": "保证金原币金额",
+            "type": "BigDecimal",
+            "ordinal": 135
+          },
+          {
+            "bizType": "amount",
+            "name": "qualityBondAmount",
+            "title": "质保金金额",
+            "type": "BigDecimal",
+            "ordinal": 136
+          },
+          {
+            "bizType": "amount",
+            "name": "originQualityBondAmount",
+            "title": "质保金原币金额",
+            "type": "BigDecimal",
+            "ordinal": 137
+          },
+          {
+            "name": "hasQualityBondPeriod",
+            "title": "质保期管理",
+            "type": "Boolean",
+            "ordinal": 138
+          },
+          {
+            "name": "qualityBondStartDate",
+            "title": "质保开始日期",
+            "type": "Timestamp",
+            "ordinal": 139
+          },
+          {
+            "name": "qualityBondEndDate",
+            "title": "质保结束日期",
+            "type": "Timestamp",
+            "ordinal": 140
+          },
+          {
+            "bizType": "quantity",
+            "name": "invoiceAppQuantity",
+            "title": "开票申请数量",
+            "type": "BigDecimal",
+            "ordinal": 141
+          },
+          {
+            "bizType": "amount",
+            "name": "invoiceAppAmount",
+            "title": "开票申请金额",
+            "type": "BigDecimal",
+            "ordinal": 142
+          },
+          {
+            "bizType": "amount",
+            "name": "originInvoiceAppAmount",
+            "title": "开票申请原币金额",
+            "type": "BigDecimal",
+            "ordinal": 143
+          },
+          {
+            "bizType": "amount",
+            "name": "invoiceAppAmountWithoutTax",
+            "title": "开票申请无税金额",
+            "type": "BigDecimal",
+            "ordinal": 144
+          },
+          {
+            "bizType": "amount",
+            "name": "originInvoiceAppAmountWithoutTax",
+            "title": "开票申请原币无税金额",
+            "type": "BigDecimal",
+            "ordinal": 145
+          },
+          {
+            "bizType": "quantity",
+            "name": "invoiceQuantity",
+            "title": "开票数量",
+            "type": "BigDecimal",
+            "ordinal": 146
+          },
+          {
+            "bizType": "amount",
+            "name": "invoiceAmount",
+            "title": "开票金额",
+            "type": "BigDecimal",
+            "ordinal": 147
+          },
+          {
+            "bizType": "amount",
+            "name": "originInvoiceAmount",
+            "title": "开票原币金额",
+            "type": "BigDecimal",
+            "ordinal": 148
+          },
+          {
+            "bizType": "amount",
+            "name": "invoiceAmountWithoutTax",
+            "title": "开票无税金额",
+            "type": "BigDecimal",
+            "ordinal": 149
+          },
+          {
+            "bizType": "amount",
+            "name": "originInvoiceAmountWithoutTax",
+            "title": "开票原币无税金额",
+            "type": "BigDecimal",
+            "ordinal": 150
+          },
+          {
+            "bizType": "quantity",
+            "name": "rcQuantity",
+            "title": "收入确认数量",
+            "type": "BigDecimal",
+            "ordinal": 151
+          },
+          {
+            "bizType": "amount",
+            "name": "rcAmount",
+            "title": "收入确认金额",
+            "type": "BigDecimal",
+            "ordinal": 152
+          },
+          {
+            "bizType": "amount",
+            "name": "originRcAmount",
+            "title": "收入确认原币金额",
+            "type": "BigDecimal",
+            "ordinal": 153
+          },
+          {
+            "bizType": "amount",
+            "name": "rcAmountWithoutTax",
+            "title": "收入确认无税金额",
+            "type": "BigDecimal",
+            "ordinal": 154
+          },
+          {
+            "bizType": "amount",
+            "name": "originRcAmountWithoutTax",
+            "title": "收入确认原币无税金额",
+            "type": "BigDecimal",
+            "ordinal": 155
+          },
+          {
+            "bizType": "amount",
+            "name": "receiptAmount",
+            "title": "收款金额",
+            "type": "BigDecimal",
+            "ordinal": 156
+          },
+          {
+            "bizType": "amount",
+            "name": "originReceiptAmount",
+            "title": "收款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 157
+          },
+          {
+            "bizType": "amount",
+            "name": "notInitReceiptAmount",
+            "title": "直接收款本币金额",
+            "type": "BigDecimal",
+            "ordinal": 158
+          },
+          {
+            "bizType": "amount",
+            "name": "originNotInitReceiptAmount",
+            "title": "直接收款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 159
+          },
+          {
+            "bizType": "amount",
+            "name": "bondPaymentAmount",
+            "title": "支付保证金金额",
+            "type": "BigDecimal",
+            "ordinal": 160
+          },
+          {
+            "bizType": "amount",
+            "name": "originBondPaymentAmount",
+            "title": "支付保证金原币金额",
+            "type": "BigDecimal",
+            "ordinal": 161
+          },
+          {
+            "bizType": "amount",
+            "name": "bondPaymentReturnAmount",
+            "title": "保证金收回金额",
+            "type": "BigDecimal",
+            "ordinal": 162
+          },
+          {
+            "bizType": "amount",
+            "name": "originBondPaymentReturnAmount",
+            "title": "保证金收回原币金额",
+            "type": "BigDecimal",
+            "ordinal": 163
+          },
+          {
+            "bizType": "amount",
+            "name": "qualityBondReceiptAmount",
+            "title": "质保金收回金额",
+            "type": "BigDecimal",
+            "ordinal": 164
+          },
+          {
+            "bizType": "amount",
+            "name": "originQualityBondReceiptAmount",
+            "title": "质保金收回原币金额",
+            "type": "BigDecimal",
+            "ordinal": 165
+          },
+          {
+            "bizType": "ratio",
+            "name": "rcAmountMoreOrLessRate",
+            "title": "收入确认单金额允差值",
+            "type": "BigDecimal",
+            "ordinal": 166
+          },
+          {
+            "bizType": "ratio",
+            "name": "rcQuantityMoreOrLessRate",
+            "title": "收入确认单数量允差值",
+            "type": "BigDecimal",
+            "ordinal": 167
+          },
+          {
+            "bizType": "ratio",
+            "name": "rcPriceMoreOrLessRate",
+            "title": "收入确认单单价允差值",
+            "type": "BigDecimal",
+            "ordinal": 168
+          },
+          {
+            "bizType": "ratio",
+            "name": "invoiceAmountMoreOrLessRate",
+            "title": "发票金额允差值",
+            "type": "BigDecimal",
+            "ordinal": 169
+          },
+          {
+            "bizType": "ratio",
+            "name": "invoiceQuantityMoreOrLessRate",
+            "title": "发票数量允差值",
+            "type": "BigDecimal",
+            "ordinal": 170
+          },
+          {
+            "bizType": "ratio",
+            "name": "invoicePriceMoreOrLessRate",
+            "title": "发票单价允差值",
+            "type": "BigDecimal",
+            "ordinal": 171
+          },
+          {
+            "bizType": "ratio",
+            "name": "invoiceAppAmountMoreOrLessRate",
+            "title": "开票申请金额允差值",
+            "type": "BigDecimal",
+            "ordinal": 172
+          },
+          {
+            "bizType": "ratio",
+            "name": "invoiceAppQuantityMoreOrLessRate",
+            "title": "开票申请数量允差值",
+            "type": "BigDecimal",
+            "ordinal": 173
+          },
+          {
+            "bizType": "ratio",
+            "name": "invoiceAppPriceMoreOrLessRate",
+            "title": "开票申请单价允差值",
+            "type": "BigDecimal",
+            "ordinal": 174
+          },
+          {
+            "bizType": "ratio",
+            "name": "bondMoreOrLessRate",
+            "title": "保证金允差值",
+            "type": "BigDecimal",
+            "ordinal": 175
+          },
+          {
+            "bizType": "ratio",
+            "name": "receiptAmountMoreOrLessRate",
+            "title": "收款金额允差值",
+            "type": "BigDecimal",
+            "ordinal": 176
+          },
+          {
+            "bizType": "ratio",
+            "name": "priceMoreOrLessRate",
+            "title": "单价允差值",
+            "type": "BigDecimal",
+            "ordinal": 177
+          },
+          {
+            "bizType": "ratio",
+            "name": "quantityMoreOrLessRate",
+            "title": "数量允差值",
+            "type": "BigDecimal",
+            "ordinal": 178
+          },
+          {
+            "bizType": "ratio",
+            "name": "amountMoreOrLessRate",
+            "title": "金额允差值",
+            "type": "BigDecimal",
+            "ordinal": 179
+          },
+          {
+            "enumType": "ReceiptStatusEnum",
+            "name": "receiptStatusId",
+            "title": "收款状态",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 180
+          },
+          {
+            "enumType": "RevenueConfirmationStatusEnum",
+            "name": "revenueConfirmationStatusId",
+            "title": "收入确认状态",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 181
+          },
+          {
+            "enumType": "InvoiceStatusEnum",
+            "name": "invoiceStatusId",
+            "title": "开票状态",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 182
+          },
+          {
+            "name": "settleObjectType",
+            "title": "结算单位类型",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 183
+          },
+          {
+            "name": "settleObjectId",
+            "title": "结算单位",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 184
+          },
+          {
+            "name": "objectType",
+            "title": "往来单位类型",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 185
+          },
+          {
+            "name": "objectId",
+            "title": "往来单位",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 186
+          },
+          {
+            "name": "settleVendorId",
+            "title": "结算供应商",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 187
+          },
+          {
+            "enumType": "ApPaymentBizTypeEnum",
+            "name": "apPaymentBizTypeId",
+            "title": "应付类型",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 188
+          },
+          {
+            "bizType": "quantity",
+            "name": "apPaymentQuantity",
+            "title": "应付数量",
+            "type": "BigDecimal",
+            "ordinal": 189
+          },
+          {
+            "bizType": "quantity",
+            "name": "initApPaymentQuantity",
+            "title": "期初应付数量",
+            "type": "BigDecimal",
+            "ordinal": 190
+          },
+          {
+            "bizType": "quantity",
+            "name": "apWriteBackQuantity",
+            "title": "应付回写数量",
+            "type": "BigDecimal",
+            "ordinal": 191,
+            "desc": "应付单的数量"
+          },
+          {
+            "bizType": "amount",
+            "name": "apPaymentAmount",
+            "title": "本币应付金额",
+            "type": "BigDecimal",
+            "ordinal": 192
+          },
+          {
+            "bizType": "amount",
+            "name": "initApPaymentAmount",
+            "title": "期初本币应付金额",
+            "type": "BigDecimal",
+            "ordinal": 193
+          },
+          {
+            "bizType": "amount",
+            "name": "apWriteBackAmount",
+            "title": "应付回写本币金额",
+            "type": "BigDecimal",
+            "ordinal": 194,
+            "desc": "应付单的本币金额"
+          },
+          {
+            "bizType": "amount",
+            "name": "originApPaymentAmount",
+            "title": "原币应付金额",
+            "type": "BigDecimal",
+            "ordinal": 195
+          },
+          {
+            "bizType": "amount",
+            "name": "originInitApPaymentAmount",
+            "title": "期初原币应付金额",
+            "type": "BigDecimal",
+            "ordinal": 196
+          },
+          {
+            "bizType": "amount",
+            "name": "originApWriteBackAmount",
+            "title": "应付回写原币金额",
+            "type": "BigDecimal",
+            "ordinal": 197,
+            "desc": "应付单的原币金额"
+          },
+          {
+            "bizType": "amount",
+            "name": "apPaymentAmountWithoutTax",
+            "title": "应付本币无税金额",
+            "type": "BigDecimal",
+            "ordinal": 198
+          },
+          {
+            "bizType": "amount",
+            "name": "initApPaymentAmountWithoutTax",
+            "title": "期初应付本币无税金额",
+            "type": "BigDecimal",
+            "ordinal": 199
+          },
+          {
+            "bizType": "amount",
+            "name": "apWriteBackAmountWithoutTax",
+            "title": "应付回写本币无税金额",
+            "type": "BigDecimal",
+            "ordinal": 200,
+            "desc": "应付单的本币无税金额"
+          },
+          {
+            "bizType": "amount",
+            "name": "originApPaymentAmountWithoutTax",
+            "title": "应付原币无税金额",
+            "type": "BigDecimal",
+            "ordinal": 201
+          },
+          {
+            "bizType": "amount",
+            "name": "originInitApPaymentAmountWithoutTax",
+            "title": "期初应付原币无税金额",
+            "type": "BigDecimal",
+            "ordinal": 202
+          },
+          {
+            "bizType": "amount",
+            "name": "originApWriteBackAmountWithoutTax",
+            "title": "应付回写原币无税金额",
+            "type": "BigDecimal",
+            "ordinal": 203,
+            "desc": "应付单的原币金额"
+          },
+          {
+            "bizType": "amount",
+            "name": "deducAfterTaxAmount",
+            "title": "应付抵扣后本币金额",
+            "type": "BigDecimal",
+            "ordinal": 204
+          },
+          {
+            "bizType": "amount",
+            "name": "initDeducAfterTaxAmount",
+            "title": "期初应付抵扣后本币金额",
+            "type": "BigDecimal",
+            "ordinal": 205
+          },
+          {
+            "bizType": "amount",
+            "name": "apDeducAfterTaxAmount",
+            "title": "应付本币抵扣后金额",
+            "type": "BigDecimal",
+            "ordinal": 206,
+            "desc": "应付单的本币抵扣后金额"
+          },
+          {
+            "bizType": "amount",
+            "name": "originDeducAfterTaxAmount",
+            "title": "应付抵扣后原币金额",
+            "type": "BigDecimal",
+            "ordinal": 207
+          },
+          {
+            "bizType": "amount",
+            "name": "originInitDeducAfterTaxAmount",
+            "title": "期初应付抵扣后原币金额",
+            "type": "BigDecimal",
+            "ordinal": 208
+          },
+          {
+            "bizType": "amount",
+            "name": "originApDeducAfterTaxAmount",
+            "title": "应付原币抵扣后金额",
+            "type": "BigDecimal",
+            "ordinal": 209,
+            "desc": "应付单的原币抵扣后金额"
+          },
+          {
+            "bizType": "amount",
+            "name": "paymentAmount",
+            "title": "付款本币金额",
+            "type": "BigDecimal",
+            "ordinal": 210
+          },
+          {
+            "bizType": "amount",
+            "name": "initPaymentAmount",
+            "title": "期初付款本币金额",
+            "type": "BigDecimal",
+            "ordinal": 211
+          },
+          {
+            "bizType": "amount",
+            "name": "notInitPaymentAmount",
+            "title": "非期初付款本币金额",
+            "type": "BigDecimal",
+            "ordinal": 212
+          },
+          {
+            "bizType": "amount",
+            "name": "originPaymentAmount",
+            "title": "付款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 213
+          },
+          {
+            "bizType": "amount",
+            "name": "originInitPaymentAmount",
+            "title": "期初付款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 214
+          },
+          {
+            "bizType": "amount",
+            "name": "originNotInitPaymentAmount",
+            "title": "非期初付款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 215
+          },
+          {
+            "bizType": "amount",
+            "name": "bondReceiptAmount",
+            "title": "已收保证金本币金额",
+            "type": "BigDecimal",
+            "ordinal": 216
+          },
+          {
+            "bizType": "amount",
+            "name": "initBondReceiptAmount",
+            "title": "期初已收保证金本币金额",
+            "type": "BigDecimal",
+            "ordinal": 217
+          },
+          {
+            "bizType": "amount",
+            "name": "notInitBondReceiptAmount",
+            "title": "非期初收回保证金本币金额",
+            "type": "BigDecimal",
+            "ordinal": 218
+          },
+          {
+            "bizType": "amount",
+            "name": "originBondReceiptAmount",
+            "title": "已收保证金原币金额",
+            "type": "BigDecimal",
+            "ordinal": 219
+          },
+          {
+            "bizType": "amount",
+            "name": "originInitBondReceiptAmount",
+            "title": "期初已收保证金原币金额",
+            "type": "BigDecimal",
+            "ordinal": 220
+          },
+          {
+            "bizType": "amount",
+            "name": "originNotInitBondReceiptAmount",
+            "title": "非期初收回保证金原币金额",
+            "type": "BigDecimal",
+            "ordinal": 221
+          },
+          {
+            "bizType": "amount",
+            "name": "bondReceiptReturnAmount",
+            "title": "保证金支付本币金额",
+            "type": "BigDecimal",
+            "ordinal": 222
+          },
+          {
+            "bizType": "amount",
+            "name": "initBondReceiptReturnAmount",
+            "title": "期初保证金支付本币金额",
+            "type": "BigDecimal",
+            "ordinal": 223
+          },
+          {
+            "bizType": "amount",
+            "name": "notInitBondReceiptReturnAmount",
+            "title": "非期初保证金支付本币金额",
+            "type": "BigDecimal",
+            "ordinal": 224
+          },
+          {
+            "bizType": "amount",
+            "name": "originBondReceiptReturnAmount",
+            "title": "保证金支付原币金额",
+            "type": "BigDecimal",
+            "ordinal": 225
+          },
+          {
+            "bizType": "amount",
+            "name": "originInitBondReceiptReturnAmount",
+            "title": "期初保证金支付原币金额",
+            "type": "BigDecimal",
+            "ordinal": 226
+          },
+          {
+            "bizType": "amount",
+            "name": "originNotInitBondReceiptReturnAmount",
+            "title": "非期初保证金支付原币金额",
+            "type": "BigDecimal",
+            "ordinal": 227
+          },
+          {
+            "bizType": "amount",
+            "name": "qualityBondPaymentAmount",
+            "title": "质保金支付本币金额",
+            "type": "BigDecimal",
+            "ordinal": 228
+          },
+          {
+            "bizType": "amount",
+            "name": "initQualityBondPaymentAmount",
+            "title": "期初质保金支付本币金额",
+            "type": "BigDecimal",
+            "ordinal": 229
+          },
+          {
+            "bizType": "amount",
+            "name": "notInitQualityBondPaymentAmount",
+            "title": "非期初质保金支付本币金额",
+            "type": "BigDecimal",
+            "ordinal": 230
+          },
+          {
+            "bizType": "amount",
+            "name": "originQualityBondPaymentAmount",
+            "title": "质保金支付原币金额",
+            "type": "BigDecimal",
+            "ordinal": 231
+          },
+          {
+            "bizType": "amount",
+            "name": "originInitQualityBondPaymentAmount",
+            "title": "期初质保金支付原币金额",
+            "type": "BigDecimal",
+            "ordinal": 232
+          },
+          {
+            "bizType": "amount",
+            "name": "originNotInitQualityBondPaymentAmount",
+            "title": "非期初质保金支付原币金额",
+            "type": "BigDecimal",
+            "ordinal": 233
+          },
+          {
+            "bizType": "ratio",
+            "name": "apPaymentAmountMoreOrLessRate",
+            "title": "应付单金额允差值",
+            "type": "BigDecimal",
+            "ordinal": 234
+          },
+          {
+            "bizType": "ratio",
+            "name": "apPaymentQuantityMoreOrLessRate",
+            "title": "应付单数量允差值",
+            "type": "BigDecimal",
+            "ordinal": 235
+          },
+          {
+            "bizType": "ratio",
+            "name": "apPaymentPriceMoreOrLessRate",
+            "title": "应付单单价允差值",
+            "type": "BigDecimal",
+            "ordinal": 236
+          },
+          {
+            "bizType": "ratio",
+            "name": "paymentAmountMoreOrLessRate",
+            "title": "付款单金额允差值",
+            "type": "BigDecimal",
+            "ordinal": 237
+          },
+          {
+            "name": "moreOrLessObjectType",
+            "title": "允差控制对象（系统字段）",
+            "type": "JsonElement",
+            "ordinal": 238
+          },
+          {
+            "name": "moreOrLessObjectTypeStr",
+            "title": "允差控制对象（前端展示）",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 239
+          },
+          {
+            "name": "controlFields",
+            "title": "控制要素（系统字段）",
+            "type": "JsonElement",
+            "ordinal": 240
+          },
+          {
+            "name": "controlFieldsStr",
+            "title": "控制要素（前端展示）",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 241
+          },
+          {
+            "defaultValue": "PaymentStatusEnum.none",
+            "enumType": "PaymentStatusEnum",
+            "name": "paymentStatusId",
+            "title": "付款状态",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 242
+          },
+          {
+            "defaultValue": "ApPaymentStatusEnum.none",
+            "enumType": "ApPaymentStatusEnum",
+            "name": "apPaymentStatusId",
+            "title": "应付状态",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 243
+          },
+          {
+            "defaultValue": "PaymentApplicationStatusEnum.none",
+            "enumType": "PaymentApplicationStatusEnum",
+            "name": "paymentApplicationStatusId",
+            "title": "付款申请状态",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 244
+          },
+          {
+            "bizType": "amount",
+            "name": "bondPaymentAppAmount",
+            "title": "保证金付款申请金额",
+            "type": "BigDecimal",
+            "ordinal": 245
+          },
+          {
+            "bizType": "amount",
+            "name": "originBondPaymentAppAmount",
+            "title": "保证金原币付款申请金额",
+            "type": "BigDecimal",
+            "ordinal": 246
+          },
+          {
+            "bizType": "amount",
+            "name": "bondPayedAppAmount",
+            "title": "保证金付款申请已付款金额",
+            "type": "BigDecimal",
+            "ordinal": 247
+          },
+          {
+            "bizType": "amount",
+            "name": "originBondPayedAppAmount",
+            "title": "保证金付款申请原币已付款金额",
+            "type": "BigDecimal",
+            "ordinal": 248
+          },
+          {
+            "bizType": "amount",
+            "name": "paymentAppAmount",
+            "title": "付款申请金额",
+            "type": "BigDecimal",
+            "ordinal": 249
+          },
+          {
+            "bizType": "amount",
+            "name": "originPaymentAppAmount",
+            "title": "原币付款申请金额",
+            "type": "BigDecimal",
+            "ordinal": 250
+          },
+          {
+            "bizType": "amount",
+            "name": "payedPaymentAppAmount",
+            "title": "付款申请已付款金额",
+            "type": "BigDecimal",
+            "ordinal": 251
+          },
+          {
+            "bizType": "amount",
+            "name": "originPayedPaymentAppAmount",
+            "title": "原币付款申请已付款金额",
+            "type": "BigDecimal",
+            "ordinal": 252
+          },
+          {
+            "bizType": "amount",
+            "name": "balancePaymentAmount",
+            "title": "可付款申请金额",
+            "type": "BigDecimal",
+            "ordinal": 253
+          },
+          {
+            "bizType": "amount",
+            "name": "originBalancePaymentAmount",
+            "title": "原币可付款申请金额",
+            "type": "BigDecimal",
+            "ordinal": 254
+          },
+          {
+            "bizType": "amount",
+            "name": "bondBalancePaymentAmount",
+            "title": "保证金可付款申请金额",
+            "type": "BigDecimal",
+            "ordinal": 255
+          },
+          {
+            "bizType": "amount",
+            "name": "originBondBalancePaymentAmount",
+            "title": "原币保证金可付款申请金额",
+            "type": "BigDecimal",
+            "ordinal": 256
+          },
+          {
+            "enumType": "ContractExecutePathEnum",
+            "name": "executePath",
+            "title": "执行路径",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 257
+          },
+          {
+            "name": "frameContractId",
+            "title": "来源合同号",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 258
+          },
+          {
+            "enumType": "ContractExecuteStatusEnum",
+            "name": "executeStatusId",
+            "title": "子合同执行状态",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 259
+          },
+          {
+            "name": "isHasFreeGift",
+            "title": "是否赠品",
+            "type": "Boolean",
+            "ordinal": 260
+          },
+          {
+            "name": "isAllFreeGift",
+            "title": "是否全部为赠品",
+            "type": "Boolean",
+            "ordinal": 261
+          },
+          {
+            "name": "arContractId",
+            "title": "应收合同",
+            "type": "String",
+            "properties": {
+              "modules": [
+                "contract"
+              ],
+              "isMultiLineText": true
+            },
+            "ordinal": 262
+          },
+          {
+            "name": "hasDeposit",
+            "title": "押金",
+            "type": "Boolean",
+            "ordinal": 263
+          },
+          {
+            "bizType": "amount",
+            "name": "depositAmount",
+            "title": "押金本币金额",
+            "type": "BigDecimal",
+            "ordinal": 264
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositAmount",
+            "title": "押金原币金额",
+            "type": "BigDecimal",
+            "ordinal": 265
+          },
+          {
+            "bizType": "amount",
+            "name": "arDepositReceivedAmount",
+            "title": "押金已收款本币金额",
+            "type": "BigDecimal",
+            "ordinal": 266
+          },
+          {
+            "bizType": "amount",
+            "name": "originArDepositReceivedAmount",
+            "title": "押金已收款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 267
+          },
+          {
+            "bizType": "amount",
+            "name": "depositDirectReceiptAmount",
+            "title": "押金直接收款本币金额",
+            "type": "BigDecimal",
+            "ordinal": 268
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositDirectReceiptAmount",
+            "title": "押金直接收款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 269
+          },
+          {
+            "bizType": "amount",
+            "name": "depositUnReceivedAmount",
+            "title": "押金未收款本币金额",
+            "type": "BigDecimal",
+            "ordinal": 270
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositUnReceivedAmount",
+            "title": "押金未收款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 271
+          },
+          {
+            "bizType": "amount",
+            "name": "arDepositPaymentAppAmount",
+            "title": "押金退回已付款申请本币金额",
+            "type": "BigDecimal",
+            "ordinal": 272
+          },
+          {
+            "bizType": "amount",
+            "name": "originArDepositPaymentAppAmount",
+            "title": "押金退回已付款申请原币金额",
+            "type": "BigDecimal",
+            "ordinal": 273
+          },
+          {
+            "bizType": "amount",
+            "name": "depositPaymentPayedAppAmount",
+            "title": "押金退回付款申请已支付本币金额",
+            "type": "BigDecimal",
+            "ordinal": 274
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositPaymentPayedAppAmount",
+            "title": "押金退回付款申请已支付原币金额",
+            "type": "BigDecimal",
+            "ordinal": 275
+          },
+          {
+            "bizType": "amount",
+            "name": "depositReturnAmount",
+            "title": "押金已退回本币金额",
+            "type": "BigDecimal",
+            "ordinal": 276
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositReturnAmount",
+            "title": "押金已退回原币金额",
+            "type": "BigDecimal",
+            "ordinal": 277
+          },
+          {
+            "bizType": "amount",
+            "name": "depositDirectReturnAmount",
+            "title": "押金直接退回本币金额",
+            "type": "BigDecimal",
+            "ordinal": 278,
+            "desc": "其他应付单或者付款申请生成的付款单部分"
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositDirectReturnAmount",
+            "title": "押金直接退回原币金额",
+            "type": "BigDecimal",
+            "ordinal": 279
+          },
+          {
+            "bizType": "amount",
+            "name": "depositReverseRcAmount",
+            "title": "押金冲销售款本币金额",
+            "type": "BigDecimal",
+            "ordinal": 280
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositReverseRcAmount",
+            "title": "押金冲销售款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 281
+          },
+          {
+            "bizType": "amount",
+            "name": "depositReverseArAmount",
+            "title": "押金冲其他应收本币金额",
+            "type": "BigDecimal",
+            "ordinal": 282
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositReverseArAmount",
+            "title": "押金冲其他应收原币金额",
+            "type": "BigDecimal",
+            "ordinal": 283
+          },
+          {
+            "bizType": "amount",
+            "name": "depositApTransferAmount",
+            "title": "押金应付转账本币金额",
+            "type": "BigDecimal",
+            "ordinal": 284
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositApTransferAmount",
+            "title": "押金应付转账原币金额",
+            "type": "BigDecimal",
+            "ordinal": 285
+          },
+          {
+            "bizType": "amount",
+            "name": "depositApRedBlueDeclaredAmount",
+            "title": "押金应付红蓝核销本币金额",
+            "type": "BigDecimal",
+            "ordinal": 286
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositApRedBlueDeclaredAmount",
+            "title": "押金应付红蓝核销原币金额",
+            "type": "BigDecimal",
+            "ordinal": 287
+          },
+          {
+            "bizType": "amount",
+            "name": "depositReceivedUnReturnAmount",
+            "title": "押金已收款未退回本币金额",
+            "type": "BigDecimal",
+            "ordinal": 288
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositReceivedUnReturnAmount",
+            "title": "押金已收款未退回原币金额",
+            "type": "BigDecimal",
+            "ordinal": 289
+          },
+          {
+            "bizType": "amount",
+            "name": "apDepositPaymentAppAmount",
+            "title": "押金付款申请本币金额",
+            "type": "BigDecimal",
+            "ordinal": 290
+          },
+          {
+            "bizType": "amount",
+            "name": "originApDepositPaymentAppAmount",
+            "title": "押金付款申请原币金额",
+            "type": "BigDecimal",
+            "ordinal": 291
+          },
+          {
+            "bizType": "amount",
+            "name": "depositPayedPaymentAppAmount",
+            "title": "押金付款申请已支付本币金额",
+            "type": "BigDecimal",
+            "ordinal": 292
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositPayedPaymentAppAmount",
+            "title": "押金付款申请已支付原币金额",
+            "type": "BigDecimal",
+            "ordinal": 293
+          },
+          {
+            "bizType": "amount",
+            "name": "depositPayedAmount",
+            "title": "押金已付款本币金额",
+            "type": "BigDecimal",
+            "ordinal": 294
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositPayedAmount",
+            "title": "押金已付款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 295
+          },
+          {
+            "bizType": "amount",
+            "name": "depositDirectPayedAmount",
+            "title": "押金直接付款本币金额",
+            "type": "BigDecimal",
+            "ordinal": 296
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositDirectPayedAmount",
+            "title": "押金直接付款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 297
+          },
+          {
+            "bizType": "amount",
+            "name": "depositUnPayedAmount",
+            "title": "押金未付款本币金额",
+            "type": "BigDecimal",
+            "ordinal": 298
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositUnPayedAmount",
+            "title": "押金未付款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 299
+          },
+          {
+            "bizType": "amount",
+            "name": "apDepositReceivedAmount",
+            "title": "押金已收回本币金额",
+            "type": "BigDecimal",
+            "ordinal": 300
+          },
+          {
+            "bizType": "amount",
+            "name": "originApDepositReceivedAmount",
+            "title": "押金已收回原币金额",
+            "type": "BigDecimal",
+            "ordinal": 301
+          },
+          {
+            "bizType": "amount",
+            "name": "depositDirectReceivedAmount",
+            "title": "押金直接收回本币金额",
+            "type": "BigDecimal",
+            "ordinal": 302
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositDirectReceivedAmount",
+            "title": "押金直接收回原币金额",
+            "type": "BigDecimal",
+            "ordinal": 303
+          },
+          {
+            "bizType": "amount",
+            "name": "depositReverseApAmount",
+            "title": "押金冲采购款本币金额",
+            "type": "BigDecimal",
+            "ordinal": 304
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositReverseApAmount",
+            "title": "押金冲采购款原币金额",
+            "type": "BigDecimal",
+            "ordinal": 305
+          },
+          {
+            "bizType": "amount",
+            "name": "depositReverseOtherApAmount",
+            "title": "押金冲其他应付本币金额",
+            "type": "BigDecimal",
+            "ordinal": 306
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositReverseOtherApAmount",
+            "title": "押金冲其他应付原币金额",
+            "type": "BigDecimal",
+            "ordinal": 307
+          },
+          {
+            "bizType": "amount",
+            "name": "depositArTransferAmount",
+            "title": "押金应收转账本币金额",
+            "type": "BigDecimal",
+            "ordinal": 308
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositArTransferAmount",
+            "title": "押金应收转账原币金额",
+            "type": "BigDecimal",
+            "ordinal": 309
+          },
+          {
+            "bizType": "amount",
+            "name": "depositArRedBlueDeclaredAmount",
+            "title": "押金应收红蓝核销本币金额",
+            "type": "BigDecimal",
+            "ordinal": 310
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositArRedBlueDeclaredAmount",
+            "title": "押金应收红蓝核销原币金额",
+            "type": "BigDecimal",
+            "ordinal": 311
+          },
+          {
+            "bizType": "amount",
+            "name": "depositPayedUnReceivedAmount",
+            "title": "押金已付款未收回本币金额",
+            "type": "BigDecimal",
+            "ordinal": 312
+          },
+          {
+            "bizType": "amount",
+            "name": "originDepositPayedUnReceivedAmount",
+            "title": "押金已付款未收回原币金额",
+            "type": "BigDecimal",
+            "ordinal": 313
+          },
+          {
+            "name": "settleObjectCustomer",
+            "title": "结算单位(客户)",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 4800
+          },
+          {
+            "name": "settleObjectVendor",
+            "title": "结算单位(供应商)",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 4801
+          },
+          {
+            "name": "objectCustomer",
+            "title": "往来单位(客户)",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 4802
+          },
+          {
+            "name": "objectVendor",
+            "title": "往来单位(供应商)",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 4803
+          },
+          {
+            "name": "frameContractApContract",
+            "title": "来源合同号(应付合同)",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 4804
+          },
+          {
+            "name": "frameContractArContract",
+            "title": "来源合同号(应收合同)",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 4805
+          },
+          {
+            "name": "srcObjectObjectData",
+            "title": "来源对象Id(对象数据表)",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 4806
+          },
+          {
+            "isRequired": false,
+            "apiName": "csHeZuoShangJieSuanBiLi",
+            "isCustomizedField": true,
+            "bizType": "percent",
+            "defaultValue": "0",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": true,
+            "isOrganizationalField": false,
+            "title": "合作商结算比例",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 4
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csHeZuoShangJieSuanBiLiCcpv4lk0cxq01",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "thousands": true,
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "decimalDigits": 4,
+              "asChangeReport": true,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00%"
+            },
+            "ordinal": 5000,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csHeTongGaiZhangFenShu",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": true,
+            "isOrganizationalField": false,
+            "title": "合同盖章分数",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csHeTongGaiZhangFenShuCcpv5r40cxq01",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "thousands": true,
+              "applyScope": [
+                "ArContract",
+                "ReferApContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "decimalDigits": 2,
+              "asChangeReport": true,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5001,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csHeTongGaiZhangFenShu",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": true,
+            "isOrganizationalField": false,
+            "title": "停",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csHeTongGaiZhangFenShuCcpv5rl0cv101",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "thousands": true,
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "decimalDigits": 2,
+              "asChangeReport": true,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5002,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csYinYongXiangMuYeWuYuan",
+            "isCustomizedField": true,
+            "dataScopeUsed": true,
+            "isRefVisible": false,
+            "isListVisible": true,
+            "isVisible": true,
+            "isOrganizationalField": false,
+            "title": "引用项目业务员",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": false,
+            "isCriteriaVisible": true,
+            "name": "csYinYongXiangMuYeWuYuanCcpwe8v0cxq01",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "applyScope": [
+                "ArContract",
+                "ReferApContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "ignoreAuth": false,
+              "orgContexts": {},
+              "asChangeReport": true,
+              "isCodeRuleField": false,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract"
+              ],
+              "isMultiLineText": true
+            },
+            "ordinal": 5003,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csHeTongGaiZhang",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": true,
+            "isOrganizationalField": false,
+            "title": "合同盖章份数",
+            "type": "Long",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csHeTongGaiZhangCcpweev0cv101",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "thousands": true,
+              "applyScope": [
+                "ArContract",
+                "ApContract",
+                "ReferApContractView",
+                "Contract",
+                "ReferArContractView",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract",
+                "ReferArContractView"
+              ],
+              "decimalFormat": "#,##0.00000000"
+            },
+            "ordinal": 5004,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csQianYueZhuTi",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 500,
+            "isListVisible": true,
+            "isVisible": true,
+            "isOrganizationalField": false,
+            "title": "签约主体",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": true,
+            "name": "csQianYueZhuTiCcpwetd0cv101",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "applyScope": [
+                "ArContract",
+                "ReferApContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "isMultiLineText": false,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract"
+              ]
+            },
+            "ordinal": 5005,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZhiFuFangShi",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "enumType": "CsHeZuoShangHeTongZhiFuFangShi",
+            "isListVisible": true,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "支付方式",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": true,
+            "name": "csZhiFuFangShiCcpwfhb0cv101",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "isMultiLineText": true
+            },
+            "ordinal": 5006,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csBaoZhengJinZhiFuFangShi",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "enumType": "CsHeZuoShangHeTongZhiFuFangShi",
+            "isListVisible": true,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "保证金支付方式",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": true,
+            "name": "csBaoZhengJinZhiFuFangShiCcpwfhj0cv101",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "isMultiLineText": true
+            },
+            "ordinal": 5007,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csLvYueBaoZhengJinZhiFuFangShi",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "enumType": "CsHeZuoShangHeTongZhiFuFangShi",
+            "isListVisible": true,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "履约保证金支付方式",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": true,
+            "name": "csLvYueBaoZhengJinZhiFuFangShiCcpwfj60cv101",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "isMultiLineText": true
+            },
+            "ordinal": 5008,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZhongBiaoFuWuFeiJinE",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "中标服务费金额",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csZhongBiaoFuWuFeiJinECcpwfje0cv101",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "thousands": true,
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "decimalDigits": 2,
+              "asChangeReport": true,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5009,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZhiXingBaoZhengJinJinE",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "执行保证金金额",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csZhiXingBaoZhengJinJinECcpwfju0cv101",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "thousands": true,
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "decimalDigits": 2,
+              "asChangeReport": true,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5010,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csLvYueBaoZhengJinJinE",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "履约保证金金额",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csLvYueBaoZhengJinJinECcpwfk30cv101",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "thousands": true,
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "decimalDigits": 2,
+              "asChangeReport": true,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5011,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csHeTongShuiLv",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isOrganizationalField": false,
+            "isVisible": true,
+            "title": "合同税率",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2,
+              "expressionDefinition": {
+                "dependencies": [
+                  {
+                    "name": "apContractSubjectMatterItems",
+                    "isDetail": true,
+                    "aliasName": "apContractSubjectMatterItems",
+                    "paramName": "taxRate"
+                  }
+                ],
+                "displayExpression": [
+                  {
+                    "type": "function",
+                    "value": "max"
+                  },
+                  {
+                    "type": "text",
+                    "value": "("
+                  },
+                  {
+                    "type": "variate",
+                    "value": "apContractSubjectMatterItems"
+                  },
+                  {
+                    "type": "text",
+                    "value": ", "
+                  },
+                  {
+                    "type": "number",
+                    "value": "'taxRate'"
+                  },
+                  {
+                    "type": "text",
+                    "value": ")"
+                  }
+                ]
+              }
+            },
+            "isCriteriaVisible": false,
+            "name": "csHeTongShuiLvCcpwg9j0cv101",
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "calcMode": "",
+              "thousands": true,
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "decimalDigits": 2,
+              "asChangeReport": true,
+              "isMultiLineText": false,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5012,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csDuiFangYinXingZhangHuXinXi",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 1000,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "对方银行账户信息",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csDuiFangYinXingZhangHuXinXiCcq38uj0cv101",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "applyScope": [
+                "PaymentApplication",
+                "Payment",
+                "ApContract",
+                "CsWuLiaoZhiZuoLeiGongDan",
+                "JournalReportView",
+                "ApInit",
+                "ReferArContractView",
+                "Contract",
+                "VerificationItem",
+                "PurSettleItem",
+                "SalesVerificationItem",
+                "PurchaseInvoiceVerificationItem",
+                "InvoiceVerificationItem",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "isMultiLineText": true,
+              "autoCopyApplyScope": [
+                "JournalReportView",
+                "ApInit",
+                "ReferArContractView",
+                "Contract"
+              ],
+              "isCustomizedEntity": true
+            },
+            "ordinal": 5013,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csYinYongXiangMuFuZeBuMen",
+            "isCustomizedField": true,
+            "dataScopeUsed": true,
+            "isRefVisible": false,
+            "isListVisible": true,
+            "isVisible": true,
+            "isOrganizationalField": false,
+            "title": "引用项目负责部门",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": false,
+            "isCriteriaVisible": true,
+            "name": "csYinYongXiangMuFuZeBuMenCcq5upn0cxq01",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "applyScope": [
+                "CsWuLiaoZhiZuoLeiGongDan",
+                "ArContract",
+                "ReferApContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "ignoreAuth": false,
+              "orgContexts": {},
+              "asChangeReport": true,
+              "isCodeRuleField": false,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract"
+              ],
+              "isMultiLineText": true,
+              "isCustomizedEntity": true
+            },
+            "ordinal": 5014,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csHeTongShuiLv",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isOrganizationalField": false,
+            "isVisible": true,
+            "title": "合同税率",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2,
+              "expressionDefinition": {
+                "dependencies": [
+                  {
+                    "name": "arContractSubjectMatterItems",
+                    "isDetail": true,
+                    "aliasName": "arContractSubjectMatterItems",
+                    "paramName": "taxRate"
+                  }
+                ],
+                "displayExpression": [
+                  {
+                    "type": "function",
+                    "value": "max"
+                  },
+                  {
+                    "type": "text",
+                    "value": "("
+                  },
+                  {
+                    "type": "variate",
+                    "value": "arContractSubjectMatterItems"
+                  },
+                  {
+                    "type": "text",
+                    "value": ", "
+                  },
+                  {
+                    "type": "number",
+                    "value": "'taxRate'"
+                  },
+                  {
+                    "type": "text",
+                    "value": ")"
+                  }
+                ]
+              }
+            },
+            "isCriteriaVisible": false,
+            "name": "csHeTongShuiLvCcqples0m0n01",
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "percent": false,
+              "calcMode": "forceCalc",
+              "thousands": true,
+              "applyScope": [
+                "ArContract",
+                "ReferApContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "decimalDigits": 2,
+              "asChangeReport": true,
+              "isMultiLineText": false,
+              "significantDigits": false,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5015,
+            "desc": "取值明细，回写到项目"
+          },
+          {
+            "isRequired": false,
+            "apiName": "csYiKouKuanJinE",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": true,
+            "isOrganizationalField": false,
+            "title": "已扣款金额",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csYiKouKuanJinECcqwv5a0m5b01",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "thousands": true,
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "decimalDigits": 2,
+              "asChangeReport": true,
+              "significantDigits": false,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5016,
+            "desc": "合作商扣款记录单【扣款金额】合计回写"
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZhongBiaoFuWuFeiYiKouKuanJin",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "中标服务费已扣款金额",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csZhongBiaoFuWuFeiYiKouKuanJinCcruec20m6q01",
+            "isEditDuringApproval": false,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "thousands": true,
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "decimalDigits": 2,
+              "asChangeReport": true,
+              "significantDigits": false,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5017,
+            "desc": "订单明细回写"
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZhongBiaoFuWuFeiWeiKouKuanJi",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isOrganizationalField": false,
+            "isVisible": false,
+            "title": "中标服务费未扣款金额",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2,
+              "expressionDefinition": {
+                "dependencies": [
+                  {
+                    "isDetail": false,
+                    "name": "csZhongBiaoFuWuFeiJinECcpwfje0cv101",
+                    "aliasName": "csZhongBiaoFuWuFeiJinECcpwfje0cv101"
+                  },
+                  {
+                    "isDetail": false,
+                    "name": "csZhongBiaoFuWuFeiYiKouKuanJinCcruec20m6q01",
+                    "aliasName": "csZhongBiaoFuWuFeiYiKouKuanJinCcruec20m6q01"
+                  },
+                  {
+                    "isDetail": false,
+                    "name": "csShouTianShouTianZhongBiaoFuWCctanbx44ax01",
+                    "aliasName": "csShouTianShouTianZhongBiaoFuWCctanbx44ax01"
+                  }
+                ],
+                "displayExpression": [
+                  {
+                    "value": "csZhongBiaoFuWuFeiJinECcpwfje0cv101",
+                    "type": "variate"
+                  },
+                  {
+                    "value": " - ",
+                    "type": "operator"
+                  },
+                  {
+                    "value": "csZhongBiaoFuWuFeiYiKouKuanJinCcruec20m6q01",
+                    "type": "variate"
+                  },
+                  {
+                    "value": " - ",
+                    "type": "operator"
+                  },
+                  {
+                    "value": "csShouTianShouTianZhongBiaoFuWCctanbx44ax01",
+                    "type": "variate"
+                  }
+                ]
+              }
+            },
+            "isCriteriaVisible": false,
+            "name": "csZhongBiaoFuWuFeiWeiKouKuanJiCcrued60m6q01",
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "percent": false,
+              "calcMode": "",
+              "thousands": true,
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "decimalDigits": 2,
+              "asChangeReport": true,
+              "isMultiLineText": false,
+              "significantDigits": false,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5018,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csBaoZhengJinWeiKouKuanJinE",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isOrganizationalField": false,
+            "isVisible": false,
+            "title": "保证金未扣款金额",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2,
+              "expressionDefinition": {
+                "dependencies": [
+                  {
+                    "isDetail": false,
+                    "name": "csZhiXingBaoZhengJinJinECcpwfju0cv101",
+                    "aliasName": "csZhiXingBaoZhengJinJinECcpwfju0cv101"
+                  },
+                  {
+                    "isDetail": false,
+                    "name": "csLvYueBaoZhengJinJinECcpwfk30cv101",
+                    "aliasName": "csLvYueBaoZhengJinJinECcpwfk30cv101"
+                  },
+                  {
+                    "isDetail": false,
+                    "name": "csYiKouKuanJinECcqwv5a0m5b01",
+                    "aliasName": "csYiKouKuanJinECcqwv5a0m5b01"
+                  },
+                  {
+                    "isDetail": false,
+                    "name": "csShouTianBaoZhengJinYiKouKuanCctand344ax01",
+                    "aliasName": "csShouTianBaoZhengJinYiKouKuanCctand344ax01"
+                  }
+                ],
+                "displayExpression": [
+                  {
+                    "value": "(",
+                    "type": "text"
+                  },
+                  {
+                    "value": "csZhiXingBaoZhengJinJinECcpwfju0cv101",
+                    "type": "variate"
+                  },
+                  {
+                    "value": " + ",
+                    "type": "operator"
+                  },
+                  {
+                    "value": "csLvYueBaoZhengJinJinECcpwfk30cv101",
+                    "type": "variate"
+                  },
+                  {
+                    "value": ")",
+                    "type": "text"
+                  },
+                  {
+                    "value": " - ",
+                    "type": "operator"
+                  },
+                  {
+                    "value": "csYiKouKuanJinECcqwv5a0m5b01",
+                    "type": "variate"
+                  },
+                  {
+                    "value": " - ",
+                    "type": "operator"
+                  },
+                  {
+                    "value": "csShouTianBaoZhengJinYiKouKuanCctand344ax01",
+                    "type": "variate"
+                  }
+                ]
+              }
+            },
+            "isCriteriaVisible": false,
+            "name": "csBaoZhengJinWeiKouKuanJinECcs1ml544c901",
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "calcMode": "forceCalc",
+              "decimalDigits": 2,
+              "isMultiLineText": false,
+              "percent": false,
+              "significantDigits": false,
+              "thousands": true,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5019,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csLinShiGongYingShangMingCheng",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 999,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "临时供应商名称",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csLinShiGongYingShangMingChengCcs89hp44c901",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "isMultiLineText": false,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ]
+            },
+            "ordinal": 5020,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZiDingYiBianMa",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 30,
+            "isListVisible": true,
+            "isVisible": true,
+            "isOrganizationalField": false,
+            "title": "自定义编码",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": true,
+            "name": "csZiDingYiBianMaCcs89kr44c901",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ArContract",
+                "ReferApContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "isMultiLineText": false,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract"
+              ]
+            },
+            "ordinal": 5021,
+            "desc": "取值系统自带编码流水号--  HT01-202407120001"
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZiDingYiBianMa",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 999,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "自定义编码",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csZiDingYiBianMaCcs89r844c901",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "isMultiLineText": false,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ]
+            },
+            "ordinal": 5022,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZiLiaoYaJinZhiFuFangShi",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "enumType": "CsHeZuoShangHeTongZhiFuFangShi",
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "资料押金支付方式",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csZiLiaoYaJinZhiFuFangShiCcsbjw244c901",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "isMultiLineText": true
+            },
+            "ordinal": 5023,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZiLiaoYaJinJinE",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "资料押金金额",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csZiLiaoYaJinJinECcsbjwb44c901",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "decimalDigits": 2,
+              "significantDigits": false,
+              "thousands": true,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5024,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZiLiaoYaJinYiKouKuan",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "资料押金已扣款",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csZiLiaoYaJinYiKouKuanCcsbjwj44c901",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "decimalDigits": 2,
+              "significantDigits": false,
+              "thousands": true,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5025,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZiLiaoYaJinWeiKouKuan",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isOrganizationalField": false,
+            "isVisible": false,
+            "title": "资料押金未扣款",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2,
+              "expressionDefinition": {
+                "dependencies": [
+                  {
+                    "isDetail": false,
+                    "name": "csZiLiaoYaJinJinECcsbjwb44c901",
+                    "aliasName": "csZiLiaoYaJinJinECcsbjwb44c901"
+                  },
+                  {
+                    "isDetail": false,
+                    "name": "csZiLiaoYaJinYiKouKuanCcsbjwj44c901",
+                    "aliasName": "csZiLiaoYaJinYiKouKuanCcsbjwj44c901"
+                  },
+                  {
+                    "isDetail": false,
+                    "name": "csShouTianZiLiaoYaJinYiKouKuanCctandt44ax01",
+                    "aliasName": "csShouTianZiLiaoYaJinYiKouKuanCctandt44ax01"
+                  }
+                ],
+                "displayExpression": [
+                  {
+                    "value": "csZiLiaoYaJinJinECcsbjwb44c901",
+                    "type": "variate"
+                  },
+                  {
+                    "value": " - ",
+                    "type": "operator"
+                  },
+                  {
+                    "value": "csZiLiaoYaJinYiKouKuanCcsbjwj44c901",
+                    "type": "variate"
+                  },
+                  {
+                    "value": " - ",
+                    "type": "operator"
+                  },
+                  {
+                    "value": "csShouTianZiLiaoYaJinYiKouKuanCctandt44ax01",
+                    "type": "variate"
+                  }
+                ]
+              }
+            },
+            "isCriteriaVisible": false,
+            "name": "csZiLiaoYaJinWeiKouKuanCcsbjww44c901",
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "calcMode": "",
+              "decimalDigits": 2,
+              "isMultiLineText": false,
+              "percent": false,
+              "significantDigits": false,
+              "thousands": true,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5026,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csPaiXuBianMa",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 30,
+            "isListVisible": true,
+            "isOrganizationalField": false,
+            "isVisible": true,
+            "title": "排序编码",
+            "type": "String",
+            "uiOption": {
+              "decimalDigits": 0,
+              "expressionDefinition": {
+                "dependencies": [
+                  {
+                    "aliasName": "code",
+                    "isDetail": false,
+                    "name": "code"
+                  },
+                  {
+                    "aliasName": "code",
+                    "isDetail": false,
+                    "name": "code"
+                  }
+                ],
+                "displayExpression": [
+                  {
+                    "type": "function",
+                    "value": "left"
+                  },
+                  {
+                    "type": "text",
+                    "value": "("
+                  },
+                  {
+                    "type": "variate",
+                    "value": "code"
+                  },
+                  {
+                    "type": "text",
+                    "value": ", "
+                  },
+                  {
+                    "type": "number",
+                    "value": "2"
+                  },
+                  {
+                    "type": "text",
+                    "value": ")"
+                  },
+                  {
+                    "type": "operator",
+                    "value": " + "
+                  },
+                  {
+                    "type": "function",
+                    "value": "right"
+                  },
+                  {
+                    "type": "text",
+                    "value": "("
+                  },
+                  {
+                    "type": "variate",
+                    "value": "code"
+                  },
+                  {
+                    "type": "text",
+                    "value": ", "
+                  },
+                  {
+                    "type": "number",
+                    "value": "8"
+                  },
+                  {
+                    "type": "text",
+                    "value": ")"
+                  }
+                ]
+              }
+            },
+            "isCriteriaVisible": false,
+            "name": "csPaiXuBianMaCcsh06d44c901",
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ArContract",
+                "ReferApContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "calcMode": "forceCalc",
+              "decimalDigits": 0,
+              "isMultiLineText": false,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract"
+              ]
+            },
+            "ordinal": 5027,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csYingFuHeTongPaiXuBianMa",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 30,
+            "isListVisible": true,
+            "isOrganizationalField": false,
+            "isVisible": true,
+            "title": "应付合同排序编码",
+            "type": "String",
+            "uiOption": {
+              "decimalDigits": 0,
+              "expressionDefinition": {
+                "dependencies": [
+                  {
+                    "aliasName": "code",
+                    "isDetail": false,
+                    "name": "code"
+                  },
+                  {
+                    "aliasName": "code",
+                    "isDetail": false,
+                    "name": "code"
+                  }
+                ],
+                "displayExpression": [
+                  {
+                    "type": "function",
+                    "value": "left"
+                  },
+                  {
+                    "type": "text",
+                    "value": "("
+                  },
+                  {
+                    "type": "variate",
+                    "value": "code"
+                  },
+                  {
+                    "type": "text",
+                    "value": ", "
+                  },
+                  {
+                    "type": "number",
+                    "value": "2"
+                  },
+                  {
+                    "type": "text",
+                    "value": ")"
+                  },
+                  {
+                    "type": "operator",
+                    "value": " + "
+                  },
+                  {
+                    "type": "function",
+                    "value": "right"
+                  },
+                  {
+                    "type": "text",
+                    "value": "("
+                  },
+                  {
+                    "type": "variate",
+                    "value": "code"
+                  },
+                  {
+                    "type": "text",
+                    "value": ", "
+                  },
+                  {
+                    "type": "number",
+                    "value": "8"
+                  },
+                  {
+                    "type": "text",
+                    "value": ")"
+                  }
+                ]
+              }
+            },
+            "isCriteriaVisible": false,
+            "name": "csYingFuHeTongPaiXuBianMaCcsh08544c901",
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "calcMode": "forceCalc",
+              "decimalDigits": 0,
+              "isMultiLineText": false,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ]
+            },
+            "ordinal": 5028,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csShouTianShouTianZhongBiaoFuW",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "手填中标服务费已扣款金额",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csShouTianShouTianZhongBiaoFuWCctanbx44ax01",
+            "isEditDuringApproval": false,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": false,
+              "decimalDigits": 2,
+              "significantDigits": false,
+              "thousands": true,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5029,
+            "desc": "期初数据，手工填写"
+          },
+          {
+            "isRequired": false,
+            "apiName": "csShouTianBaoZhengJinYiKouKuan",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "手填保证金已扣款金额",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csShouTianBaoZhengJinYiKouKuanCctand344ax01",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "decimalDigits": 2,
+              "significantDigits": false,
+              "thousands": true,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5030,
+            "desc": "期初数据"
+          },
+          {
+            "isRequired": false,
+            "apiName": "csShouTianZiLiaoYaJinYiKouKuan",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 9,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "手填资料押金已扣款金额",
+            "type": "BigDecimal",
+            "uiOption": {
+              "decimalDigits": 2
+            },
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csShouTianZiLiaoYaJinYiKouKuanCctandt44ax01",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "decimalDigits": 2,
+              "significantDigits": false,
+              "thousands": true,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "decimalFormat": "#,##0.00"
+            },
+            "ordinal": 5031,
+            "desc": "期初数据"
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZhiFuQiXian",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 30,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "支付期限",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csZhiFuQiXianCcv2rdf44ax01",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": false,
+              "isMultiLineText": false,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ]
+            },
+            "ordinal": 5032,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csZiDingYiZhuHeTong",
+            "isCustomizedField": true,
+            "isRefVisible": false,
+            "isListVisible": false,
+            "isVisible": false,
+            "isOrganizationalField": false,
+            "title": "自定义主合同",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": false,
+            "name": "csZiDingYiZhuHeTongCcwukmw44ax01",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ApContract",
+                "ReferArContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "bizOnLevel": {
+                "ApContract": "any"
+              },
+              "isCodeRuleField": false,
+              "orgContexts": {},
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferArContractView",
+                "Contract"
+              ],
+              "isMultiLineText": true
+            },
+            "ordinal": 5033,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csYongZhangLeiXing",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "enumType": "CsYongZhangLeiXing",
+            "isListVisible": true,
+            "isVisible": true,
+            "multiLangs": {},
+            "isOrganizationalField": false,
+            "title": "用章类型",
+            "type": "Multiple",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": true,
+            "name": "csYongZhangLeiXingCd1abea44ax01",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ArContract",
+                "ReferApContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract"
+              ]
+            },
+            "ordinal": 5034,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "csYongZhangShuLiangShuoMing",
+            "isCustomizedField": true,
+            "defaultValue": "",
+            "isRefVisible": false,
+            "length": 1000,
+            "isListVisible": true,
+            "isVisible": false,
+            "multiLangs": {},
+            "isOrganizationalField": false,
+            "title": "用章数量说明",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": true,
+            "isCriteriaVisible": true,
+            "name": "csYongZhangShuLiangShuoMingCd1abfb44ax01",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "applyScope": [
+                "ArContract",
+                "ReferApContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "isMultiLineText": false,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract"
+              ]
+            },
+            "ordinal": 5035,
+            "desc": ""
+          },
+          {
+            "isRequired": false,
+            "apiName": "hisVerCsYinYongXiangMuFuZeBuMen",
+            "isCustomizedField": true,
+            "dataScopeUsed": true,
+            "isRefVisible": false,
+            "isListVisible": true,
+            "isVisible": true,
+            "isOrganizationalField": false,
+            "title": "引用项目负责部门(历史)",
+            "type": "String",
+            "uiOption": {},
+            "isEditable": false,
+            "isCriteriaVisible": true,
+            "name": "hisVerCsYinYongXiangMuFuZeBuMenCcq5upn0cxq01",
+            "isEditDuringApproval": true,
+            "isDisabled": false,
+            "placeHolder": "",
+            "properties": {
+              "ordinal": 5000,
+              "applyScope": [
+                "CsWuLiaoZhiZuoLeiGongDan",
+                "ArContract",
+                "ReferApContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "ignoreAuth": false,
+              "orgContexts": {},
+              "asChangeReport": true,
+              "isCodeRuleField": false,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract"
+              ],
+              "isMultiLineText": true,
+              "isCustomizedEntity": true
+            },
+            "ordinal": 5036,
+            "isHisVerId": true,
+            "desc": ""
+          },
+          {
+            "isCustomizedField": true,
+            "isRefVisible": false,
+            "isListVisible": true,
+            "isOrganizationalField": false,
+            "isVisible": true,
+            "multiLangs": {
+              "title": {
+                "en-us": "用章类型List",
+                "zh-cn": "用章类型列表"
+              }
+            },
+            "title": "用章类型列表",
+            "type": "List",
+            "uiOption": {},
+            "isCriteriaVisible": true,
+            "name": "csYongZhangLeiXingCd1abea44ax01Objects",
+            "dependField": "csYongZhangLeiXingCd1abea44ax01",
+            "isDisabled": false,
+            "properties": {
+              "applyScope": [
+                "ArContract",
+                "ReferApContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract"
+              ]
+            }
+          },
+          {
+            "isCustomizedField": true,
+            "name": "csYongZhangLeiXingCd1abea44ax01Nbr",
+            "dependField": "csYongZhangLeiXingCd1abea44ax01",
+            "multiLangs": {
+              "title": {
+                "en-us": "用章类型 Count",
+                "zh-cn": "用章类型计数"
+              }
+            },
+            "isDisabled": false,
+            "title": "用章类型计数",
+            "type": "Integer",
+            "virtualExpr": "COALESCE((csYongZhangLeiXingCd1abea44ax01->>'nbr')::numeric,0)",
+            "properties": {
+              "applyScope": [
+                "ArContract",
+                "ReferApContractView",
+                "Contract",
+                "AccountingFactItem"
+              ],
+              "asChangeReport": true,
+              "ordinal": 5000,
+              "autoCopyApplyScope": [
+                "ReferApContractView",
+                "Contract"
+              ]
+            }
+          },
+          {
+            "bizType": "operator",
+            "name": "createdUserId",
+            "title": "创建人",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9000
+          },
+          {
+            "name": "createdTime",
+            "title": "创建时间",
+            "type": "Timestamp",
+            "isSystemField": true,
+            "ordinal": 9001
+          },
+          {
+            "bizType": "operator",
+            "name": "modifiedUserId",
+            "title": "修改人",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9002
+          },
+          {
+            "name": "modifiedTime",
+            "title": "修改时间",
+            "type": "Timestamp",
+            "isSystemField": true,
+            "ordinal": 9003
+          },
+          {
+            "bizType": "operator",
+            "name": "approvedUserId",
+            "title": "审批人",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9004
+          },
+          {
+            "name": "approvedTime",
+            "title": "审批时间",
+            "type": "Timestamp",
+            "isSystemField": true,
+            "ordinal": 9005
+          },
+          {
+            "name": "printTimes",
+            "title": "打印次数",
+            "type": "Integer",
+            "isSystemField": true,
+            "ordinal": 9006
+          },
+          {
+            "bizType": "operator",
+            "name": "lastPrintUserId",
+            "title": "最近打印人",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9007
+          },
+          {
+            "name": "lastPrintTime",
+            "title": "最近打印日期",
+            "type": "Timestamp",
+            "isSystemField": true,
+            "ordinal": 9008
+          },
+          {
+            "bizType": "operator",
+            "name": "abortedUserId",
+            "title": "作废人",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9009
+          },
+          {
+            "name": "abortedTime",
+            "title": "作废时间",
+            "type": "Timestamp",
+            "isSystemField": true,
+            "ordinal": 9010
+          },
+          {
+            "name": "abortedReason",
+            "title": "作废原因",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9011
+          },
+          {
+            "bizType": "operator",
+            "name": "finishedUserId",
+            "title": "结案人",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9012
+          },
+          {
+            "name": "finishedTime",
+            "title": "结案时间",
+            "type": "Timestamp",
+            "isSystemField": true,
+            "ordinal": 9013
+          },
+          {
+            "name": "finishedReason",
+            "title": "结案原因",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9014
+          },
+          {
+            "bizType": "operator",
+            "name": "closedUserId",
+            "title": "关闭人",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9015
+          },
+          {
+            "name": "closedBizDate",
+            "title": "关闭日期",
+            "type": "Timestamp",
+            "ordinal": 9016
+          },
+          {
+            "name": "closedTime",
+            "title": "关闭时间",
+            "type": "Timestamp",
+            "isSystemField": true,
+            "ordinal": 9017
+          },
+          {
+            "name": "closedReason",
+            "title": "关闭原因说明",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9018
+          },
+          {
+            "name": "closedBizReasonId",
+            "title": "关闭原因",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9019
+          },
+          {
+            "name": "isAutoClosed",
+            "title": "是否自动关闭",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9020
+          },
+          {
+            "name": "isSuspended",
+            "title": "是否挂起",
+            "type": "Boolean",
+            "ordinal": 9021
+          },
+          {
+            "bizType": "operator",
+            "name": "suspendedUserId",
+            "title": "挂起人",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9022
+          },
+          {
+            "name": "suspendedReason",
+            "isDisabled": true,
+            "title": "挂起原因说明",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9023
+          },
+          {
+            "name": "suspendedBizReasonId",
+            "title": "挂起原因码",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9024
+          },
+          {
+            "enumType": "SuspendType",
+            "name": "suspendTypeId",
+            "length": 64,
+            "title": "挂起类型",
+            "type": "String",
+            "isSystemField": true,
+            "ordinal": 9025
+          },
+          {
+            "bizType": "operator",
+            "name": "lastSubmitUserId",
+            "title": "提交人",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9026
+          },
+          {
+            "name": "lastSubmitTime",
+            "title": "提交时间",
+            "type": "Timestamp",
+            "isSystemField": true,
+            "ordinal": 9027
+          },
+          {
+            "name": "suspendedTime",
+            "title": "挂起时间",
+            "type": "Timestamp",
+            "isSystemField": true,
+            "ordinal": 9029
+          },
+          {
+            "name": "codeSeq",
+            "length": 64,
+            "title": "流水编码",
+            "type": "String",
+            "isSystemField": true,
+            "ordinal": 9500
+          },
+          {
+            "name": "isManualCode",
+            "title": "编码手工输入",
+            "type": "Boolean",
+            "isSystemField": true,
+            "ordinal": 9501
+          },
+          {
+            "name": "idPath",
+            "title": "id路径",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 9502
+          },
+          {
+            "name": "webEditTemplateId",
+            "title": "单据模板",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9503
+          },
+          {
+            "name": "level",
+            "title": "级别",
+            "type": "Integer",
+            "ordinal": 9504
+          },
+          {
+            "name": "isTemplateBill",
+            "title": "是否为模板数据",
+            "type": "Boolean",
+            "isSystemField": true,
+            "ordinal": 9505
+          },
+          {
+            "name": "isLeaf",
+            "title": "是否叶子节点",
+            "type": "Boolean",
+            "ordinal": 9506
+          },
+          {
+            "name": "srcTemplateBillId",
+            "title": "来源模板",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9507
+          },
+          {
+            "name": "idPathJson",
+            "title": "ID Path Json",
+            "type": "JsonElement",
+            "isSystemField": true,
+            "ordinal": 9508,
+            "triggerExpr": "to_jsonb(string_to_array(substring(id_path, 0, length(id_path)),','))"
+          },
+          {
+            "name": "activeEsignTaskId",
+            "title": "活跃的电子签署任务",
+            "type": "String",
+            "virtualExpr": "select id from EsignTask where objectId = ${alias}.id order by createdTime desc limit 1",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": false,
+            "ordinal": 9509
+          },
+          {
+            "name": "stdLevel",
+            "title": "标准级次",
+            "type": "Integer",
+            "virtualExpr": "level + 1",
+            "isSystemField": true,
+            "ordinal": 9510
+          },
+          {
+            "name": "isFreeProc",
+            "title": "是否自由流程",
+            "type": "Boolean",
+            "isSystemField": false,
+            "ordinal": 9511
+          },
+          {
+            "name": "treeSeqNo",
+            "title": "树序号",
+            "type": "String",
+            "virtualExpr": "''",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9512
+          },
+          {
+            "name": "bizPhaseGroupId",
+            "title": "业务阶段组",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9513
+          },
+          {
+            "name": "isMatchedCriteria",
+            "title": "是否符符合条件",
+            "type": "Boolean",
+            "virtualExpr": "false",
+            "isSystemField": true,
+            "ordinal": 9514
+          },
+          {
+            "name": "bizPhaseId",
+            "title": "业务阶段",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9515
+          },
+          {
+            "name": "billBizPhaseId",
+            "title": "单据业务阶段",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9516
+          },
+          {
+            "name": "lastWorkActivityTime",
+            "title": "最近跟进时间",
+            "type": "Timestamp",
+            "isSystemField": true,
+            "ordinal": 9517
+          },
+          {
+            "name": "isSystem",
+            "title": "是否为系统数据",
+            "type": "Boolean",
+            "isSystemField": true,
+            "ordinal": 9900
+          },
+          {
+            "name": "isInitData",
+            "title": "是否为预置数据",
+            "type": "Boolean",
+            "isSystemField": true,
+            "ordinal": 9901
+          },
+          {
+            "name": "isDeleted",
+            "title": "是否为删除数据",
+            "type": "Boolean",
+            "isSystemField": true,
+            "ordinal": 9902
+          },
+          {
+            "name": "dataVersion",
+            "title": "数据版本",
+            "type": "Long",
+            "isSystemField": true,
+            "ordinal": 9903
+          },
+          {
+            "name": "lastRequestId",
+            "length": 128,
+            "title": "最后一次更新请求的requestId",
+            "type": "String",
+            "isSystemField": true,
+            "ordinal": 9905
+          },
+          {
+            "bizType": "operator",
+            "name": "lastModifiedUserId",
+            "title": "最后修改人",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "isSystemField": true,
+            "ordinal": 9906
+          },
+          {
+            "name": "lastModifiedTime",
+            "title": "最后修改时间",
+            "type": "Timestamp",
+            "isSystemField": true,
+            "ordinal": 9907
+          },
+          {
+            "name": "customizedFields",
+            "title": "自定义属性",
+            "type": "JsonObject",
+            "isSystemField": true,
+            "ordinal": 9908
+          },
+          {
+            "isCustomizedField": false,
+            "name": "contractSubjectMatterItems",
+            "isDisabled": false,
+            "title": "标的明细列表",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10000
+          },
+          {
+            "isCustomizedField": false,
+            "name": "contractAggSettlementViews",
+            "isDisabled": false,
+            "title": "收付款及押金列表",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10001
+          },
+          {
+            "isCustomizedField": false,
+            "name": "contractAggBondViews",
+            "isDisabled": false,
+            "title": "保证金列表",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10002
+          },
+          {
+            "isCustomizedField": false,
+            "name": "redBills",
+            "isDisabled": false,
+            "title": "相关红单",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10003
+          },
+          {
+            "isCustomizedField": false,
+            "name": "contractSettlementItems",
+            "isDisabled": false,
+            "title": "收款计划明细列表",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10004
+          },
+          {
+            "isCustomizedField": false,
+            "name": "attachments",
+            "title": "附件",
+            "type": "List",
+            "ordinal": 11000
+          },
+          {
+            "isCustomizedField": false,
+            "name": "validateExceptions",
+            "title": "对象合法性检查异常",
+            "type": "List",
+            "ordinal": 11001
+          },
+          {
+            "isCustomizedField": false,
+            "name": "comments",
+            "title": "评论",
+            "type": "List",
+            "ordinal": 11002
+          },
+          {
+            "isCustomizedField": false,
+            "name": "userTasks",
+            "title": "关联的任务",
+            "type": "List",
+            "ordinal": 11003
+          },
+          {
+            "isCustomizedField": false,
+            "name": "activeAppoveUsers",
+            "title": "待审批用户",
+            "type": "List",
+            "ordinal": 11004
+          },
+          {
+            "isCustomizedField": false,
+            "name": "appovedUsers",
+            "title": "已审批用户",
+            "type": "List",
+            "ordinal": 11005
+          },
+          {
+            "isCustomizedField": false,
+            "name": "freeProcNodes",
+            "title": "自由审批节点列表",
+            "type": "List",
+            "ordinal": 11006
+          },
+          {
+            "isCustomizedField": false,
+            "name": "billParticipants",
+            "title": "单据参与人",
+            "type": "List",
+            "ordinal": 11007
+          },
+          {
+            "isCustomizedField": false,
+            "name": "chats",
+            "title": "群聊",
+            "type": "List",
+            "ordinal": 11008
+          },
+          {
+            "isCustomizedField": false,
+            "name": "esignTasks",
+            "title": "关联的电子签任务",
+            "type": "List",
+            "ordinal": 11009
+          },
+          {
+            "name": "unverifyRecord",
+            "title": "取消核销记录",
+            "type": "String",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 11010
+          },
+          {
+            "name": "dataObjectId",
+            "title": "数据对象类型",
+            "type": "String",
+            "virtualExpr": "to_entity_name(${alias}.tableoid::regclass::varchar)",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 11011
+          },
+          {
+            "name": "approvingUserNames",
+            "title": "待审批人",
+            "type": "String",
+            "virtualExpr": "select string_agg(user.name, ', ') from UserTaskEvent where userTask.taskTypeId='5JNNGXV01HP0100' and userTask.isActed=false and userTask.objectId=${alias}.id",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 11012
+          },
+          {
+            "name": "nextApproveUserTaskId",
+            "title": "待审任务",
+            "type": "String",
+            "virtualExpr": "select id from UserTask where taskTypeId='5JNNGXV01HP0100' and isActed=false and objectId=${alias}.id order by createdTime limit 1",
+            "properties": {
+              "isMultiLineText": true
+            },
+            "ordinal": 11013
+          },
+          {
+            "dependType": "detail",
+            "expression": "count(contractSubjectMatterItems)",
+            "isCustomizedField": false,
+            "name": "contractSubjectMatterItemsCount",
+            "dependField": "contractSubjectMatterItems",
+            "isDisabled": false,
+            "title": "标的明细列表计数",
+            "type": "Integer",
+            "properties": {},
+            "ordinal": 11014
+          },
+          {
+            "dependType": "detail",
+            "expression": "count(contractAggSettlementViews)",
+            "isCustomizedField": false,
+            "name": "contractAggSettlementViewsCount",
+            "dependField": "contractAggSettlementViews",
+            "isDisabled": false,
+            "title": "收付款及押金列表计数",
+            "type": "Integer",
+            "properties": {},
+            "ordinal": 11015
+          },
+          {
+            "dependType": "detail",
+            "expression": "count(contractAggBondViews)",
+            "isCustomizedField": false,
+            "name": "contractAggBondViewsCount",
+            "dependField": "contractAggBondViews",
+            "isDisabled": false,
+            "title": "保证金列表计数",
+            "type": "Integer",
+            "properties": {},
+            "ordinal": 11016
+          },
+          {
+            "dependType": "detail",
+            "expression": "count(contractSettlementItems)",
+            "isCustomizedField": false,
+            "name": "contractSettlementItemsCount",
+            "dependField": "contractSettlementItems",
+            "isDisabled": false,
+            "title": "收款计划明细列表计数",
+            "type": "Integer",
+            "properties": {},
+            "ordinal": 11017
+          },
+          {
+            "dependType": "detail",
+            "expression": "count(attachments)",
+            "isCustomizedField": false,
+            "name": "attachmentsCount",
+            "dependField": "attachments",
+            "title": "附件计数",
+            "type": "Integer",
+            "ordinal": 11018
+          },
+          {
+            "dependType": "detail",
+            "isCustomizedField": false,
+            "name": "commentsCount",
+            "dependField": "comments",
+            "title": "评论计数",
+            "type": "Integer",
+            "ordinal": 11019
+          },
+          {
+            "isCustomizedField": false,
+            "name": "paymentItems",
+            "isDisabled": false,
+            "title": "付款明细",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10000
+          },
+          {
+            "isCustomizedField": false,
+            "name": "receiptItems",
+            "isDisabled": false,
+            "title": "收款单明细",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10000
+          },
+          {
+            "isCustomizedField": false,
+            "name": "paymentApplicationItems",
+            "isDisabled": false,
+            "title": "付款申请明细",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10000
+          },
+          {
+            "isCustomizedField": false,
+            "name": "paymentApplications",
+            "isDisabled": false,
+            "title": "付款申请单",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10000
+          },
+          {
+            "isCustomizedField": false,
+            "name": "receipts",
+            "isDisabled": false,
+            "title": "收款单",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10000
+          },
+          {
+            "isCustomizedField": false,
+            "name": "receiptBillViews",
+            "isDisabled": false,
+            "title": "收款单据视图",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10000
+          },
+          {
+            "isCustomizedField": false,
+            "name": "arReceiptBillViews",
+            "isDisabled": false,
+            "title": "应收单据视图",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10000
+          },
+          {
+            "isCustomizedField": false,
+            "name": "payments",
+            "isDisabled": false,
+            "title": "付款单",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10000
+          },
+          {
+            "isCustomizedField": false,
+            "name": "arReceiptViews",
+            "isDisabled": false,
+            "title": "应收单据视图",
+            "type": "List",
+            "properties": {},
+            "ordinal": 10000
+          }
+        ],
+        "properties": {
+          "isBizOnNonLeaf": true,
+          "asReport": true
+        }
+      }
+    ]
+  },
+  "errors": []
+}

@@ -683,8 +683,8 @@ public class ExpressionValidatorService {
      * 点号路径 idField 的两级校验：
      *   idField = "contract.frameContractId"
      *   1. 在 srcObjectType 中找 "contractId"(模块名+Id) 或 "contract" 字段
-     *   2. 解析该字段的 referInfo 找到引用对象（如 ContractView）
-     *   3. 校验 ContractView 中是否存在 "frameContractId"
+     *   2. 解析该字段的 referInfo 找到引用对象（如 ContractView.json）
+     *   3. 校验 ContractView.json 中是否存在 "frameContractId"
      */
     private void validateDottedIdField(BaseappObjectField field, WriteBackExpr wb, String srcCtx,
                                        Map<String, List<BaseappObjectField>> groupedFields,
@@ -745,8 +745,8 @@ public class ExpressionValidatorService {
     /**
      * 解析 referInfo JSON 提取第一个 referEntityName。
      * 支持两种格式：
-     *   格式A（对象）: { "referEntities": [ { "referEntityName": "ContractView" } ] }
-     *   格式B（数组）: [ { "referEntityName": "ContractView" } ]
+     *   格式A（对象）: { "referEntities": [ { "referEntityName": "ContractView.json" } ] }
+     *   格式B（数组）: [ { "referEntityName": "ContractView.json" } ]
      */
     private String extractFirstReferEntityName(String referInfoJson) {
         if (referInfoJson == null || referInfoJson.trim().isEmpty()) return null;

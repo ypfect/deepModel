@@ -9,8 +9,6 @@ public enum ErrorCategory {
     // ---- WriteBack expression specific ----
     /** validateExpr 或 expression 中存在聚合函数嵌套 (e.g. string_agg(CASE WHEN sum(...) ...) ) */
     NESTED_AGGREGATE,
-    /** validateExpr 中引用了自身字段（该字段是"被回写的目标字段"），在 validateExpr 上下文中不合法 */
-    SELF_REFERENCE_IN_VALIDATE,
     /** writeBackExpr 缺少必填属性 (srcObjectType / idField / expression) */
     MISSING_REQUIRED_FIELD,
     /** executingMoment 值不在合法枚举范围内 */
