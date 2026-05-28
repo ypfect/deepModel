@@ -1,8 +1,12 @@
 package com.deepmodel.relation.service;
 
+import com.deepmodel.relation.env.EnvSnapshot;
+import com.deepmodel.relation.env.EnvSnapshotManager;
+import com.deepmodel.relation.env.TestEnvSupport;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.CascadeWriteBackInfo;
 import com.deepmodel.relation.model.WriteBackRelationInfo;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -12,11 +16,20 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class WriteBackRelationServiceTest {
 
+    private EnvSnapshotManager snapshotManager;
+    private EnvSnapshot snapshot;
     private WriteBackRelationService service;
 
     @BeforeEach
     void setUp() {
-        service = new WriteBackRelationService();
+        snapshotManager = TestEnvSupport.createManager();
+        snapshot = TestEnvSupport.snapshot(snapshotManager);
+        service = new WriteBackRelationService(snapshotManager);
+    }
+
+    @AfterEach
+    void tearDown() {
+        TestEnvSupport.teardown(snapshotManager);
     }
 
     private BaseappObjectField createField(String objectType, String name, String writeBackExpr) {
@@ -34,7 +47,7 @@ class WriteBackRelationServiceTest {
         List<BaseappObjectField> rows = Arrays.asList(
                 createField("ArContract", "invoicedAmount", wbe));
 
-        service.buildIndex(rows);
+        service.buildIndex(snapshot, rows);
 
         Map<String, Set<WriteBackRelationInfo>> result = service.getWriteBackExprFields("ArInvoiceItem");
         assertFalse(result.isEmpty());
@@ -48,7 +61,7 @@ class WriteBackRelationServiceTest {
 
     @Test
     void buildIndex_emptyData_returnsEmptyMaps() {
-        service.buildIndex(Collections.emptyList());
+        service.buildIndex(snapshot, Collections.emptyList());
 
         assertTrue(service.getWriteBackExprFields("Anything").isEmpty());
         assertTrue(service.getWriteBackFieldVars("Anything").isEmpty());
@@ -62,7 +75,7 @@ class WriteBackRelationServiceTest {
                 createField("ArContract", "invoicedAmount",
                         "{\"srcObjectType\":\"ArInvoiceItem\",\"expression\":\"sum(amount)\",\"idField\":\"contractId\"}"));
 
-        service.buildIndex(rows);
+        service.buildIndex(snapshot, rows);
 
         // 第一条无效被跳过，第二条正常解析
         Map<String, Set<WriteBackRelationInfo>> result = service.getWriteBackExprFields("ArInvoiceItem");
@@ -73,7 +86,7 @@ class WriteBackRelationServiceTest {
     void getWriteBackFieldVars_extractsSourceVars() {
         String wbe = "{\"srcObjectType\":\"ArInvoiceItem\",\"expression\":\"sum(invoice_amount)\","
                 + "\"idField\":\"contract_id\",\"condition\":\"bill_status_id = 'BillStatus.effective'\"}";
-        service.buildIndex(Arrays.asList(createField("ArContract", "invoicedAmount", wbe)));
+        service.buildIndex(snapshot, Arrays.asList(createField("ArContract", "invoicedAmount", wbe)));
 
         Map<String, Set<String>> vars = service.getWriteBackFieldVars("ArContract");
         assertFalse(vars.isEmpty());
@@ -91,7 +104,7 @@ class WriteBackRelationServiceTest {
         // B (ArContract) 回写 C (ArFrameContract.totalInvoicedAmount)，条件中引用 invoicedAmount
         String wbeBC = "{\"srcObjectType\":\"ArContract\",\"expression\":\"sum(invoiced_amount)\",\"idField\":\"frameContractId\"}";
 
-        service.buildIndex(Arrays.asList(
+        service.buildIndex(snapshot, Arrays.asList(
                 createField("ArContract", "invoicedAmount", wbeAB),
                 createField("ArFrameContract", "totalInvoicedAmount", wbeBC)));
 
@@ -110,13 +123,13 @@ class WriteBackRelationServiceTest {
                 createField("ArContract", "name", null),
                 createField("ArContract", "title", ""));
 
-        service.buildIndex(rows);
+        service.buildIndex(snapshot, rows);
         assertTrue(service.getWriteBackExprFields("ArContract").isEmpty());
     }
 
     @Test
     void getWriteBackExprFields_unknownObject_returnsEmptyMap() {
-        service.buildIndex(Collections.emptyList());
+        service.buildIndex(snapshot, Collections.emptyList());
         Map<String, Set<WriteBackRelationInfo>> result = service.getWriteBackExprFields("NonExistent");
         assertNotNull(result);
         assertTrue(result.isEmpty());

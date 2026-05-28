@@ -17,7 +17,7 @@ class ImpactAnalyzerServiceParseWriteBackTest {
     @BeforeEach
     void setUp() {
         // parseWriteBack 不依赖 mapper/formulaParserService，传 null 即可
-        service = new ImpactAnalyzerService(null, null, null, null, null);
+        service = new ImpactAnalyzerService(null, null, null, null, null, null);
     }
 
     @Test

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DeepModel - FuncUnit 编排模拟器</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
+    <script src="/env-common.js"></script>
     <style>
         :root { --el-color-primary: #6366f1; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -161,13 +162,14 @@
     <script src="https://cdn.jsdelivr.net/npm/element-plus@2.4.4/dist/index.full.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
 </head>
-<body>
+<body data-dm-skip-env-gate>
 <div id="app">
     <header class="header">
         <div class="logo"><div class="logo-mark"></div><span>FuncUnit 编排模拟器</span></div>
         <div class="toolbar">
             <span style="color:#475569;font-size:13px">共 {{ folders.length }} 个 Service</span>
         </div>
+        <span id="envMount" style="color:#e2e8f0;font-size:13px;margin-right:16px;"></span>
         <a href="/" style="color:#64748b;font-size:12px;text-decoration:none;">← 首页</a>
     </header>
 
@@ -452,6 +454,13 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
     app.component(key, component);
 }
 app.mount('#app');
+
+DM.mountEnvSelector(document.getElementById('envMount'), {
+    scope: 'global',
+    label: '环境',
+    width: '240px',
+    theme: 'dark'
+});
 </script>
 </body>
 </html>

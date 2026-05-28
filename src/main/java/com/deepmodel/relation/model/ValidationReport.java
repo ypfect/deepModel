@@ -8,6 +8,12 @@ import java.util.List;
 public class ValidationReport {
     private String reportTime;
     private int scannedObjectCount;
+    /** 当前环境下全部对象数（未按 appName 过滤） */
+    private int totalObjectCountInEnv;
+    /** 实际生效的 appName 过滤，空表示全库 */
+    private String filterAppName;
+    /** 检出存在问题的对象数（items 中去重 objectType） */
+    private int issueObjectCount;
     private int totalErrors;
     private int totalWarnings;
     private List<ValidationErrorItem> items;
@@ -31,6 +37,15 @@ public class ValidationReport {
 
     public int getScannedObjectCount() { return scannedObjectCount; }
     public void setScannedObjectCount(int scannedObjectCount) { this.scannedObjectCount = scannedObjectCount; }
+
+    public int getTotalObjectCountInEnv() { return totalObjectCountInEnv; }
+    public void setTotalObjectCountInEnv(int totalObjectCountInEnv) { this.totalObjectCountInEnv = totalObjectCountInEnv; }
+
+    public String getFilterAppName() { return filterAppName; }
+    public void setFilterAppName(String filterAppName) { this.filterAppName = filterAppName; }
+
+    public int getIssueObjectCount() { return issueObjectCount; }
+    public void setIssueObjectCount(int issueObjectCount) { this.issueObjectCount = issueObjectCount; }
 
     public int getTotalErrors() { return totalErrors; }
     public void setTotalErrors(int totalErrors) { this.totalErrors = totalErrors; }

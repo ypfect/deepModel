@@ -272,6 +272,7 @@
     <script src="https://cdn.jsdelivr.net/npm/layout-base@1.0.2/layout-base.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cose-base@1.0.2/cose-base.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cytoscape-fcose@2.2.0/cytoscape-fcose.min.js"></script>
+    <script src="/env-common.js"></script>
     <script>
       try{ if(window.cytoscape && window.cytoscapeFcose) window.cytoscape.use(window.cytoscapeFcose); }catch(e){}
     </script>
@@ -288,26 +289,22 @@
 
     <div class="card">
         <h2>🔄 Version Comparison (Remote)</h2>
+        <p style="font-size:12px;color:#64748b;margin:-8px 0 12px;">分别选择「基准环境」和「比较环境」，再统一选择要对比的 App 模块。</p>
 
         <div style="display:flex;gap:0;align-items:stretch;margin-bottom:12px;">
-            <!-- 左侧：基准库（JDBC，留空=当前服务数据库） -->
+            <!-- 左侧：基准环境 -->
             <div style="flex:1;border:1px solid #e5e7eb;border-radius:8px 0 0 8px;padding:12px 14px;">
-                <div style="font-size:13px;font-weight:600;margin-bottom:6px;color:#111827;">📌 基准库</div>
-                <input type="text" id="baseUrl" placeholder="JDBC URL（自动填充当前服务数据库）"
-                    value="" style="margin-bottom:4px;width:100%;box-sizing:border-box;">
-                <input type="text" id="baseUser" placeholder="Username"
-                    value="" style="margin-bottom:4px;width:100%;box-sizing:border-box;">
-                <input type="text" id="basePass" placeholder="Password" value="123"
-                    style="margin-bottom:4px;width:100%;box-sizing:border-box;">
-                <input type="text" id="baseAppName" placeholder="App Names（逗号分隔，可选）" value="arap"
-                    style="width:100%;box-sizing:border-box;">
+                <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#111827;">📌 基准环境</div>
+                <select id="baseEnvSelect" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;">
+                    <option value="">-- 选择基准环境 --</option>
+                </select>
             </div>
 
             <!-- 中间：交换按钮 -->
             <div style="display:flex;flex-direction:column;justify-content:center;align-items:center;padding:0 12px;gap:10px;">
                 <button type="button" id="btn-switch-base"
                     style="padding:8px 12px;font-size:18px;border-radius:999px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;cursor:pointer;line-height:1;"
-                    title="交换两侧配置">⇄</button>
+                    title="交换两侧环境">⇄</button>
                 <button type="button" onclick="compareRemote()" id="btn-compare"
                     style="padding:8px 14px;font-size:13px;border-radius:8px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;border:none;cursor:pointer;font-weight:500;white-space:nowrap;">
                     开始对比
@@ -319,26 +316,36 @@
                 </button>
             </div>
 
-            <!-- 右侧：比较库（JDBC） -->
+            <!-- 右侧：比较环境 -->
             <div style="flex:1;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;padding:12px 14px;">
-                <div style="font-size:13px;font-weight:600;margin-bottom:6px;color:#111827;">🔍 比较库</div>
-                <input type="text" id="compareUrl" placeholder="JDBC URL（留空 = 当前服务数据库）"
-                    value="jdbc:postgresql://localhost:5432/testapp" style="margin-bottom:4px;width:100%;box-sizing:border-box;">
-                <input type="text" id="compareUser" placeholder="Username" value="postgres"
-                    style="margin-bottom:4px;width:100%;box-sizing:border-box;">
-                <input type="text" id="comparePass" placeholder="Password" value="123"
-                    style="margin-bottom:4px;width:100%;box-sizing:border-box;">
-                <input type="text" id="compareAppName" placeholder="App Names（逗号分隔，可选）" value="arap"
-                    style="margin-bottom:4px;width:100%;box-sizing:border-box;">
-                <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
-                    <label for="upgradeDepth" style="font-size:12px;color:#374151;white-space:nowrap;">分析层级</label>
-                    <input type="number" id="upgradeDepth" value="3" min="1" max="10"
-                        style="width:70px;box-sizing:border-box;" title="升级脚本分析的下游依赖层级深度（默认 3）">
-                </div>
+                <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#111827;">🔍 比较环境</div>
+                <select id="compareEnvSelect" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;">
+                    <option value="">-- 选择比较环境 --</option>
+                </select>
             </div>
         </div>
 
-        <div id="diff-result" style="margin-top: 20px;"></div>
+        <div style="margin-bottom:12px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;">
+            <div style="font-size:13px;font-weight:600;margin-bottom:4px;color:#111827;">📦 对比 App 模块</div>
+            <p style="font-size:12px;color:#64748b;margin:0 0 8px;">基准与比较环境使用相同 App 范围，只需选择一次。</p>
+            <div id="sharedAppMount"></div>
+        </div>
+
+        <div id="compare-analysis-bar" style="display:none;margin-top:16px;margin-bottom:12px;padding:12px 14px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;">
+            <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:6px;">分析层级</div>
+            <p style="font-size:12px;color:#64748b;margin:0 0 10px;line-height:1.55;">
+                用于<strong>批量生成升级脚本</strong>与<strong>影响分析预览</strong>：从勾选的变更字段出发，沿对象内 / 回写依赖向下展开。
+                层级越大，纳入的下游字段越多，脚本更长、生成更慢；无特殊需求建议保持 <strong>3</strong>。
+            </p>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <label for="upgradeDepth" style="font-size:12px;color:#374151;font-weight:500;">依赖深度</label>
+                <input type="number" id="upgradeDepth" value="3" min="1" max="10"
+                    style="width:72px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;">
+                <span style="font-size:12px;color:#94a3b8;">范围 1～10，默认 3</span>
+            </div>
+        </div>
+
+        <div id="diff-result" style="margin-top: 4px;"></div>
 
         <!-- Field Detail Dialog -->
         <div id="field-detail-dialog">
@@ -366,6 +373,11 @@
                 </div>
                 <!-- 配置面板（批量模式专用，点执行前显示） -->
                 <div id="upgrade-script-config" style="display:none; padding:24px 28px; flex:1; overflow:auto;">
+                    <div id="upgrade-script-depth-banner" style="margin-bottom:14px;padding:10px 12px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;font-size:12px;color:#1e40af;line-height:1.55;">
+                        <strong>当前分析层级：<span id="upgrade-script-depth-value">3</span></strong>
+                        <span style="color:#3b82f6;">（对象内 + 回写，向下展开）</span>
+                        <span style="color:#64748b;"> — 与结果区 Summary 上方的「分析层级」一致；修改后请关闭本弹窗再重新打开以生效。</span>
+                    </div>
                     <div style="font-size:13px; color:#334155; margin-bottom:20px; line-height:1.6;">
                         将对勾选的 <strong id="upgrade-script-count">0</strong> 个根字段，按依赖拓扑顺序生成批量升级 SQL 脚本。
                     </div>
@@ -392,7 +404,7 @@
                                     <input type="text" id="upgrade-wb-api-url" placeholder="自动从对比库推导（可手动修改）"
                                            style="flex:1; font-size:12px; padding:5px 8px; border:1px solid #d1d5db; border-radius:5px; box-sizing:border-box; font-family:monospace;">
                                 </div>
-                                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">回写字段的 SQL 通过调用 arap 服务接口生成。地址默认从对比库 URL 推导，也可手动指定。</div>
+                                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">回写字段的 SQL 通过调用 arap 服务接口生成。地址默认从「比较环境」推导，也可手动指定。</div>
                             </div>
                         </div>
                     </div>
@@ -442,6 +454,7 @@
           <div style="display:flex; align-items:center; gap:12px;">
             <span style="font-weight:600; font-size:15px; color:#0f172a;">影响分析预览</span>
             <span id="impact-preview-summary" style="font-size:12px; color:#64748b; line-height:1.4;"></span>
+            <span id="impact-preview-depth-badge" style="font-size:12px;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:4px 10px;border-radius:6px;white-space:nowrap;"></span>
           </div>
           <div style="display:flex; align-items:center; gap:10px; font-size:12px;">
             <label style="display:inline-flex; align-items:center; gap:2px; cursor:pointer; margin:0;"><input type="checkbox" id="imp-chk-intra" checked style="margin:0; width:14px; height:14px; flex-shrink:0;"><span style="color:#c2410c; font-weight:500;">intra</span></label>
@@ -475,6 +488,27 @@
     </div>
 
     <script>
+        function getUpgradeDepth() {
+            const el = document.getElementById('upgradeDepth');
+            const n = parseInt((el && el.value) || '3', 10);
+            if (Number.isNaN(n)) return 3;
+            return Math.min(10, Math.max(1, n));
+        }
+
+        function setCompareAnalysisBarVisible(visible) {
+            const bar = document.getElementById('compare-analysis-bar');
+            if (bar) bar.style.display = visible ? 'block' : 'none';
+        }
+
+        function syncDialogDepthDisplay() {
+            const depth = getUpgradeDepth();
+            const v = document.getElementById('upgrade-script-depth-value');
+            if (v) v.textContent = String(depth);
+            const badge = document.getElementById('impact-preview-depth-badge');
+            if (badge) badge.textContent = `分析层级 ${depth}`;
+            return depth;
+        }
+
         function showProgress(msg) {
             const overlay = document.getElementById('progress-overlay');
             const text = document.getElementById('status-text');
@@ -486,43 +520,83 @@
             document.getElementById('progress-overlay').style.display = 'none';
         }
 
-        // 中间按钮：交换左右两侧 JDBC 配置（仅前端输入框，后端始终以左侧为基准库、右侧为比较库）
-        function initDbRoleSwitcher() {
+        // ===== 环境选择（基准 + 比较，均独立，不写全局 currentEnv）=====
+        let baseEnvCtl = null;
+        let compareEnvCtl = null;
+        let appCtl = null;
+
+        function getBaseEnv()      { return baseEnvCtl ? baseEnvCtl.getValue() : ''; }
+        function getCompareEnv()   { return compareEnvCtl ? compareEnvCtl.getValue() : ''; }
+        function getSelectedApps() { return appCtl ? appCtl.getValues() : []; }
+
+        function getAppListEnv() {
+            return getCompareEnv() || getBaseEnv();
+        }
+
+        async function refreshAppList() {
+            if (appCtl) await appCtl.refresh(getAppListEnv());
+        }
+
+        function initEnvSwitcher() {
             const btn = document.getElementById('btn-switch-base');
             if (!btn) return;
-
             btn.onclick = () => {
-                const baseUrlEl = document.getElementById('baseUrl');
-                const baseUserEl = document.getElementById('baseUser');
-                const basePassEl = document.getElementById('basePass');
-                const baseAppEl = document.getElementById('baseAppName');
-
-                const cmpUrlEl = document.getElementById('compareUrl');
-                const cmpUserEl = document.getElementById('compareUser');
-                const cmpPassEl = document.getElementById('comparePass');
-                const cmpAppEl = document.getElementById('compareAppName');
-
-                if (!baseUrlEl || !baseUserEl || !basePassEl || !baseAppEl ||
-                    !cmpUrlEl || !cmpUserEl || !cmpPassEl || !cmpAppEl) {
-                    return;
-                }
-
-                // 交换两边输入框的值
-                const tmpUrl = baseUrlEl.value;
-                const tmpUser = baseUserEl.value;
-                const tmpPass = basePassEl.value;
-                const tmpApp = baseAppEl.value;
-
-                baseUrlEl.value = cmpUrlEl.value;
-                baseUserEl.value = cmpUserEl.value;
-                basePassEl.value = cmpPassEl.value;
-                baseAppEl.value = cmpAppEl.value;
-
-                cmpUrlEl.value = tmpUrl;
-                cmpUserEl.value = tmpUser;
-                cmpPassEl.value = tmpPass;
-                cmpAppEl.value = tmpApp;
+                if (!baseEnvCtl || !compareEnvCtl) return;
+                const b = baseEnvCtl.getValue();
+                const c = compareEnvCtl.getValue();
+                if (!b || !c) { alert('请先选择基准环境和比较环境'); return; }
+                baseEnvCtl.setValue(c);
+                compareEnvCtl.setValue(b);
             };
+        }
+
+        async function initEnvBar() {
+            const baseSel = document.getElementById('baseEnvSelect');
+            const compareSel = document.getElementById('compareEnvSelect');
+            if (!baseSel || !compareSel) {
+                console.error('initEnvBar: baseEnvSelect / compareEnvSelect 未找到');
+                return;
+            }
+
+            // 先填充选项（HTML 里已有 select，立即可见）
+            await DM.populateEnvSelect(baseSel, DM.getEnv(), '-- 选择基准环境 --');
+            await DM.populateEnvSelect(compareSel, DM.getCompareEnv(), '-- 选择比较环境 --');
+
+            baseEnvCtl = DM.bindEnvSelect(baseSel, {
+                scope: 'global',
+                onChange: () => { refreshAppList().catch(console.error); }
+            });
+            compareEnvCtl = DM.bindEnvSelect(compareSel, {
+                scope: 'compare',
+                onChange: async (v) => {
+                    await refreshAppList();
+                    await updateWriteBackApiUrlFromCompareEnv();
+                }
+            });
+
+            appCtl = DM.mountAppMultiSelect(document.getElementById('sharedAppMount'), {
+                placeholder: '选择 App（多选）',
+                width: '100%'
+            });
+
+            await refreshAppList();
+            await updateWriteBackApiUrlFromCompareEnv();
+        }
+
+        async function updateWriteBackApiUrlFromCompareEnv() {
+            const wbApiUrlEl = document.getElementById('upgrade-wb-api-url');
+            const compareEnv = getCompareEnv();
+            if (!wbApiUrlEl || !compareEnv) {
+                if (wbApiUrlEl) wbApiUrlEl.value = '';
+                return;
+            }
+            try {
+                const res = await DM.fetchWithEnv('/api/env/services?env=' + encodeURIComponent(compareEnv), compareEnv);
+                if (res.ok) {
+                    const info = await res.json();
+                    wbApiUrlEl.value = info.writeBackSqlApiUrl || '';
+                }
+            } catch (e) { /* ignore */ }
         }
 
         /** 是否为可升级字段（trigger 或 writeBack 相关）——用于「新增」列表 */
@@ -556,14 +630,15 @@
             if (!dialog || !pre) return;
 
             // 单根模式直接展示结果面板，不经过配置面板
-            titleEl.textContent = `升级脚本：${objectType}.${fieldName}`;
+            const depth = syncDialogDepthDisplay();
+            titleEl.textContent = `升级脚本：${objectType}.${fieldName}（层级 ${depth}）`;
             if (configDiv) configDiv.style.display = 'none';
             if (resultDiv) resultDiv.style.display = 'block';
             if (downloadBtn) downloadBtn.style.display = 'none';
-            pre.textContent = '加载中...';
+            pre.textContent = `加载中…（分析层级 ${depth}，对象内 + 回写）`;
             dialog.style.display = 'flex';
             try {
-                const url = `/api/impact/upgradeScript?objectType=${encodeURIComponent(objectType)}&field=${encodeURIComponent(fieldName)}&depth=3&relTypes=intra,writeBack`;
+                const url = `/api/impact/upgradeScript?objectType=${encodeURIComponent(objectType)}&field=${encodeURIComponent(fieldName)}&depth=${depth}&relTypes=intra,writeBack`;
                 const res = await fetch(url);
                 const text = await res.text();
                 pre.textContent = res.ok ? text : `请求失败: ${res.status}\n${text}`;
@@ -594,7 +669,7 @@
         }
 
         /** 批量生成升级脚本：先弹出配置面板，点「执行」后才调用后端接口 */
-        function batchGenerateUpgradeScripts(container) {
+        async function batchGenerateUpgradeScripts(container) {
             const checkboxes = container ? container.querySelectorAll('.upgrade-checkbox:checked') : [];
             const items = [];
             checkboxes.forEach(cb => {
@@ -618,9 +693,10 @@
             const countEl     = document.getElementById('upgrade-script-count');
             if (!dialog || !configDiv || !resultDiv) return;
 
+            const depth = syncDialogDepthDisplay();
             // 切换到「配置面板」状态
             if (countEl) countEl.textContent = items.length;
-            titleEl.textContent = `批量升级脚本（${items.length} 个根字段）`;
+            titleEl.textContent = `批量升级脚本（${items.length} 个根字段 · 层级 ${depth}）`;
             configDiv.style.display = 'block';
             resultDiv.style.display = 'none';
             if (downloadBtn) downloadBtn.style.display = 'none';
@@ -628,15 +704,8 @@
             const commentChk = document.getElementById('upgrade-script-include-comments');
             if (commentChk) commentChk.checked = false;
 
-            // 自动从对比库 URL 推导回写 API 地址
-            const wbApiUrlEl = document.getElementById('upgrade-wb-api-url');
-            if (wbApiUrlEl) {
-                const compareUrl = (document.getElementById('compareUrl') || {}).value || '';
-                const envMatch = compareUrl.match(/postgres\.([^:/]+)\.e7link\.com/);
-                wbApiUrlEl.value = envMatch
-                    ? 'http://arap.' + envMatch[1] + '.e7link.com/arap/gen/debug/writeBackField2sql'
-                    : '';
-            }
+            // 自动从比较环境推导回写 API 地址
+            await updateWriteBackApiUrlFromCompareEnv();
 
             dialog.style.display = 'flex';
 
@@ -669,22 +738,21 @@
                         progressPct.textContent = '';
                         progressBar.className = 'progress-bar indeterminate';
                         progressBar.style.width = '';
-                        progressTitle.textContent = `正在生成升级脚本（${items.length} 个根字段）...`;
+                        progressTitle.textContent = `正在生成升级脚本（${items.length} 个根字段 · 层级 ${getUpgradeDepth()}）...`;
                     }
                     resultDiv.style.display = 'none';
                     if (downloadBtn) downloadBtn.style.display = 'none';
 
                     const payload = {
                         roots: items,
-                        depth: parseInt((document.getElementById('upgradeDepth') || {}).value || '3', 10) || 3,
+                        depth: getUpgradeDepth(),
                         relTypes: 'intra,writeBack',
                         includeComments: includeComments,
-                        compareDbUrl:      (document.getElementById('compareUrl')  || {}).value || '',
-                        compareDbUser:     (document.getElementById('compareUser') || {}).value || '',
-                        compareDbPassword: (document.getElementById('comparePass') || {}).value || '',
-                        compareDbAppName:  (document.getElementById('compareAppName') || {}).value || '',
+                        baseEnv: getBaseEnv(),
+                        compareEnv: getCompareEnv(),
+                        compareAppName: getSelectedApps().join(','),
                         writeBackTenantId: (document.getElementById('upgrade-wb-tenant-id') || {}).value || '',
-                        writeBackApiUrl:   (document.getElementById('upgrade-wb-api-url') || {}).value || ''
+                        writeBackApiUrl: (document.getElementById('upgrade-wb-api-url') || {}).value || ''
                     };
 
                     // 辅助：向日志追加一行
@@ -706,7 +774,8 @@
                     try {
                         const res = await fetch('/api/impact/upgradeScript/batch/stream', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: Object.assign({ 'Content-Type': 'application/json' },
+                                                   DM.headers({}, getBaseEnv())),
                             body: JSON.stringify(payload)
                         });
                         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -995,8 +1064,9 @@
             const dialog = document.getElementById('impact-preview-dialog');
             const cyDiv = document.getElementById('impact-preview-cy');
             const summaryEl = document.getElementById('impact-preview-summary');
+            const depth = syncDialogDepthDisplay();
             dialog.style.display = 'flex';
-            summaryEl.textContent = '加载中…';
+            summaryEl.textContent = `加载中… · ${items.length} 个根字段`;
             document.getElementById('imp-obj-filters').innerHTML = '';
 
             // 先 fetch 数据，等浏览器完成 flex 重排后再初始化/刷新 Cytoscape
@@ -1005,7 +1075,7 @@
                 const resp = await fetch('/api/impact/graph/multiRoot', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ roots: items, depth: parseInt((document.getElementById('upgradeDepth') || {}).value || '3', 10) || 3, relTypes: 'intra,writeBack' })
+                    body: JSON.stringify({ roots: items, depth: depth, relTypes: 'intra,writeBack' })
                 });
                 if (!resp.ok) throw new Error(`请求失败 ${resp.status}`);
                 const graph = await resp.json();
@@ -1098,7 +1168,7 @@
                     _impApplyEdgeFilter();
                     _impBuildObjFilter();
                     _impCy.fit(_impCy.elements(),40);
-                    summaryEl.textContent = `${items.length} 个根字段 · 影响 ${nodeCount} 个字段 · ${objSet.size} 个对象 · ${edgeCount} 条依赖边`;
+                    summaryEl.textContent = `${items.length} 个根字段 · 层级 ${depth} · 影响 ${nodeCount} 个字段 · ${objSet.size} 个对象 · ${edgeCount} 条依赖边`;
                 });
             } catch (e) {
                 summaryEl.textContent = '加载失败：' + e.message;
@@ -1153,9 +1223,12 @@
             const modified = Array.isArray(data.modified) ? data.modified.slice() : [];
 
             if (!added.length && !removed.length && !modified.length) {
+                setCompareAnalysisBarVisible(false);
                 resDiv.innerHTML = '<p>No differences found.</p>';
                 return;
             }
+
+            setCompareAnalysisBarVisible(true);
 
             // 排序辅助：先按对象，再按字段
             const cmp = (a, b) => (a || '').localeCompare(b || '');
@@ -1695,78 +1768,77 @@
             });
         }
 
-        // 初始化页面上的交互组件
-        document.addEventListener('DOMContentLoaded', async () => {
-            initDbRoleSwitcher();
-            // 自动填充基准库连接信息（来自当前 Spring Boot 数据源）
-            try {
-                const res = await fetch('/api/impact/meta/datasource');
-                if (res.ok) {
-                    const info = await res.json();
-                    const baseUrlEl = document.getElementById('baseUrl');
-                    const baseUserEl = document.getElementById('baseUser');
-                    const basePassEl = document.getElementById('basePass');
-                    if (baseUrlEl && info.url) baseUrlEl.value = info.url;
-                    if (baseUserEl && info.username) baseUserEl.value = info.username;
-                    if (basePassEl && info.password) basePassEl.value = info.password;
-                }
-            } catch (e) {
-                // 不影响页面功能，静默处理
-            }
-        });
+        function bootManagementPage() {
+            initEnvBar().catch(err => {
+                console.error('initEnvBar 失败', err);
+                alert('环境选择器初始化失败，请刷新页面。详情见控制台。');
+            });
+            initEnvSwitcher();
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', bootManagementPage);
+        } else {
+            bootManagementPage();
+        }
 
-        // 对比结果缓存，避免相同参数重复查询数据库
         const _compareCache = new Map();
 
         async function compareRemote(forceRefresh) {
             const btn = document.getElementById('btn-compare');
             const resDiv = document.getElementById('diff-result');
 
+            const baseEnv = getBaseEnv();
+            const compareEnv = getCompareEnv();
+            if (!baseEnv || !compareEnv) {
+                alert('请先选择基准环境和比较环境');
+                return;
+            }
+
+            const appName = getSelectedApps().join(',');
             const payload = {
                 base: {
-                    url: (document.getElementById('baseUrl')||{}).value||'',
-                    username: (document.getElementById('baseUser')||{}).value||'',
-                    password: (document.getElementById('basePass')||{}).value||'',
-                    appName: ((document.getElementById('baseAppName')||{}).value||'').trim()
+                    env: baseEnv,
+                    appName: appName
                 },
                 compare: {
-                    url: (document.getElementById('compareUrl')||{}).value||'',
-                    username: (document.getElementById('compareUser')||{}).value||'',
-                    password: (document.getElementById('comparePass')||{}).value||'',
-                    appName: ((document.getElementById('compareAppName')||{}).value||'').trim()
+                    env: compareEnv,
+                    appName: appName
                 }
             };
             const cacheKey = JSON.stringify(payload);
 
-            // 命中缓存直接渲染，无需重新查询
             if (!forceRefresh && _compareCache.has(cacheKey)) {
                 const cached = _compareCache.get(cacheKey);
                 window.__lastDiff = cached;
                 renderDiff(cached);
-                // 在标题旁提示缓存命中
-                const resDiv2 = document.getElementById('diff-result');
                 const cacheHint = document.createElement('div');
                 cacheHint.style.cssText = 'font-size:11px;color:#16a34a;margin-bottom:6px;';
                 cacheHint.textContent = '⚡ 已使用缓存结果（参数未变化）— 如需重新查询请点击「刷新对比」';
-                resDiv2.insertBefore(cacheHint, resDiv2.firstChild);
+                resDiv.insertBefore(cacheHint, resDiv.firstChild);
                 return;
             }
 
             btn.disabled = true;
-            showProgress('Connecting to remote database & Comparing...');
+            showProgress('正在从 GraphQL 拉取元数据并对比...');
+            setCompareAnalysisBarVisible(false);
             resDiv.innerHTML = '';
 
             try {
-                const response = await fetch('/api/impact/snapshot/diff/jdbcPair', {
+                const response = await fetch('/api/impact/snapshot/diff/envPair', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || ('HTTP ' + response.status));
+                }
                 const data = await response.json();
-                _compareCache.set(cacheKey, data); // 缓存结果
+                _compareCache.set(cacheKey, data);
                 window.__lastDiff = data;
                 renderDiff(data);
             } catch (e) {
+                setCompareAnalysisBarVisible(false);
                 resDiv.innerHTML = `<span style="color:red">Error: ${e.message}</span>`;
             } finally {
                 btn.disabled = false;

@@ -1,12 +1,28 @@
 # Bug 报告: [BUG TITLE]
 
-**Feature Branch**: `[###-fix-bug-name]`  
+**Bug 目录**: `specs/<迭代>/bugs/<NNN>-fix-<short-name>/`  
+**所属迭代**: `specs/<迭代>/`  
 **Created**: [DATE]  
 **Status**: Draft  
 **严重级别**: [P0-阻塞 / P1-严重 / P2-一般 / P3-轻微]  
 **Input**: Bug 描述: "$ARGUMENTS"
 
-## 环境信息 *(mandatory)*
+## 迭代锚点 *(mandatory)*
+
+<!--
+  指向迭代里与本 bug 强相关的位置；只放索引，不复制原文。
+  目的：修复阶段 AI 沿这些锚点回看迭代设计，无需把整份迭代文档塞进对话。
+  建档阶段由 AI 基于读到的迭代 spec/plan/data-model 填写。
+-->
+
+- **关联 User Story**: [Story 编号 + 标题，如 "Story 2 — bizType 维度字段匹配"；多个用列表]
+- **关联 FR**: [FR 编号列表，如 FR-003, FR-009]
+- **关联章节**: [迭代文档里的具体小节路径，如 `plan.md § 缓存设计`、`data-model.md § ObjectTypeMeta`]
+- **关联无**: [若确无关联，删除上方三行，仅保留此项并写明理由]
+
+## 环境信息 *(optional)*
+
+<!-- 单产品仓库默认无需填写；仅当 bug 与特定环境/版本/配置强相关时填。 -->
 
 - **版本/分支**: [受影响的版本或分支]
 - **操作系统**: [OS 信息，如适用]

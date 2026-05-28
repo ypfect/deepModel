@@ -471,6 +471,7 @@
         .action-buttons .el-button--primary { --el-button-bg-color: #0284c7; --el-button-border-color: #0284c7; }
         .action-buttons .el-button--primary:hover { --el-button-hover-bg-color: #0369a1; --el-button-hover-border-color: #0369a1; }
     </style>
+    <script src="/env-common.js"></script>
     <!-- Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/element-plus@2.4.4/dist/index.full.js"></script>
@@ -493,6 +494,14 @@
                 <span>DeepModel Insight</span>
             </div>
             <div style="flex: 1"></div>
+
+            <el-select v-model="currentEnv" placeholder="搜索环境名 / 中文名" filterable clearable
+                :filter-method="filterEnvList"
+                style="width:280px;margin-right:12px;" @change="onEnvChange">
+                <el-option v-for="e in filteredEnvOptions" :key="e.envName"
+                    :label="typeof DM !== 'undefined' ? DM.formatEnvOptionLabel(e) : e.envName"
+                    :value="e.envName" />
+            </el-select>
 
             <el-radio-group v-model="viewMode" size="small">
                 <el-radio-button label="graph">
@@ -1071,8 +1080,51 @@
                 // GraphQL 导出
                 const graphQLDialogVisible = ref(false);
                 const graphQLText = ref('');
-                const graphqlUrl = ref('https://graphql-test-tx-16.e7link.com/graphiql/index.html');
-                const graphqlTenantId = ref('711FNX50G6V0009');
+                const graphqlUrl = ref('');
+                const graphqlTenantId = ref('0');
+
+                const envList = ref([]);
+                const filteredEnvOptions = ref([]);
+                const currentEnv = ref(typeof DM !== 'undefined' ? DM.getEnv() : '');
+
+                const filterEnvList = (query) => {
+                    const q = (query || '').trim().toLowerCase();
+                    if (!q) {
+                        filteredEnvOptions.value = envList.value;
+                        return;
+                    }
+                    filteredEnvOptions.value = envList.value.filter(e => {
+                        const hay = [e.envName, e.zhcnName, e.type, e.globalEnv]
+                            .filter(Boolean).join(' ').toLowerCase();
+                        return hay.includes(q);
+                    });
+                };
+
+                const initEnv = async () => {
+                    try {
+                        envList.value = await DM.loadEnvList();
+                        filteredEnvOptions.value = envList.value;
+                        if (currentEnv.value) {
+                            DM.setEnv(currentEnv.value);
+                            try {
+                                const res = await fetch('/api/env/current');
+                                if (res.ok) {
+                                    const info = await res.json();
+                                    if (info.graphqlUrl) graphqlUrl.value = info.graphqlUrl.replace('/graphql/withoutAuth', '/graphiql/index.html');
+                                }
+                            } catch (e) { /* ignore */ }
+                        }
+                    } catch (e) {
+                        console.warn('加载环境列表失败', e);
+                    }
+                };
+
+                const onEnvChange = (val) => {
+                    DM.setEnv(val || '');
+                    if (val) {
+                        initEnv().then(() => loadObjects());
+                    }
+                };
 
                 // 来源对象影响分析
                 const sourceObject = ref('');
@@ -1112,6 +1164,10 @@
                 };
 
                 const loadObjects = async () => {
+                    if (!DM.getEnv()) {
+                        ElMessage.warning('请先在右上角选择工作环境');
+                        return;
+                    }
                     metaLoading.value = true;
                     try {
                         let list = [];
@@ -2710,9 +2766,20 @@
 
                 onMounted(async () => {
                     initCy();
+                    await initEnv();
+                    window.addEventListener('dm-env-changed', (e) => {
+                        const env = (e.detail && e.detail.env) || DM.getEnv();
+                        if (currentEnv.value !== env) {
+                            currentEnv.value = env;
+                            if (env) loadObjects();
+                        }
+                    });
                     await initFromUrl();
-                    // 对象列表后台加载，避免阻塞首屏渲染
-                    loadObjects();
+                    if (DM.getEnv()) {
+                        loadObjects();
+                    } else {
+                        ElMessage.warning('请先在右上角选择工作环境');
+                    }
                 });
 
 
@@ -2755,6 +2822,7 @@
                     generateUpgradeScript, loadCrossTargets, loadCrossFields,
                     hasGraphData, exportGraphQL, graphQLDialogVisible, graphQLText, copyGraphQL,
                     graphqlUrl, graphqlTenantId, copyTenantId,
+                    envList, filteredEnvOptions, filterEnvList, currentEnv, onEnvChange,
                     filterObjects, filterFields, downloadGraph
                 };
             }

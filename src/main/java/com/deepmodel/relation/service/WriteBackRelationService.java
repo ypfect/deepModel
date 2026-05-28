@@ -1,5 +1,7 @@
 package com.deepmodel.relation.service;
 
+import com.deepmodel.relation.env.EnvSnapshot;
+import com.deepmodel.relation.env.EnvSnapshotManager;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.CascadeWriteBackInfo;
 import com.deepmodel.relation.model.WriteBackExpr;
@@ -17,9 +19,9 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 回写触发关系图服务。
- * <p>
- * 从所有含 writeBackExpr 的字段中构建回写触发全景索引：
+ * 回写触发关系图服务（stateless，state 全部存于 {@link EnvSnapshot}）。
+ *
+ * 索引语义：
  * <ul>
  *   <li>srcObject → targetObject → Set&lt;WriteBackRelationInfo&gt;</li>
  *   <li>targetObject → targetField → Set&lt;sourceVars&gt;</li>
@@ -39,27 +41,21 @@ public class WriteBackRelationService {
             .configure(JsonParser.Feature.ALLOW_COMMENTS, true)
             .configure(JsonParser.Feature.ALLOW_TRAILING_COMMA, true);
 
-    /** srcObjectType → targetObjectType → Set&lt;WriteBackRelationInfo&gt; */
-    private final Map<String, Map<String, Set<WriteBackRelationInfo>>> srcIndex = new ConcurrentHashMap<>();
+    private final EnvSnapshotManager snapshotManager;
 
-    /** targetObjectType → targetFieldName → Set&lt;sourceVars&gt; */
-    private final Map<String, Map<String, Set<String>>> targetFieldVarsIndex = new ConcurrentHashMap<>();
-
-    /** srcObjectType → List&lt;CascadeWriteBackInfo&gt; */
-    private final Map<String, List<CascadeWriteBackInfo>> cascadeIndex = new ConcurrentHashMap<>();
+    public WriteBackRelationService(EnvSnapshotManager snapshotManager) {
+        this.snapshotManager = snapshotManager;
+    }
 
     /**
-     * 从字段列表构建回写触发索引。
-     *
-     * @param allRows 所有字段记录
+     * 从字段列表构建回写触发索引，结果写入指定 {@link EnvSnapshot}。
      */
-    public void buildIndex(List<BaseappObjectField> allRows) {
+    public void buildIndex(EnvSnapshot snapshot, List<BaseappObjectField> allRows) {
         long t0 = System.currentTimeMillis();
-        srcIndex.clear();
-        targetFieldVarsIndex.clear();
-        cascadeIndex.clear();
+        snapshot.wbSrcIndex.clear();
+        snapshot.wbTargetFieldVarsIndex.clear();
+        snapshot.wbCascadeIndex.clear();
 
-        // 第一步：构建 srcObject → targetObject → fields 索引
         for (BaseappObjectField row : allRows) {
             if (row.getWriteBackExpr() == null || row.getWriteBackExpr().trim().isEmpty()) {
                 continue;
@@ -77,17 +73,14 @@ public class WriteBackRelationService {
                 info.setIdField(wbe.getIdField());
                 info.setCondition(wbe.getCondition());
 
-                // 提取源变量
                 Set<String> vars = extractSourceVars(wbe);
                 info.setSourceVars(vars);
 
-                // 放入 src 索引
-                srcIndex.computeIfAbsent(wbe.getSrcObjectType(), k -> new ConcurrentHashMap<>())
+                snapshot.wbSrcIndex.computeIfAbsent(wbe.getSrcObjectType(), k -> new ConcurrentHashMap<>())
                         .computeIfAbsent(row.getObjectType(), k -> new LinkedHashSet<>())
                         .add(info);
 
-                // 放入 target 字段变量索引
-                targetFieldVarsIndex.computeIfAbsent(row.getObjectType(), k -> new ConcurrentHashMap<>())
+                snapshot.wbTargetFieldVarsIndex.computeIfAbsent(row.getObjectType(), k -> new ConcurrentHashMap<>())
                         .computeIfAbsent(row.getName(), k -> new LinkedHashSet<>())
                         .addAll(vars);
 
@@ -96,33 +89,27 @@ public class WriteBackRelationService {
             }
         }
 
-        // 第二步：检测级联回写
-        buildCascadeIndex();
+        buildCascadeIndex(snapshot);
 
         long elapsed = System.currentTimeMillis() - t0;
-        log.info("Built writeback relation index: {} src entries in {}ms", srcIndex.size(), elapsed);
+        log.info("Built writeback relation index for env={}: {} src entries in {}ms",
+                snapshot.env, snapshot.wbSrcIndex.size(), elapsed);
     }
 
-    /**
-     * 从 writeBackExpr 的 expression 和 condition 中提取源对象变量字段。
-     */
     private Set<String> extractSourceVars(WriteBackExpr wbe) {
         Set<String> vars = new LinkedHashSet<>();
-        // 从 expression 中提取
         if (wbe.getExpression() != null && !wbe.getExpression().isEmpty()) {
             Map<String, Set<String>> exprVars = ExprUtils.extractVariablesFromExpression(wbe.getExpression());
             for (Set<String> fieldSet : exprVars.values()) {
                 vars.addAll(fieldSet);
             }
         }
-        // 从 condition 中提取
         if (wbe.getCondition() != null && !wbe.getCondition().isEmpty()) {
             Map<String, Set<String>> condVars = ExprUtils.extractVariablesFromExpression(wbe.getCondition());
             for (Set<String> fieldSet : condVars.values()) {
                 vars.addAll(fieldSet);
             }
         }
-        // idField 本身也是源变量
         if (wbe.getIdField() != null && !wbe.getIdField().isEmpty()) {
             String camelId = wbe.getIdField().contains("_") ? ExprUtils.snakeToCamel(wbe.getIdField()) : wbe.getIdField();
             if (camelId != null) {
@@ -132,14 +119,9 @@ public class WriteBackRelationService {
         return vars;
     }
 
-    /**
-     * 构建级联回写索引：当 A 回写 B.fieldX，而 B.fieldX 本身也被 C 回写时，
-     * 记录 A → B.fieldX → C.fieldY 的级联链路。
-     */
-    private void buildCascadeIndex() {
-        // 收集所有被回写的 targetObject.targetField 集合
+    private void buildCascadeIndex(EnvSnapshot snapshot) {
         Map<String, Set<String>> targetFields = new HashMap<>();
-        for (Map.Entry<String, Map<String, Set<WriteBackRelationInfo>>> srcEntry : srcIndex.entrySet()) {
+        for (Map.Entry<String, Map<String, Set<WriteBackRelationInfo>>> srcEntry : snapshot.wbSrcIndex.entrySet()) {
             for (Map.Entry<String, Set<WriteBackRelationInfo>> tgtEntry : srcEntry.getValue().entrySet()) {
                 for (WriteBackRelationInfo info : tgtEntry.getValue()) {
                     targetFields.computeIfAbsent(info.getTargetObjectType(), k -> new HashSet<>())
@@ -148,28 +130,24 @@ public class WriteBackRelationService {
             }
         }
 
-        // 对每个源对象的回写目标字段，检查该字段是否本身也是某个源对象的回写目标
-        for (Map.Entry<String, Map<String, Set<WriteBackRelationInfo>>> srcEntry : srcIndex.entrySet()) {
+        for (Map.Entry<String, Map<String, Set<WriteBackRelationInfo>>> srcEntry : snapshot.wbSrcIndex.entrySet()) {
             String srcObj = srcEntry.getKey();
             for (Map.Entry<String, Set<WriteBackRelationInfo>> tgtEntry : srcEntry.getValue().entrySet()) {
                 String midObj = tgtEntry.getKey();
                 for (WriteBackRelationInfo info : tgtEntry.getValue()) {
                     String midField = info.getTargetFieldName();
-                    // 检查 midObj 是否也是某个源对象——即 midObj 也在 srcIndex 中
-                    Map<String, Set<WriteBackRelationInfo>> midTargets = srcIndex.get(midObj);
+                    Map<String, Set<WriteBackRelationInfo>> midTargets = snapshot.wbSrcIndex.get(midObj);
                     if (midTargets == null) {
                         continue;
                     }
-                    // midObj 作为源对象回写了哪些目标
                     for (Map.Entry<String, Set<WriteBackRelationInfo>> cascadeEntry : midTargets.entrySet()) {
                         String cascadeObj = cascadeEntry.getKey();
                         for (WriteBackRelationInfo cascadeInfo : cascadeEntry.getValue()) {
-                            // 只有当级联触发的源变量包含了被回写的字段名时，才构成级联
                             if (cascadeInfo.getSourceVars() != null && cascadeInfo.getSourceVars().contains(midField)) {
                                 CascadeWriteBackInfo cascade = new CascadeWriteBackInfo(
                                         srcObj, midObj, midField,
                                         cascadeObj, cascadeInfo.getTargetFieldName());
-                                cascadeIndex.computeIfAbsent(srcObj, k -> new ArrayList<>()).add(cascade);
+                                snapshot.wbCascadeIndex.computeIfAbsent(srcObj, k -> new ArrayList<>()).add(cascade);
                             }
                         }
                     }
@@ -178,36 +156,24 @@ public class WriteBackRelationService {
         }
     }
 
-    /**
-     * 查询源对象触发的所有回写关系。
-     *
-     * @param srcObjectType 源对象类型名
-     * @return targetObject → Set&lt;WriteBackRelationInfo&gt;；未找到返回空 Map
-     */
+    /** 查询源对象触发的所有回写关系。 */
     public Map<String, Set<WriteBackRelationInfo>> getWriteBackExprFields(String srcObjectType) {
-        Map<String, Set<WriteBackRelationInfo>> result = srcIndex.get(srcObjectType);
+        EnvSnapshot snap = snapshotManager.current();
+        Map<String, Set<WriteBackRelationInfo>> result = snap.wbSrcIndex.get(srcObjectType);
         return result != null ? Collections.unmodifiableMap(result) : Collections.emptyMap();
     }
 
-    /**
-     * 查询目标对象每个被回写字段涉及的源变量。
-     *
-     * @param targetObjectType 目标对象类型名
-     * @return targetFieldName → Set&lt;sourceVars&gt;；未找到返回空 Map
-     */
+    /** 查询目标对象每个被回写字段涉及的源变量。 */
     public Map<String, Set<String>> getWriteBackFieldVars(String targetObjectType) {
-        Map<String, Set<String>> result = targetFieldVarsIndex.get(targetObjectType);
+        EnvSnapshot snap = snapshotManager.current();
+        Map<String, Set<String>> result = snap.wbTargetFieldVarsIndex.get(targetObjectType);
         return result != null ? Collections.unmodifiableMap(result) : Collections.emptyMap();
     }
 
-    /**
-     * 查询源对象的级联回写链路。
-     *
-     * @param srcObjectType 源对象类型名
-     * @return 级联回写信息列表；未找到返回空 List
-     */
+    /** 查询源对象的级联回写链路。 */
     public List<CascadeWriteBackInfo> getCascadeWriteBackInfo(String srcObjectType) {
-        List<CascadeWriteBackInfo> result = cascadeIndex.get(srcObjectType);
+        EnvSnapshot snap = snapshotManager.current();
+        List<CascadeWriteBackInfo> result = snap.wbCascadeIndex.get(srcObjectType);
         return result != null ? Collections.unmodifiableList(result) : Collections.emptyList();
     }
 }

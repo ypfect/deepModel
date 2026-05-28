@@ -1,6 +1,9 @@
 package com.deepmodel.relation.service;
 
-import com.deepmodel.relation.dao.BaseappObjectFieldMapper;
+import com.deepmodel.relation.dao.MetadataRepository;
+import com.deepmodel.relation.env.EnvContext;
+import com.deepmodel.relation.env.EnvSnapshot;
+import com.deepmodel.relation.env.EnvSnapshotManager;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.GraphModels;
 import com.deepmodel.relation.model.ObjectTypeMeta;
@@ -8,6 +11,7 @@ import com.deepmodel.relation.model.EnumTypeMeta;
 import com.deepmodel.relation.model.EnumValueMeta;
 import com.deepmodel.relation.model.WriteBackExpr;
 import com.deepmodel.relation.util.ExprUtils;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -21,18 +25,15 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
 
 @Service
 public class ImpactAnalyzerService {
 
     private static final Logger log = LoggerFactory.getLogger(ImpactAnalyzerService.class);
 
-    private final BaseappObjectFieldMapper mapper;
+    private final MetadataRepository repository;
     private final ObjectMapper objectMapper = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
             .configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES, true)
@@ -40,36 +41,6 @@ public class ImpactAnalyzerService {
             .configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true)
             .configure(JsonParser.Feature.ALLOW_COMMENTS, true)
             .configure(JsonParser.Feature.ALLOW_TRAILING_COMMA, true);
-
-    // 缓存
-    private volatile List<BaseappObjectField> allRows = Collections.emptyList();
-    private final Map<String, List<BaseappObjectField>> rowsByObject = new ConcurrentHashMap<String, List<BaseappObjectField>>();
-    // 缓存对象标题: objectType -> title（兼容旧接口）
-    private final Map<String, String> objectTitles = new ConcurrentHashMap<>();
-    // 扩展：对象类型元信息缓存
-    private final Map<String, ObjectTypeMeta> objectTypeMetas = new ConcurrentHashMap<>();
-    // 扩展：中文标题 -> 对象名列表 反向索引
-    private final Map<String, List<String>> titleToObjectTypes = new ConcurrentHashMap<>();
-    // 枚举定义缓存: enumName -> Set<validValue>
-    private final Map<String, Set<String>> enumValueMap = new ConcurrentHashMap<>();
-    // 枚举类型索引: enumName -> EnumTypeMeta（含 title 和枚举值列表）
-    private final Map<String, EnumTypeMeta> enumTypeIndex = new ConcurrentHashMap<>();
-    // 枚举标题反向索引: enumTitle -> List<enumName>
-    private final Map<String, List<String>> enumTitleIndex = new ConcurrentHashMap<>();
-    // 枚举字段索引: enumName -> List<objectType.fieldName>
-    private final Map<String, List<String>> enumFieldIndex = new ConcurrentHashMap<>();
-    private final Map<String, String> objectLabels = new HashMap<>(); // objectName -> 描述标签
-
-    // bill 类型对象集合（来自 baseapp_object_type.type='bill'）
-    private volatile Set<String> billObjectTypes = Collections.emptySet();
-
-    // 支持变更单的实体集合（来自 baseapp_system_metadata.content.isSupportChangeBill=true）
-    private volatile Set<String> changeBillEntities = Collections.emptySet();
-
-    // 子表关系映射：主表 → 直接子表列表
-    private final Map<String, Set<String>> mainToDetails = new ConcurrentHashMap<>();
-    // 子表关系映射：子表 → 主表
-    private final Map<String, String> detailToMain = new ConcurrentHashMap<>();
 
     private static final Map<String, List<String>> GLOBAL_SYNONYMS = new HashMap<>();
     static {
@@ -80,25 +51,11 @@ public class ImpactAnalyzerService {
         GLOBAL_SYNONYMS.put("Customer", Arrays.asList("客户", "甲方", "付款方"));
     }
 
-    // 视图依赖反向索引: SourceObject.field -> Set<ViewName.field> (用于下游分析)
-    private final Map<String, Set<String>> viewReverseDeps = new ConcurrentHashMap<>();
-    // 视图依赖正向索引: ViewName.field -> Set<SourceObject.field> (用于上游溯源)
-    private final Map<String, Set<String>> viewDirectDeps = new ConcurrentHashMap<>();
-
-    // 分析结果缓存（使用Guava Cache）
-    private final Cache<String, GraphModels.Graph> graphCache = CacheBuilder.newBuilder()
-            .maximumSize(1000) // 最多缓存1000个结果
-            .build();
-
-    // 解释结果缓存
-    private final Cache<String, GraphModels.ExplainResponse> explainCache = CacheBuilder.newBuilder()
-            .maximumSize(1000) // 最多缓存1000个结果
-            .build();
-
     private final FormulaParserService formulaParserService;
     private final WriteBackRelationService writeBackRelationService;
     private final ExpressionFieldService expressionFieldService;
     private final EntityReferenceService entityReferenceService;
+    private final EnvSnapshotManager snapshotManager;
 
     // @Lazy 避免与 SkillsService 循环依赖：SkillsService 注入 ImpactAnalyzerService，
     // ImpactAnalyzerService 仅在 clearAnalysisCache 时通知 SkillsService 清缓存。
@@ -106,27 +63,46 @@ public class ImpactAnalyzerService {
     @Autowired
     private SkillsService skillsService;
 
-    public ImpactAnalyzerService(BaseappObjectFieldMapper mapper, FormulaParserService formulaParserService,
+    public ImpactAnalyzerService(MetadataRepository repository, FormulaParserService formulaParserService,
                                  WriteBackRelationService writeBackRelationService,
                                  ExpressionFieldService expressionFieldService,
-                                 EntityReferenceService entityReferenceService) {
-        this.mapper = mapper;
+                                 EntityReferenceService entityReferenceService,
+                                 EnvSnapshotManager snapshotManager) {
+        this.repository = repository;
         this.formulaParserService = formulaParserService;
         this.writeBackRelationService = writeBackRelationService;
         this.expressionFieldService = expressionFieldService;
         this.entityReferenceService = entityReferenceService;
+        this.snapshotManager = snapshotManager;
     }
 
     @PostConstruct
-    public void loadCache() {
-        reload();
+    public void init() {
+        // 注册 loader：当 EnvSnapshotManager 首次访问某 env 时调用
+        snapshotManager.registerLoader(this::loadInto);
     }
 
+    /** 获取当前请求上下文对应的 EnvSnapshot（首次访问时触发加载）。 */
+    private EnvSnapshot env() {
+        return snapshotManager.current();
+    }
+
+    /** 强制重新加载当前 env 的数据。 */
     public synchronized void reload() {
+        String env = EnvContext.requireCurrent();
+        snapshotManager.invalidate(env);
+        snapshotManager.getOrLoad(env);
+    }
+
+    /**
+     * 将指定 env 的全量元数据 + 各索引填充到 snapshot。
+     * 由 {@link EnvSnapshotManager} 在首次访问 env 时回调。
+     */
+    private synchronized void loadInto(EnvSnapshot snap) {
         long t0 = System.currentTimeMillis();
 
         long tSelectStart = System.currentTimeMillis();
-        List<BaseappObjectField> rows = mapper.selectAll();
+        List<BaseappObjectField> rows = repository.selectAll();
         long tSelectEnd = System.currentTimeMillis();
 
         long tGroupStart = System.currentTimeMillis();
@@ -134,9 +110,9 @@ public class ImpactAnalyzerService {
                 .collect(Collectors.groupingBy(BaseappObjectField::getObjectType));
         long tGroupEnd = System.currentTimeMillis();
 
-        rowsByObject.clear();
-        rowsByObject.putAll(byObj);
-        allRows = rows;
+        snap.rowsByObject.clear();
+        snap.rowsByObject.putAll(byObj);
+        snap.allRows = rows;
 
         // 解析 referInfo JSON，设置 refObjectType（供链式引用解析和级联搜索使用）
         int refCount = 0;
@@ -149,7 +125,6 @@ public class ImpactAnalyzerService {
         }
         log.info("Parsed {} referInfo → refObjectType mappings", refCount);
 
-        // 统计停用字段数量
         long disabledFieldCount = rows.stream()
                 .filter(f -> Boolean.TRUE.equals(f.getIsDisabled()))
                 .count();
@@ -157,25 +132,23 @@ public class ImpactAnalyzerService {
             log.info("Loaded {} fields ({} disabled)", rows.size(), disabledFieldCount);
         }
 
-        // 重新加载视图字段（因为 allRows 覆盖了）
         long tViewsStart = System.currentTimeMillis();
-        loadViews();
+        loadViews(snap);
         long tViewsEnd = System.currentTimeMillis();
 
-        // 加载对象标题和元信息
         long tTitleStart = System.currentTimeMillis();
-        objectTitles.clear();
-        objectTypeMetas.clear();
-        titleToObjectTypes.clear();
+        snap.objectTitles.clear();
+        snap.objectTypeMetas.clear();
+        snap.titleToObjectTypes.clear();
         try {
-            List<ObjectTypeMeta> metas = mapper.selectObjectTitles();
+            List<ObjectTypeMeta> metas = repository.selectObjectTitles();
             Map<String, List<String>> titleIndex = new HashMap<>();
             int disabledCount = 0;
             for (ObjectTypeMeta m : metas) {
                 if (m.getName() != null) {
-                    objectTypeMetas.put(m.getName(), m);
+                    snap.objectTypeMetas.put(m.getName(), m);
                     if (m.getTitle() != null) {
-                        objectTitles.put(m.getName(), m.getTitle());
+                        snap.objectTitles.put(m.getName(), m.getTitle());
                         titleIndex.computeIfAbsent(m.getTitle(), k -> new ArrayList<>()).add(m.getName());
                     }
                     if (Boolean.TRUE.equals(m.getIsDisabled())) {
@@ -183,93 +156,78 @@ public class ImpactAnalyzerService {
                     }
                 }
             }
-            titleToObjectTypes.putAll(titleIndex);
+            snap.titleToObjectTypes.putAll(titleIndex);
             log.info("Loaded {} object metas ({} disabled), {} title reverse-index entries",
-                    objectTypeMetas.size(), disabledCount, titleToObjectTypes.size());
+                    snap.objectTypeMetas.size(), disabledCount, snap.titleToObjectTypes.size());
+            enrichFieldAppNamesFromObjectMetas(snap);
         } catch (Exception e) {
             log.warn("Failed to load object titles", e);
         }
         long tTitleEnd = System.currentTimeMillis();
 
-        // 加载 bill 类型对象列表（baseapp_object_type.type='bill'）
         long tBillStart = System.currentTimeMillis();
         try {
-            List<String> billNames = mapper.selectBillObjectTypes();
-            billObjectTypes = new HashSet<String>();
-            for (String n : billNames) {
-                if (n != null && !n.trim().isEmpty()) {
-                    billObjectTypes.add(n.trim());
-                }
-            }
-            log.info("Loaded {} bill object types", billObjectTypes.size());
+            snap.billObjectTypes = deriveBillObjectTypes(snap);
+            log.info("Loaded {} bill object types (from object metas)", snap.billObjectTypes.size());
         } catch (Exception e) {
-            log.warn("Failed to load bill object types", e);
-            billObjectTypes = Collections.emptySet();
+            log.warn("Failed to derive bill object types", e);
+            snap.billObjectTypes = Collections.emptySet();
         }
         long tBillEnd = System.currentTimeMillis();
 
-        // 加载支持变更单的实体列表
         long tChangeBillStart = System.currentTimeMillis();
         try {
-            List<String> cbNames = mapper.selectChangeBillSupportedEntities();
-            changeBillEntities = new HashSet<String>();
+            List<String> cbNames = repository.selectChangeBillSupportedEntities();
+            Set<String> cbs = new HashSet<>();
             for (String n : cbNames) {
                 if (n != null && !n.trim().isEmpty()) {
-                    changeBillEntities.add(n.trim());
+                    cbs.add(n.trim());
                 }
             }
-            log.info("Loaded {} change-bill supported entities", changeBillEntities.size());
+            snap.changeBillEntities = cbs;
+            log.info("Loaded {} change-bill supported entities", snap.changeBillEntities.size());
         } catch (Exception e) {
             log.warn("Failed to load change-bill supported entities", e);
-            changeBillEntities = Collections.emptySet();
+            snap.changeBillEntities = Collections.emptySet();
         }
         long tChangeBillEnd = System.currentTimeMillis();
 
-        // 加载子表关系映射
         long tDetailStart = System.currentTimeMillis();
-        loadDetailRelations();
+        loadDetailRelations(snap);
         long tDetailEnd = System.currentTimeMillis();
 
-        // 构建回写触发关系索引
         long tWbStart = System.currentTimeMillis();
-        writeBackRelationService.buildIndex(allRows);
+        writeBackRelationService.buildIndex(snap, snap.allRows);
         long tWbEnd = System.currentTimeMillis();
 
-        // 构建表达式字段依赖层级索引
         long tExprStart = System.currentTimeMillis();
-        expressionFieldService.buildIndex(allRows, mainToDetails);
+        expressionFieldService.buildIndex(snap, snap.allRows, snap.mainToDetails);
         long tExprEnd = System.currentTimeMillis();
 
-        // 构建对象引用关系反向索引
         long tRefStart = System.currentTimeMillis();
-        entityReferenceService.buildIndex(allRows);
+        entityReferenceService.buildIndex(snap, snap.allRows);
         long tRefEnd = System.currentTimeMillis();
 
-        // 加载枚举定义
         long tEnumStart = System.currentTimeMillis();
-        loadEnumDefinitions();
+        loadEnumDefinitions(snap);
         long tEnumEnd = System.currentTimeMillis();
 
-        // 从元数据 JSON 补充字段级属性（description/enumType/isDisabled/isMasterField）
-        // 同时提取对象级特性到 ObjectTypeMeta
         long tEnrichStart = System.currentTimeMillis();
-        enrichFieldMetadata();
+        enrichFieldMetadata(snap);
         long tEnrichEnd = System.currentTimeMillis();
 
-        // 构建枚举字段索引（需在 enrichFieldMetadata 之后，因为 enumType 在此步骤补充）
         long tEnumFieldStart = System.currentTimeMillis();
-        buildEnumFieldIndex();
+        buildEnumFieldIndex(snap);
         long tEnumFieldEnd = System.currentTimeMillis();
 
-        // 清除分析结果缓存（因为数据源已更新）
-        long tCacheStart = System.currentTimeMillis();
-        clearAnalysisCache();
-        long tCacheEnd = System.currentTimeMillis();
+        // 此处不再调用 clearAnalysisCache：snap 是新建的，env().graphCache/env().explainCache 本就为空。
+        // SkillsService 由于按 env scope 维护 cache，由其自身在调用时按 env 查找。
 
         long tEnd = System.currentTimeMillis();
 
         log.info(
-                "[reload] done. total={}ms, selectAll={}ms, groupBy={}ms, loadViews={}ms, loadTitles={}ms, loadBillTypes={}ms, loadDetails={}ms, loadEnums={}ms, clearCache={}ms, objects={}, fields={}, views={}, details={}, enums={}",
+                "[loadInto] env={}, total={}ms, selectAll={}ms, groupBy={}ms, loadViews={}ms, loadTitles={}ms, loadBillTypes={}ms, loadDetails={}ms, loadEnums={}ms, objects={}, fields={}, views={}, details={}, enums={}",
+                snap.env,
                 (tEnd - t0),
                 (tSelectEnd - tSelectStart),
                 (tGroupEnd - tGroupStart),
@@ -278,16 +236,15 @@ public class ImpactAnalyzerService {
                 (tBillEnd - tBillStart),
                 (tDetailEnd - tDetailStart),
                 (tEnumEnd - tEnumStart),
-                (tCacheEnd - tCacheStart),
-                rowsByObject.size(), allRows.size(), viewReverseDeps.size(), mainToDetails.size(), enumValueMap.size());
+                snap.rowsByObject.size(), snap.allRows.size(), snap.viewReverseDeps.size(),
+                snap.mainToDetails.size(), snap.enumValueMap.size());
     }
 
-    /**
-     * 清除分析结果缓存
-     */
+    /** 清除当前 env 的分析结果缓存。 */
     public void clearAnalysisCache() {
-        graphCache.invalidateAll();
-        explainCache.invalidateAll();
+        EnvSnapshot snap = env();
+        snap.graphCache.invalidateAll();
+        snap.explainCache.invalidateAll();
         // 联动清除 SkillsService 缓存（@Lazy，首次 reload 前可能为 null）
         if (skillsService != null) {
             try {
@@ -295,18 +252,18 @@ public class ImpactAnalyzerService {
             } catch (Exception ignored) {
             }
         }
-        log.info("已清除分析结果缓存（含 SkillsService 缓存）");
+        log.info("已清除分析结果缓存（env={}，含 SkillsService 缓存）", snap.env);
     }
 
-    /**
-     * 获取缓存统计信息
-     */
+    /** 获取当前 env 的缓存统计信息。 */
     public Map<String, Object> getCacheStats() {
+        EnvSnapshot snap = env();
         Map<String, Object> stats = new HashMap<>();
-        stats.put("graphCacheSize", graphCache.size());
-        stats.put("explainCacheSize", explainCache.size());
-        stats.put("graphCacheStats", graphCache.stats().toString());
-        stats.put("explainCacheStats", explainCache.stats().toString());
+        stats.put("env", snap.env);
+        stats.put("graphCacheSize", snap.graphCache.size());
+        stats.put("explainCacheSize", snap.explainCache.size());
+        stats.put("graphCacheStats", snap.graphCache.stats().toString());
+        stats.put("explainCacheStats", snap.explainCache.stats().toString());
         return stats;
     }
 
@@ -344,13 +301,47 @@ public class ImpactAnalyzerService {
      * 加载子表关系映射：从 source_info 中提取 isDetail=true 的 LIST 字段，
      * 构建 mainEntity → Set(detailEntity) 和 detailEntity → mainEntity 映射。
      */
-    private void loadDetailRelations() {
-        mainToDetails.clear();
-        detailToMain.clear();
+    /** 用已加载的 ObjectType 元数据补全字段 appName（避免 ObjectField 行级 exprField 关联查询）。 */
+    private void enrichFieldAppNamesFromObjectMetas(EnvSnapshot snap) {
+        if (snap.allRows == null || snap.objectTypeMetas.isEmpty()) {
+            return;
+        }
+        int enriched = 0;
+        for (BaseappObjectField f : snap.allRows) {
+            if (f.getObjectType() == null) {
+                continue;
+            }
+            ObjectTypeMeta meta = snap.objectTypeMetas.get(f.getObjectType());
+            if (meta != null && meta.getAppName() != null && !meta.getAppName().isBlank()) {
+                f.setAppName(meta.getAppName());
+                enriched++;
+            }
+        }
+        log.info("Enriched appName on {} fields from object type metas", enriched);
+    }
+
+    private Set<String> deriveBillObjectTypes(EnvSnapshot snap) {
+        Set<String> bills = new HashSet<>();
+        for (ObjectTypeMeta m : snap.objectTypeMetas.values()) {
+            if (m.getName() == null || m.getName().isBlank()) {
+                continue;
+            }
+            if ("bill".equalsIgnoreCase(m.getType() != null ? m.getType().trim() : "")) {
+                bills.add(m.getName().trim());
+            }
+        }
+        return bills;
+    }
+
+    private void loadDetailRelations(EnvSnapshot snap) {
+        snap.mainToDetails.clear();
+        snap.detailToMain.clear();
         try {
-            List<BaseappObjectField> sourceInfoFields = mapper.selectSourceInfoFields();
-            for (BaseappObjectField field : sourceInfoFields) {
+            for (BaseappObjectField field : snap.allRows) {
                 if (field.getSourceInfo() == null || field.getSourceInfo().isEmpty()) {
+                    continue;
+                }
+                if (field.getType() == null || !"list".equalsIgnoreCase(field.getType().trim())) {
                     continue;
                 }
                 try {
@@ -359,14 +350,15 @@ public class ImpactAnalyzerService {
                     String sourceEntityName = si.has("sourceEntityName") ? si.get("sourceEntityName").asText(null) : null;
                     if (isDetail && sourceEntityName != null && !sourceEntityName.isEmpty()) {
                         String mainEntity = field.getObjectType();
-                        mainToDetails.computeIfAbsent(mainEntity, k -> new LinkedHashSet<>()).add(sourceEntityName);
-                        detailToMain.put(sourceEntityName, mainEntity);
+                        snap.mainToDetails.computeIfAbsent(mainEntity, k -> new LinkedHashSet<>()).add(sourceEntityName);
+                        snap.detailToMain.put(sourceEntityName, mainEntity);
                     }
                 } catch (Exception e) {
                     log.warn("Failed to parse source_info for {}.{}: {}", field.getObjectType(), field.getName(), e.getMessage());
                 }
             }
-            log.info("Loaded detail relations: {} main entities, {} detail entities", mainToDetails.size(), detailToMain.size());
+            log.info("Loaded detail relations: {} main entities, {} detail entities",
+                    snap.mainToDetails.size(), snap.detailToMain.size());
         } catch (Exception e) {
             log.warn("Failed to load detail relations", e);
         }
@@ -376,21 +368,21 @@ public class ImpactAnalyzerService {
      * 获取主表→子表列表映射（全量）。
      */
     public Map<String, Set<String>> getMainToDetails() {
-        return Collections.unmodifiableMap(mainToDetails);
+        return Collections.unmodifiableMap(env().mainToDetails);
     }
 
     /**
      * 获取子表→主表映射（全量）。
      */
     public Map<String, String> getDetailToMain() {
-        return Collections.unmodifiableMap(detailToMain);
+        return Collections.unmodifiableMap(env().detailToMain);
     }
 
     /**
      * 判断指定实体是否支持变更单（isSupportChangeBill=true）。
      */
     public boolean isSupportChangeBill(String entityName) {
-        return changeBillEntities.contains(entityName);
+        return env().changeBillEntities.contains(entityName);
     }
 
     /**
@@ -405,7 +397,7 @@ public class ImpactAnalyzerService {
 
     private Set<String> collectDetails(String entityName, int level) {
         Set<String> result = new LinkedHashSet<>();
-        Set<String> directDetails = mainToDetails.get(entityName);
+        Set<String> directDetails = env().mainToDetails.get(entityName);
         if (directDetails == null || directDetails.isEmpty() || level >= 3) {
             return result;
         }
@@ -419,12 +411,12 @@ public class ImpactAnalyzerService {
     /**
      * 从 baseapp_system_metadata 加载所有枚举定义，构建 enumName → Set(validValues) 映射。
      */
-    private void loadEnumDefinitions() {
-        enumValueMap.clear();
-        enumTypeIndex.clear();
-        enumTitleIndex.clear();
+    private void loadEnumDefinitions(EnvSnapshot snap) {
+        snap.enumValueMap.clear();
+        snap.enumTypeIndex.clear();
+        snap.enumTitleIndex.clear();
         try {
-            List<String> enumJsonList = mapper.selectEnumDefinitions();
+            List<String> enumJsonList = repository.selectEnumDefinitions();
             for (String json : enumJsonList) {
                 try {
                     JsonNode root = objectMapper.readTree(json);
@@ -452,21 +444,20 @@ public class ImpactAnalyzerService {
                         }
                     }
                     if (!values.isEmpty()) {
-                        enumValueMap.put(enumName, values);
+                        snap.enumValueMap.put(enumName, values);
                     }
-                    // 构建 EnumTypeMeta
                     EnumTypeMeta meta = new EnumTypeMeta(enumName, enumTitle, enumDesc);
                     meta.setValues(valueMetas);
-                    enumTypeIndex.put(enumName, meta);
-                    // 标题反向索引
+                    snap.enumTypeIndex.put(enumName, meta);
                     if (enumTitle != null && !enumTitle.isEmpty()) {
-                        enumTitleIndex.computeIfAbsent(enumTitle, k -> new ArrayList<>()).add(enumName);
+                        snap.enumTitleIndex.computeIfAbsent(enumTitle, k -> new ArrayList<>()).add(enumName);
                     }
                 } catch (Exception e) {
                     log.debug("解析枚举定义 JSON 失败，跳过: {}", e.getMessage());
                 }
             }
-            log.info("Loaded {} enum definitions, {} enum type metas", enumValueMap.size(), enumTypeIndex.size());
+            log.info("Loaded {} enum definitions, {} enum type metas",
+                    snap.enumValueMap.size(), snap.enumTypeIndex.size());
         } catch (Exception e) {
             log.warn("Failed to load enum definitions from DB", e);
         }
@@ -476,22 +467,22 @@ public class ImpactAnalyzerService {
      * 获取枚举定义映射（供 ExpressionValidatorService 使用）
      */
     public Map<String, Set<String>> getEnumValueMap() {
-        return enumValueMap;
+        return env().enumValueMap;
     }
 
     /** 获取枚举类型索引（resolve 枚举搜索用） */
     public Map<String, EnumTypeMeta> getEnumTypeIndex() {
-        return enumTypeIndex;
+        return env().enumTypeIndex;
     }
 
     /** 获取枚举标题反向索引（中文标题 → 枚举名列表） */
     public Map<String, List<String>> getEnumTitleIndex() {
-        return enumTitleIndex;
+        return env().enumTitleIndex;
     }
 
     /** 获取枚举字段索引（枚举名 → 使用该枚举的字段列表） */
     public Map<String, List<String>> getEnumFieldIndex() {
-        return enumFieldIndex;
+        return env().enumFieldIndex;
     }
 
     /** 获取 ExpressionFieldService（resolve 依赖摘要用） */
@@ -512,14 +503,14 @@ public class ImpactAnalyzerService {
      * 从 content JSON 提取对象级特性到 ObjectTypeMeta。
      * 在 enrichFieldMetadata 之前调用，因为需要 content JSON 的根节点属性。
      */
-    private void enrichObjectTraits(List<Map<String, Object>> metaList) {
+    private void enrichObjectTraits(EnvSnapshot snap, List<Map<String, Object>> metaList) {
         int traitCount = 0;
         for (Map<String, Object> meta : metaList) {
             String entityName = (String) meta.get("name");
             String content = (String) meta.get("content");
             if (entityName == null || content == null) continue;
 
-            ObjectTypeMeta otm = objectTypeMetas.get(entityName);
+            ObjectTypeMeta otm = snap.objectTypeMetas.get(entityName);
             if (otm == null) continue;
 
             try {
@@ -536,26 +527,25 @@ public class ImpactAnalyzerService {
     }
 
     /**
-     * 构建 enumFieldIndex：遍历所有字段，将有 enumType 的字段注册到枚举字段索引。
+     * 构建 env().enumFieldIndex：遍历所有字段，将有 enumType 的字段注册到枚举字段索引。
      */
-    private void buildEnumFieldIndex() {
-        enumFieldIndex.clear();
-        for (BaseappObjectField f : allRows) {
+    private void buildEnumFieldIndex(EnvSnapshot snap) {
+        snap.enumFieldIndex.clear();
+        for (BaseappObjectField f : snap.allRows) {
             String enumType = f.getEnumType();
             if (enumType != null && !enumType.isEmpty()) {
                 String fieldRef = f.getObjectType() + "." + f.getName();
-                enumFieldIndex.computeIfAbsent(enumType, k -> new ArrayList<>()).add(fieldRef);
+                snap.enumFieldIndex.computeIfAbsent(enumType, k -> new ArrayList<>()).add(fieldRef);
             }
         }
-        log.info("Built enum field index with {} enum types", enumFieldIndex.size());
+        log.info("Built enum field index with {} enum types", snap.enumFieldIndex.size());
     }
 
-    private void enrichFieldMetadata() {
+    private void enrichFieldMetadata(EnvSnapshot snap) {
         try {
-            // 合并标准元数据 + 自定义元数据
-            List<Map<String, Object>> metaList = mapper.selectEntityMetadataContents();
+            List<Map<String, Object>> metaList = repository.selectEntityMetadataContents();
             try {
-                List<Map<String, Object>> customizedList = mapper.selectCustomizedMetadataContents();
+                List<Map<String, Object>> customizedList = repository.selectCustomizedMetadataContents();
                 if (customizedList != null) {
                     metaList.addAll(customizedList);
                     log.info("Loaded {} customized metadata entries", customizedList.size());
@@ -564,15 +554,14 @@ public class ImpactAnalyzerService {
                 log.warn("Failed to load customized metadata (table may not exist): {}", e.getMessage());
             }
 
-            // 先提取对象级特性（复用同一份 content JSON）
-            enrichObjectTraits(metaList);
+            enrichObjectTraits(snap, metaList);
             int enrichedCount = 0;
             for (Map<String, Object> meta : metaList) {
                 String entityName = (String) meta.get("name");
                 String content = (String) meta.get("content");
                 if (entityName == null || content == null) continue;
 
-                List<BaseappObjectField> fields = rowsByObject.get(entityName);
+                List<BaseappObjectField> fields = snap.rowsByObject.get(entityName);
                 if (fields == null || fields.isEmpty()) continue;
 
                 // 构建 apiName → BaseappObjectField 的快速查找
@@ -594,6 +583,12 @@ public class ImpactAnalyzerService {
 
                         BaseappObjectField bf = fieldMap.get(apiName);
                         if (bf == null) continue;
+
+                        try {
+                            bf.setMetadataJson(objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(fn));
+                        } catch (JsonProcessingException ignored) {
+                            bf.setMetadataJson(fn.toString());
+                        }
 
                         // 补充 description
                         String desc = fn.path("description").asText(null);
@@ -623,20 +618,19 @@ public class ImpactAnalyzerService {
                     log.debug("解析实体 {} 元数据 JSON 失败: {}", entityName, e.getMessage());
                 }
             }
-            // 统计 enumType 补充情况
-            long enumCount = allRows.stream().filter(f -> f.getEnumType() != null).count();
+            long enumCount = snap.allRows.stream().filter(f -> f.getEnumType() != null).count();
             log.info("Enriched {} field metadata entries from entity content JSON, {} fields with enumType", enrichedCount, enumCount);
         } catch (Exception e) {
             log.warn("Failed to enrich field metadata from system_metadata", e);
         }
     }
 
-    private void loadViews() {
-        viewReverseDeps.clear();
-        viewDirectDeps.clear();
+    private void loadViews(EnvSnapshot snap) {
+        snap.viewReverseDeps.clear();
+        snap.viewDirectDeps.clear();
         try {
             // 从数据库查询所有视图定义
-            List<String> viewJsonList = mapper.selectViewDefinitions();
+            List<String> viewJsonList = repository.selectViewDefinitions();
             log.info("[视图加载] 从数据库查询到 {} 个视图定义", viewJsonList.size());
 
             if (viewJsonList.isEmpty()) {
@@ -676,21 +670,17 @@ public class ImpactAnalyzerService {
                     }
                     // log.info("[视图加载] 视图字段数量={}", viewFields.size());
 
-                    // 注入到 Graph 数据源 (仅当对象不存在时，避免覆盖实体对象)
-                    if (!rowsByObject.containsKey(viewName)) {
-                        rowsByObject.put(viewName, viewFields);
+                    if (!snap.rowsByObject.containsKey(viewName)) {
+                        snap.rowsByObject.put(viewName, viewFields);
                     }
                     totalViewsLoaded++;
 
                     JsonNode viewDefs = root.path("viewDef");
                     if (viewDefs.isArray()) {
-                        // log.info("[视图加载] viewDef SQL数量={}", viewDefs.size());
                         for (JsonNode def : viewDefs) {
                             String objectName = def.path("objectName").asText();
                             String sqlText = def.path("sql").asText();
-                            // log.info("[视图加载] 解析SQL: objectName={}, SQL长度={}", objectName,
-                            // sqlText.length());
-                            parseSqlDependencies(viewName, sqlText);
+                            parseSqlDependencies(snap, viewName, sqlText);
                             totalSqlsParsed++;
                         }
                     } else {
@@ -711,14 +701,10 @@ public class ImpactAnalyzerService {
                 }
             }
 
-            // log.info("[视图加载] 完成，加载视图数={}, 解析SQL数={}, viewReverseDeps总条目数={}",
-            // totalViewsLoaded, totalSqlsParsed, viewReverseDeps.size());
-
-            // 输出前5条依赖关系示例
             int count = 0;
-            for (Map.Entry<String, Set<String>> entry : viewReverseDeps.entrySet()) {
+            for (Map.Entry<String, Set<String>> entry : snap.viewReverseDeps.entrySet()) {
                 if (count++ < 5) {
-                    // log.info("[视图加载] 依赖示例: {} -> {}", entry.getKey(), entry.getValue());
+                    // example
                 }
             }
         } catch (Exception e) {
@@ -726,12 +712,10 @@ public class ImpactAnalyzerService {
         }
     }
 
-    private void parseSqlDependencies(String viewName, String sql) {
+    private void parseSqlDependencies(EnvSnapshot snap, String viewName, String sql) {
         if (sql == null || sql.isEmpty())
             return;
 
-        // 使用 JSqlParser 解析字段血缘
-        // Map<OutputColumn, Map<SourceTable, Set<SourceColumn>>>
         Map<String, Map<String, Set<String>>> lineage = formulaParserService.extractColumnLineage(sql);
 
         int parsedCount = 0;
@@ -743,7 +727,6 @@ public class ImpactAnalyzerService {
 
             for (Map.Entry<String, Set<String>> srcEntry : sources.entrySet()) {
                 String tableName = srcEntry.getKey();
-                // 忽略未识别的表
                 if (tableName == null || "UNKNOWN".equals(tableName)) {
                     continue;
                 }
@@ -758,13 +741,11 @@ public class ImpactAnalyzerService {
                     if (srcField == null)
                         continue;
 
-                    // 记录依赖: srcObj.srcField -> viewName.targetCamel (下游)
                     String srcKey = srcObj + "." + srcField;
                     String tgtKey = viewName + "." + targetCamel;
-                    viewReverseDeps.computeIfAbsent(srcKey, k -> new HashSet<>()).add(tgtKey);
+                    snap.viewReverseDeps.computeIfAbsent(srcKey, k -> new HashSet<>()).add(tgtKey);
 
-                    // 记录依赖: viewName.targetCamel -> srcObj.srcField (上游溯源)
-                    viewDirectDeps.computeIfAbsent(tgtKey, k -> new HashSet<>()).add(srcKey);
+                    snap.viewDirectDeps.computeIfAbsent(tgtKey, k -> new HashSet<>()).add(srcKey);
 
                     parsedCount++;
                 }
@@ -786,7 +767,7 @@ public class ImpactAnalyzerService {
 
     // 新增：获取字段元数据
     public BaseappObjectField getFieldInfo(String objectType, String fieldCamel) {
-        List<BaseappObjectField> rows = rowsByObject.get(objectType);
+        List<BaseappObjectField> rows = env().rowsByObject.get(objectType);
         if (rows == null)
             return null;
         for (BaseappObjectField r : rows) {
@@ -821,7 +802,7 @@ public class ImpactAnalyzerService {
         }
 
         // 为当前对象构建一个 camelCase -> 字段行 的索引
-        List<BaseappObjectField> rows = rowsByObject.getOrDefault(objectType,
+        List<BaseappObjectField> rows = env().rowsByObject.getOrDefault(objectType,
                 Collections.<BaseappObjectField>emptyList());
         Map<String, BaseappObjectField> byCamel = new HashMap<String, BaseappObjectField>();
         for (BaseappObjectField r : rows) {
@@ -861,7 +842,7 @@ public class ImpactAnalyzerService {
         if (targetObjectType == null || sourceObjectType == null) {
             return Collections.emptyList();
         }
-        List<BaseappObjectField> rows = rowsByObject.getOrDefault(targetObjectType, Collections.emptyList());
+        List<BaseappObjectField> rows = env().rowsByObject.getOrDefault(targetObjectType, Collections.emptyList());
         if (rows.isEmpty()) {
             return Collections.emptyList();
         }
@@ -893,7 +874,7 @@ public class ImpactAnalyzerService {
             return Collections.emptyList();
         }
         List<CrossTargetSummary> out = new ArrayList<CrossTargetSummary>();
-        for (String target : rowsByObject.keySet()) {
+        for (String target : env().rowsByObject.keySet()) {
             List<BaseappObjectField> fields = getFieldsImpactedBySourceObject(target, sourceObjectType);
             if (fields != null && !fields.isEmpty()) {
                 CrossTargetSummary s = new CrossTargetSummary();
@@ -925,7 +906,7 @@ public class ImpactAnalyzerService {
         if (targetObjectType == null || targetObjectType.trim().isEmpty()) {
             return Collections.emptyList();
         }
-        List<BaseappObjectField> rows = rowsByObject.getOrDefault(targetObjectType,
+        List<BaseappObjectField> rows = env().rowsByObject.getOrDefault(targetObjectType,
                 Collections.<BaseappObjectField>emptyList());
         Map<String, Integer> counts = new HashMap<String, Integer>();
         for (BaseappObjectField r : rows) {
@@ -956,28 +937,28 @@ public class ImpactAnalyzerService {
      * 获取对象中文标题映射（objectType → 中文标题）。
      */
     public Map<String, String> getObjectTitles() {
-        return Collections.unmodifiableMap(objectTitles);
+        return Collections.unmodifiableMap(env().objectTitles);
     }
 
     /**
      * 获取指定对象的字段列表。
      */
     public List<BaseappObjectField> getFieldsByObject(String objectType) {
-        return rowsByObject.getOrDefault(objectType, Collections.emptyList());
+        return env().rowsByObject.getOrDefault(objectType, Collections.emptyList());
     }
 
     /**
      * 获取对象类型元信息映射（objectType → ObjectTypeMeta）。
      */
     public Map<String, ObjectTypeMeta> getObjectTypeMetas() {
-        return Collections.unmodifiableMap(objectTypeMetas);
+        return Collections.unmodifiableMap(env().objectTypeMetas);
     }
 
     /**
      * 获取中文标题到对象名的反向索引（title → List&lt;objectType&gt;）。
      */
     public Map<String, List<String>> getTitleToObjectTypes() {
-        return Collections.unmodifiableMap(titleToObjectTypes);
+        return Collections.unmodifiableMap(env().titleToObjectTypes);
     }
 
     /**
@@ -990,12 +971,12 @@ public class ImpactAnalyzerService {
     // Meta APIs for Frontend
     public Set<String> getAllObjectTypes() {
         // 仅保留 baseapp_object_type 中 type='bill' 的对象；若配置为空则退回全部
-        Set<String> all = new TreeSet<>(rowsByObject.keySet());
-        if (billObjectTypes == null || billObjectTypes.isEmpty()) {
+        Set<String> all = new TreeSet<>(env().rowsByObject.keySet());
+        if (env().billObjectTypes == null || env().billObjectTypes.isEmpty()) {
             return all;
         }
         Set<String> billOnly = all.stream()
-                .filter(name -> name != null && billObjectTypes.contains(name))
+                .filter(name -> name != null && env().billObjectTypes.contains(name))
                 .collect(Collectors.toCollection(TreeSet::new));
         return billOnly.isEmpty() ? all : billOnly;
     }
@@ -1006,7 +987,7 @@ public class ImpactAnalyzerService {
         for (String type : types) {
             Map<String, String> map = new HashMap<>();
             map.put("name", type);
-            map.put("title", objectTitles.getOrDefault(type, type)); // fallback to name
+            map.put("title", env().objectTitles.getOrDefault(type, type)); // fallback to name
             result.add(map);
         }
         // Sort by name
@@ -1015,7 +996,7 @@ public class ImpactAnalyzerService {
     }
 
     public List<String> getFieldsForObject(String objectType) {
-        List<BaseappObjectField> rows = rowsByObject.get(objectType);
+        List<BaseappObjectField> rows = env().rowsByObject.get(objectType);
         if (rows == null)
             return Collections.emptyList();
         return rows.stream()
@@ -1026,7 +1007,7 @@ public class ImpactAnalyzerService {
     }
 
     public List<BaseappObjectField> getFieldDetailsForObject(String objectType) {
-        List<BaseappObjectField> rows = rowsByObject.get(objectType);
+        List<BaseappObjectField> rows = env().rowsByObject.get(objectType);
         if (rows == null)
             return Collections.emptyList();
         // Filter and return valid fields
@@ -1062,7 +1043,7 @@ public class ImpactAnalyzerService {
      * - writeBackNoDownstream: 有 writeBack 但从未被下游使用的字段数
      */
     public ObjectHealth getObjectHealth(String objectType) {
-        List<BaseappObjectField> rows = rowsByObject.getOrDefault(objectType, Collections.emptyList());
+        List<BaseappObjectField> rows = env().rowsByObject.getOrDefault(objectType, Collections.emptyList());
         ObjectHealth h = new ObjectHealth();
         h.object = objectType;
         h.totalFields = rows.size();
@@ -1249,7 +1230,7 @@ public class ImpactAnalyzerService {
      * 也等价于被 <code>makeInvoiceAmount</code> 影响到。
      */
     private Map<String, List<String>> buildTriggerAliasMap(String objectType) {
-        List<BaseappObjectField> rows = rowsByObject.getOrDefault(objectType,
+        List<BaseappObjectField> rows = env().rowsByObject.getOrDefault(objectType,
                 Collections.<BaseappObjectField>emptyList());
         Map<String, List<String>> aliasMap = new HashMap<String, List<String>>();
         for (BaseappObjectField r : rows) {
@@ -1305,7 +1286,7 @@ public class ImpactAnalyzerService {
      * 是由 sourceFieldCamel 触发，从而补上「等价关系」这层语义。
      */
     private List<Map.Entry<String, String>> buildIntraDependencies(String objectType, String sourceFieldCamel) {
-        List<BaseappObjectField> rows = rowsByObject.getOrDefault(objectType,
+        List<BaseappObjectField> rows = env().rowsByObject.getOrDefault(objectType,
                 Collections.<BaseappObjectField>emptyList());
         List<Map.Entry<String, String>> out = new ArrayList<Map.Entry<String, String>>();
 
@@ -1336,7 +1317,7 @@ public class ImpactAnalyzerService {
     }
 
     private List<String> buildIntraUpstreamDependencies(String objectType, String targetFieldCamel) {
-        List<BaseappObjectField> rows = rowsByObject.getOrDefault(objectType,
+        List<BaseappObjectField> rows = env().rowsByObject.getOrDefault(objectType,
                 Collections.<BaseappObjectField>emptyList());
         for (BaseappObjectField r : rows) {
             // 尝试多种匹配方式：apiName (camelCase) 或 name (snake_case 转 camelCase)
@@ -1481,7 +1462,7 @@ public class ImpactAnalyzerService {
     private List<Map.Entry<String, String>> buildCrossObjectDependencies(String objectType, String sourceFieldCamel) {
         List<Map.Entry<String, String>> out = new ArrayList<Map.Entry<String, String>>();
         int scanned = 0;
-        for (BaseappObjectField r : allRows) {
+        for (BaseappObjectField r : env().allRows) {
             scanned++;
             WriteBackExpr wb = parseWriteBack(r.getWriteBackExpr());
             if (!writebackHitsCurrentObject(wb, objectType))
@@ -1528,7 +1509,7 @@ public class ImpactAnalyzerService {
         // 先检查缓存
         String cacheKey = cacheKey(objectType, fieldCamel, depth, relType, includeUpstream);
         try {
-            GraphModels.Graph cached = graphCache.get(cacheKey, () -> {
+            GraphModels.Graph cached = env().graphCache.get(cacheKey, () -> {
                 return analyzeInternal(objectType, fieldCamel, depth, relType, includeUpstream);
             });
             log.info("从缓存获取分析结果: {}", cacheKey);
@@ -1665,7 +1646,7 @@ public class ImpactAnalyzerService {
 
                 // 3. View Upstream: 我是视图字段，我来自哪里 (Source -> Me)
                 if (includeView) {
-                    Set<String> upstreamSources = viewDirectDeps.get(cur); // cur is View.Field
+                    Set<String> upstreamSources = env().viewDirectDeps.get(cur); // cur is View.Field
                     if (upstreamSources != null) {
                         for (String srcId : upstreamSources) {
                             addEdgeIfAbsent(edges, edgeSet, srcId, cur, "view"); // Source -> Me
@@ -1725,7 +1706,7 @@ public class ImpactAnalyzerService {
                 }
                 if (includeView) {
                     // 查找受当前字段影响的视图字段
-                    Set<String> views = viewReverseDeps.get(cur);
+                    Set<String> views = env().viewReverseDeps.get(cur);
                     if (views != null) {
                         for (String viewId : views) {
                             addEdgeIfAbsent(edges, edgeSet, cur, viewId, "view");
@@ -1755,7 +1736,7 @@ public class ImpactAnalyzerService {
         // 检查解释结果缓存
         String cacheKey = cacheKey(objectType, fieldCamel, depth, relType, includeUpstream) + ".explain";
         try {
-            GraphModels.ExplainResponse cached = explainCache.get(cacheKey, () -> {
+            GraphModels.ExplainResponse cached = env().explainCache.get(cacheKey, () -> {
                 return explainInternal(objectType, fieldCamel, depth, relType, includeUpstream);
             });
             // log.info("从缓存获取解释结果: {}", cacheKey);
@@ -1889,7 +1870,7 @@ public class ImpactAnalyzerService {
         String cacheKey = cacheKey(objectType, fieldsStr, depth, relType, includeUpstream);
 
         try {
-            GraphModels.Graph cached = graphCache.get(cacheKey, () -> {
+            GraphModels.Graph cached = env().graphCache.get(cacheKey, () -> {
                 return analyzeBatchInternal(objectType, fields, depth, relType, includeUpstream);
             });
             // log.info("从缓存获取批量分析结果: {}", cacheKey);
@@ -1993,18 +1974,18 @@ public class ImpactAnalyzerService {
      */
     public Map<String, Object> getViewDependenciesDebugInfo() {
         Map<String, Object> result = new HashMap<>();
-        result.put("totalEntries", viewReverseDeps.size());
+        result.put("totalEntries", env().viewReverseDeps.size());
 
         // 转换为易读格式
         Map<String, List<String>> readableFormat = new HashMap<>();
-        for (Map.Entry<String, Set<String>> entry : viewReverseDeps.entrySet()) {
+        for (Map.Entry<String, Set<String>> entry : env().viewReverseDeps.entrySet()) {
             readableFormat.put(entry.getKey(), new ArrayList<>(entry.getValue()));
         }
         result.put("dependencies", readableFormat);
 
         // 统计信息
         int totalMappings = 0;
-        for (Set<String> targets : viewReverseDeps.values()) {
+        for (Set<String> targets : env().viewReverseDeps.values()) {
             totalMappings += targets.size();
         }
         result.put("totalMappings", totalMappings);
@@ -2013,7 +1994,7 @@ public class ImpactAnalyzerService {
     }
 
     public List<BaseappObjectField> getAllFields() {
-        return allRows;
+        return env().allRows;
     }
 
     // ===== NL2MVEL 自然语言到 MVEL 推演引擎 =====
@@ -2046,7 +2027,7 @@ public class ImpactAnalyzerService {
         }
         List<BaseappObjectField> rows;
         try {
-            rows = mapper.selectReferencingFields(entityName.trim());
+            rows = repository.selectReferencingFields(entityName.trim());
         } catch (Exception e) {
             log.warn("[findObjectsReferencingEntity] DB 查询失败: {}", e.getMessage());
             return Collections.emptyList();
@@ -2060,7 +2041,7 @@ public class ImpactAnalyzerService {
                 ReferenceGroup rg = new ReferenceGroup();
                 rg.objectType = k;
                 rg.appName = f.getAppName();
-                rg.objectTitle = objectTitles.getOrDefault(k, "");
+                rg.objectTitle = env().objectTitles.getOrDefault(k, "");
                 return rg;
             });
             ReferenceGroup.FieldRef fr = new ReferenceGroup.FieldRef();

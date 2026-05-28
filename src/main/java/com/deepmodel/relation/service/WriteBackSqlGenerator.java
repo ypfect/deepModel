@@ -1,6 +1,6 @@
 package com.deepmodel.relation.service;
 
-import com.deepmodel.relation.dao.BaseappObjectFieldMapper;
+import com.deepmodel.relation.dao.MetadataRepository;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.WriteBackExpr;
 import com.deepmodel.relation.util.ExprUtils;
@@ -36,7 +36,7 @@ public class WriteBackSqlGenerator {
     private static final Logger log = LoggerFactory.getLogger(WriteBackSqlGenerator.class);
 
     private final ImpactAnalyzerService impactAnalyzerService;
-    private final BaseappObjectFieldMapper mapper;
+    private final MetadataRepository repository;
 
     /** objectType → appName 缓存 */
     private final Map<String, String> appNameCache = new ConcurrentHashMap<String, String>();
@@ -62,9 +62,9 @@ public class WriteBackSqlGenerator {
     }
 
     public WriteBackSqlGenerator(ImpactAnalyzerService impactAnalyzerService,
-                                 BaseappObjectFieldMapper mapper) {
+                                 MetadataRepository repository) {
         this.impactAnalyzerService = impactAnalyzerService;
-        this.mapper = mapper;
+        this.repository = repository;
     }
 
     /**
@@ -299,7 +299,7 @@ public class WriteBackSqlGenerator {
         if (objectType == null || objectType.trim().isEmpty()) return "";
         String snake = ExprUtils.camelToSnake(objectType);
         String appName = appNameCache.computeIfAbsent(objectType, k -> {
-            String name = mapper.selectAppNameByObjectType(k);
+            String name = repository.selectAppNameByObjectType(k);
             return name != null ? name.trim() : "";
         });
         if (!appName.isEmpty()) {

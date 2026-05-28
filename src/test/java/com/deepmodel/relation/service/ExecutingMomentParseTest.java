@@ -16,7 +16,7 @@ class ExecutingMomentParseTest {
 
     @BeforeEach
     void setUp() {
-        service = new ImpactAnalyzerService(null, null, null, null, null);
+        service = new ImpactAnalyzerService(null, null, null, null, null, null);
     }
 
     @Test

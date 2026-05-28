@@ -1,5 +1,7 @@
 package com.deepmodel.relation.service;
 
+import com.deepmodel.relation.env.EnvSnapshot;
+import com.deepmodel.relation.env.EnvSnapshotManager;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -14,7 +16,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 对象引用关系反向索引服务。
+ * 对象引用关系反向索引服务（stateless，state 全部存于 {@link EnvSnapshot}）。
  * <p>
  * 从 refer_info JSON 中解析 referEntities，构建：
  * {@code Map<被引用对象, Map<引用对象, Map<FK字段, Boolean(isDetail)>>>}
@@ -37,17 +39,16 @@ public class EntityReferenceService {
             .configure(JsonParser.Feature.ALLOW_COMMENTS, true)
             .configure(JsonParser.Feature.ALLOW_TRAILING_COMMA, true);
 
-    /** 被引用对象 → 引用对象 → FK字段 → isDetail */
-    private final Map<String, Map<String, Map<String, Boolean>>> referIndex = new ConcurrentHashMap<>();
+    private final EnvSnapshotManager snapshotManager;
 
-    /**
-     * 从字段列表构建引用关系反向索引。
-     *
-     * @param allRows 所有字段记录
-     */
-    public void buildIndex(List<BaseappObjectField> allRows) {
+    public EntityReferenceService(EnvSnapshotManager snapshotManager) {
+        this.snapshotManager = snapshotManager;
+    }
+
+    /** 从字段列表构建引用关系反向索引，结果写入指定 {@link EnvSnapshot}。 */
+    public void buildIndex(EnvSnapshot snapshot, List<BaseappObjectField> allRows) {
         long t0 = System.currentTimeMillis();
-        referIndex.clear();
+        snapshot.referIndex.clear();
 
         for (BaseappObjectField row : allRows) {
             if (row.getReferInfo() == null || row.getReferInfo().trim().isEmpty()
@@ -61,7 +62,6 @@ public class EntityReferenceService {
                     continue;
                 }
 
-                // 检查是否多态引用
                 String referEntityFieldName = ri.has("referEntityFieldName")
                         ? ri.get("referEntityFieldName").asText(null) : null;
                 boolean isPolymorphic = referEntityFieldName != null && !referEntityFieldName.isEmpty();
@@ -76,7 +76,7 @@ public class EntityReferenceService {
 
                     String indexKey = isPolymorphic ? KEY_ALL : referEntityName;
 
-                    referIndex.computeIfAbsent(indexKey, k -> new ConcurrentHashMap<>())
+                    snapshot.referIndex.computeIfAbsent(indexKey, k -> new ConcurrentHashMap<>())
                             .computeIfAbsent(row.getObjectType(), k -> new LinkedHashMap<>())
                             .put(row.getName(), isDetail);
                 }
@@ -87,26 +87,20 @@ public class EntityReferenceService {
         }
 
         long elapsed = System.currentTimeMillis() - t0;
-        log.info("Built entity reference index: {} referred entities in {}ms", referIndex.size(), elapsed);
+        log.info("Built entity reference index for env={}: {} referred entities in {}ms",
+                snapshot.env, snapshot.referIndex.size(), elapsed);
     }
 
-    /**
-     * 查询指定对象被谁引用。
-     *
-     * @param referredEntity 被引用的对象类型名
-     * @return 引用对象 → FK字段 → isDetail；未找到返回空 Map
-     */
+    /** 查询指定对象被谁引用。 */
     public Map<String, Map<String, Boolean>> getReferRelations(String referredEntity) {
-        Map<String, Map<String, Boolean>> result = referIndex.get(referredEntity);
+        EnvSnapshot snap = snapshotManager.current();
+        Map<String, Map<String, Boolean>> result = snap.referIndex.get(referredEntity);
         return result != null ? Collections.unmodifiableMap(result) : Collections.emptyMap();
     }
 
-    /**
-     * 查询全量引用关系索引。
-     *
-     * @return 被引用对象 → 引用对象 → FK字段 → isDetail
-     */
+    /** 查询全量引用关系索引。 */
     public Map<String, Map<String, Map<String, Boolean>>> getAllReferRelations() {
-        return Collections.unmodifiableMap(referIndex);
+        EnvSnapshot snap = snapshotManager.current();
+        return Collections.unmodifiableMap(snap.referIndex);
     }
 }

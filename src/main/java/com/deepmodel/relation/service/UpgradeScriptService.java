@@ -1,6 +1,8 @@
 package com.deepmodel.relation.service;
 
-import com.deepmodel.relation.dao.BaseappObjectFieldMapper;
+import com.deepmodel.relation.dao.MetadataRepository;
+import com.deepmodel.relation.env.EnvContext;
+import com.deepmodel.relation.env.EnvResolver;
 import com.deepmodel.relation.config.ExpressionEngineConfig;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.GraphModels;
@@ -12,7 +14,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import jakarta.annotation.PostConstruct;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -66,71 +67,49 @@ public class UpgradeScriptService {
     private static final Pattern MYBATIS_TARGET_IDS_PATTERN =
             Pattern.compile("\\s+WHERE\\s+m\\.id\\s+IN\\s*\\(#\\{targetIds\\[\\d+]\\}\\)\\s*$", Pattern.CASE_INSENSITIVE);
 
-    /** 从 JDBC URL 提取环境名的正则：postgres.{env}.e7link.com */
-    private static final Pattern ENV_FROM_JDBC_PATTERN =
-            Pattern.compile("postgres\\.([^:/]+)\\.e7link\\.com");
-
-    @Value("${spring.datasource.url:}")
-    private String datasourceUrl;
-
     @Value("${writeback-sql.tenant-id:}")
     private String writeBackSqlTenantId;
 
-    /** 从 Spring Boot 数据源推导的默认回写 API 地址，@PostConstruct 时初始化 */
-    private String defaultWriteBackSqlApiUrl;
-
     private final ImpactAnalyzerService impactAnalyzerService;
-    private final BaseappObjectFieldMapper mapper;
+    private final MetadataRepository repository;
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final ExpressionEngineConfig expressionEngineConfig;
     private final WriteBackSqlGenerator writeBackSqlGenerator;
+    private final EnvResolver envResolver;
 
     /** objectType → appName 缓存，避免 N+1 DB 查询 */
     private final Map<String, String> appNameCache = new ConcurrentHashMap<>();
 
     public UpgradeScriptService(ImpactAnalyzerService impactAnalyzerService,
-                                BaseappObjectFieldMapper mapper,
+                                MetadataRepository repository,
                                 OkHttpClient httpClient,
                                 ExpressionEngineConfig expressionEngineConfig,
-                                WriteBackSqlGenerator writeBackSqlGenerator) {
+                                WriteBackSqlGenerator writeBackSqlGenerator,
+                                EnvResolver envResolver) {
         this.impactAnalyzerService = impactAnalyzerService;
-        this.mapper = mapper;
+        this.repository = repository;
         this.httpClient = httpClient;
         this.objectMapper = new ObjectMapper();
         this.expressionEngineConfig = expressionEngineConfig;
         this.writeBackSqlGenerator = writeBackSqlGenerator;
-    }
-
-    @PostConstruct
-    private void init() {
-        defaultWriteBackSqlApiUrl = buildWriteBackApiUrl(datasourceUrl);
-        if (defaultWriteBackSqlApiUrl != null) {
-            log.info("[UpgradeScript] 回写 SQL API 默认地址（从数据源推导）: {}", defaultWriteBackSqlApiUrl);
-        } else {
-            log.warn("[UpgradeScript] 无法从数据源 URL 推导回写 SQL API 地址: {}", datasourceUrl);
-        }
+        this.envResolver = envResolver;
     }
 
     /**
-     * 从 JDBC URL 提取环境名，构建回写 SQL API 地址。
-     * 例: jdbc:postgresql://postgres.test-tx-19.e7link.com:5432/tenant-public
-     *   → http://arap.test-tx-19.e7link.com/arap/gen/debug/writeBackField2sql
+     * 解析当前上下文中生效的回写 SQL API 地址。
+     * 优先级：ThreadLocal 覆盖 > 当前 EnvContext 推导。
      */
-    static String buildWriteBackApiUrl(String jdbcUrl) {
-        if (jdbcUrl == null || jdbcUrl.isEmpty()) return null;
-        java.util.regex.Matcher m = ENV_FROM_JDBC_PATTERN.matcher(jdbcUrl);
-        if (m.find()) {
-            String env = m.group(1);
-            return "http://arap." + env + ".e7link.com/arap/gen/debug/writeBackField2sql";
-        }
-        return null;
-    }
-
-    /** 获取当前上下文中生效的回写 SQL API 地址（对比库覆盖 > 默认值） */
     private String resolveWriteBackApiUrl() {
         String override = writeBackApiUrlOverrideCtx.get();
-        return override != null ? override : defaultWriteBackSqlApiUrl;
+        if (override != null) {
+            return override;
+        }
+        String env = EnvContext.currentOrNull();
+        if (env != null) {
+            return envResolver.getWriteBackSqlApiUrl(env);
+        }
+        return null;
     }
 
     enum RelType {
@@ -329,7 +308,7 @@ public class UpgradeScriptService {
      *                           为 null 时退化为使用本地 in-memory 数据（兼容旧行为）。
      * @param includeComments    是否在输出 SQL 中保留注释行；false 时输出更精简的纯 SQL。
      * @param progressCallback   进度回调，每个阶段/字段开始处调用；为 null 时无进度输出。
-     * @param compareDbUrl       对比库 JDBC URL（可选），用于推导回写 SQL API 地址。
+     * @param compareEnv         对比环境名（可选）；非空时用 EnvResolver 解析其 arap 服务地址覆盖默认回写 API。
      * @param writeBackTenantId  回写 SQL API 的 Tenant-Id（可选），覆盖默认配置。
      * @param writeBackApiUrl    回写 SQL API 地址（可选），用户手动指定时优先使用。
      */
@@ -339,7 +318,7 @@ public class UpgradeScriptService {
                                              Map<String, BaseappObjectField> latestFieldDefs,
                                              boolean includeComments,
                                              java.util.function.Consumer<String> progressCallback,
-                                             String compareDbUrl,
+                                             String compareEnv,
                                              String writeBackTenantId,
                                              String writeBackApiUrl) {
         if (roots == null || roots.isEmpty()) {
@@ -348,18 +327,21 @@ public class UpgradeScriptService {
         latestFieldDefsCtx.set(latestFieldDefs);
         progressCtx.set(progressCallback);
 
-        // 优先使用用户手动指定的回写 API 地址，否则从对比库 URL 推导
+        // 回写 API 地址优先级：手动指定 > compareEnv 推导 > EnvContext 默认推导（resolveWriteBackApiUrl）
         if (writeBackApiUrl != null && !writeBackApiUrl.trim().isEmpty()) {
             writeBackApiUrlOverrideCtx.set(writeBackApiUrl.trim());
             log.info("[UpgradeScript] 回写 SQL API 地址（用户指定）: {}", writeBackApiUrl.trim());
-        } else if (compareDbUrl != null && !compareDbUrl.trim().isEmpty()) {
-            String overrideUrl = buildWriteBackApiUrl(compareDbUrl);
-            if (overrideUrl != null) {
-                writeBackApiUrlOverrideCtx.set(overrideUrl);
-                log.info("[UpgradeScript] 回写 SQL API 地址（从对比库推导）: {}", overrideUrl);
+        } else if (compareEnv != null && !compareEnv.trim().isEmpty()) {
+            try {
+                String overrideUrl = envResolver.getWriteBackSqlApiUrl(compareEnv.trim());
+                if (overrideUrl != null) {
+                    writeBackApiUrlOverrideCtx.set(overrideUrl);
+                    log.info("[UpgradeScript] 回写 SQL API 地址（从 compareEnv={} 推导）: {}", compareEnv.trim(), overrideUrl);
+                }
+            } catch (Exception e) {
+                log.warn("[UpgradeScript] 无法解析 compareEnv={} 的回写 API 地址: {}", compareEnv, e.getMessage());
             }
         }
-        // 覆盖 tenant-id
         if (writeBackTenantId != null && !writeBackTenantId.trim().isEmpty()) {
             this.writeBackSqlTenantId = writeBackTenantId.trim();
         }
@@ -1644,7 +1626,7 @@ public class UpgradeScriptService {
         }
         String snake = ExprUtils.camelToSnake(objectType);
         String appName = appNameCache.computeIfAbsent(objectType, k -> {
-            String name = mapper.selectAppNameByObjectType(k);
+            String name = repository.selectAppNameByObjectType(k);
             return name != null ? name.trim() : "";
         });
         if (!appName.isEmpty()) {

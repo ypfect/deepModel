@@ -1,5 +1,8 @@
 package com.deepmodel.relation.controller;
 
+import com.deepmodel.relation.env.EnvContext;
+import com.deepmodel.relation.env.EnvFilter;
+import com.deepmodel.relation.env.EnvResolver;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.GraphModels;
 import com.deepmodel.relation.service.ImpactAnalyzerService;
@@ -16,6 +19,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -33,36 +37,41 @@ public class ImpactController {
 
     private static final Logger log = LoggerFactory.getLogger(ImpactController.class);
 
-    @Value("${spring.datasource.url:}")
-    private String datasourceUrl;
-
-    @Value("${spring.datasource.username:}")
-    private String datasourceUsername;
-
-    @Value("${spring.datasource.password:}")
-    private String datasourcePassword;
+    @Value("${metadata-source.tenant-id:0}")
+    private String metadataTenantId;
 
     private final ImpactAnalyzerService analyzerService;
     private final UpgradeScriptService upgradeScriptService;
     private final HealthCheckService healthCheckService;
     private final SnapshotService snapshotService;
+    private final EnvResolver envResolver;
 
     public ImpactController(ImpactAnalyzerService analyzerService,
             UpgradeScriptService upgradeScriptService,
             HealthCheckService healthCheckService,
-            SnapshotService snapshotService) {
+            SnapshotService snapshotService,
+            EnvResolver envResolver) {
         this.analyzerService = analyzerService;
         this.upgradeScriptService = upgradeScriptService;
         this.healthCheckService = healthCheckService;
         this.snapshotService = snapshotService;
+        this.envResolver = envResolver;
     }
 
     @GetMapping("/api/impact/meta/datasource")
     public Map<String, String> getDatasourceInfo() {
         Map<String, String> info = new LinkedHashMap<>();
-        info.put("url", datasourceUrl);
-        info.put("username", datasourceUsername);
-        info.put("password", datasourcePassword);
+        String env = EnvContext.currentOrNull();
+        info.put("env", env);
+        info.put("tenantId", metadataTenantId);
+        if (env != null) {
+            try {
+                info.put("graphqlUrl", envResolver.getGraphqlUrl(env));
+                info.put("writeBackSqlApiUrl", envResolver.getWriteBackSqlApiUrl(env));
+            } catch (Exception e) {
+                info.put("graphqlUrl", "(解析失败: " + e.getMessage() + ")");
+            }
+        }
         return info;
     }
 
@@ -173,61 +182,27 @@ public class ImpactController {
     }
 
     /**
-     * 远程数据库对比：前端传入 JDBC URL、用户名、密码和可选 appName 列表，
-     * 后端从远程库加载 baseapp_object_field + object_type，再与本地当前定义做差异分析。
-     *
-     * 支持指定「基准库」：
-     * - localAsBase = true => 基准库 = 本地 Spring Boot 数据源，比较库 = 远程
-     * - localAsBase = false => 基准库 = 远程，比较库 = 本地（兼容原有语义）
+     * 双环境对比：前端传入「基准环境」和「比较环境」，通过 GraphQL 拉取 bill 对象字段并 diff。
      */
-    @PostMapping("/api/impact/snapshot/diff/remote")
-    public SnapshotService.VersionDiff diffRemote(
-            @org.springframework.web.bind.annotation.RequestBody RemoteRequest req)
-            throws Exception {
-        List<String> apps = parseAppNames(req.appName);
-        boolean localAsBase = req.localAsBase == null ? false : req.localAsBase;
-        return snapshotService.compareWithRemote(req.url, req.username, req.password, apps, localAsBase);
-    }
-
-    public static class RemoteRequest {
-        public String url;
-        public String username;
-        public String password;
-        public String appName;
-        /**
-         * 是否以本地库为基准库（可为空，默认 false 以保持向后兼容；前端会主动传 true 以本地为基准）。
-         */
-        public Boolean localAsBase;
-    }
-
-    /**
-     * 双端 JDBC 对比接口。前端传入「基准库」和「比较库」两个 JDBC 端点（都可为空）。
-     * - 当某一端 URL 为空时，表示使用当前 Spring Boot 数据源。
-     */
-    @PostMapping("/api/impact/snapshot/diff/jdbcPair")
-    public SnapshotService.VersionDiff diffJdbcPair(
-            @org.springframework.web.bind.annotation.RequestBody JdbcPairRequest req) throws Exception {
-        JdbcEndpoint base = req.base != null ? req.base : new JdbcEndpoint();
-        JdbcEndpoint compare = req.compare != null ? req.compare : new JdbcEndpoint();
-
+    @PostMapping("/api/impact/snapshot/diff/envPair")
+    public SnapshotService.VersionDiff diffEnvPair(@RequestBody EnvPairRequest req) {
+        EnvEndpoint base = req.base != null ? req.base : new EnvEndpoint();
+        EnvEndpoint compare = req.compare != null ? req.compare : new EnvEndpoint();
         List<String> baseApps = parseAppNames(base.appName);
         List<String> compareApps = parseAppNames(compare.appName);
-
-        return snapshotService.compareJdbcPair(
-                base.url, base.username, base.password, baseApps,
-                compare.url, compare.username, compare.password, compareApps);
+        return snapshotService.compareEnvPair(base.env, baseApps, compare.env, compareApps);
     }
 
-    public static class JdbcEndpoint {
-        public String url;
-        public String username;
-        public String password;
+    public static class EnvEndpoint {
+        /** 环境名，如 test-tx-21 */
+        public String env;
+        /** App 过滤，逗号分隔，可选 */
         public String appName;
     }
 
-    public static class JdbcPairRequest {
-        public JdbcEndpoint base;
-        public JdbcEndpoint compare;
+    public static class EnvPairRequest {
+        public EnvEndpoint base;
+        public EnvEndpoint compare;
     }
 
     /**
@@ -509,7 +484,7 @@ public class ImpactController {
 
         String sql = upgradeScriptService.generateUpgradeScriptBatch(
                 roots, depth, relTypes, latestFieldDefs, includeComments, null,
-                req.compareDbUrl, req.writeBackTenantId, req.writeBackApiUrl);
+                req.compareEnv, req.writeBackTenantId, req.writeBackApiUrl);
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"batch_upgrade.sql\"");
         headers.setContentType(MediaType.TEXT_PLAIN);
@@ -530,8 +505,10 @@ public class ImpactController {
     @PostMapping(value = "/api/impact/upgradeScript/batch/stream",
                  produces = "text/plain;charset=UTF-8")
     public ResponseEntity<StreamingResponseBody> generateUpgradeScriptBatchStream(
-            @RequestBody UpgradeScriptBatchRequest req) {
+            @RequestBody UpgradeScriptBatchRequest req,
+            @RequestHeader(value = EnvFilter.HEADER, required = false) String headerEnv) {
 
+        final String workEnv = resolveWorkEnv(headerEnv, req);
         final List<Map.Entry<String, String>> roots = parseRoots(req);
         final int depth = req.depth != null && req.depth > 0 ? req.depth : 3;
         final String relTypes = req.relTypes != null && !req.relTypes.isEmpty() ? req.relTypes : "intra,writeBack";
@@ -541,9 +518,20 @@ public class ImpactController {
             BufferedWriter writer = new BufferedWriter(
                     new OutputStreamWriter(outputStream, StandardCharsets.UTF_8));
 
-            // 所有对 writer 的写操作都加锁，避免心跳线程与主线程并发写导致数据损坏
-            // 进度回调
-            java.util.function.Consumer<String> progress = msg -> {
+            if (workEnv == null || workEnv.isBlank()) {
+                try {
+                    writer.write("-- [ERROR] 当前请求未指定环境（X-Env header 缺失），请先在前端选择基准环境\n");
+                    writer.flush();
+                } catch (IOException ignored) {}
+                return;
+            }
+
+            try {
+                EnvContext.set(workEnv);
+
+                // 所有对 writer 的写操作都加锁，避免心跳线程与主线程并发写导致数据损坏
+                // 进度回调
+                java.util.function.Consumer<String> progress = msg -> {
                 synchronized (writer) {
                     try {
                         writer.write("-- [PROGRESS] " + msg + "\n");
@@ -574,31 +562,34 @@ public class ImpactController {
                 }
             }, 8, 8, java.util.concurrent.TimeUnit.SECONDS);
 
-            try {
-                // compareDb 字段加载（可能耗时，单独上报进度）
-                Map<String, BaseappObjectField> latestFieldDefs = fetchLatestFieldDefs(req, progress);
+                try {
+                    // compareDb 字段加载（可能耗时，单独上报进度）
+                    Map<String, BaseappObjectField> latestFieldDefs = fetchLatestFieldDefs(req, progress);
 
-                String sql = upgradeScriptService.generateUpgradeScriptBatch(
-                        roots, depth, relTypes, latestFieldDefs, includeComments, progress,
-                        req.compareDbUrl, req.writeBackTenantId, req.writeBackApiUrl);
+                    String sql = upgradeScriptService.generateUpgradeScriptBatch(
+                            roots, depth, relTypes, latestFieldDefs, includeComments, progress,
+                            req.compareEnv, req.writeBackTenantId, req.writeBackApiUrl);
 
-                synchronized (writer) {
-                    writer.write(sql);
-                    writer.flush();
-                }
-            } catch (Throwable e) {
-                // 捕获 Throwable 而非 Exception，确保 OOM / StackOverflow 等 Error 也能上报
-                log.error("[upgradeScript/batch/stream] 生成失败", e);
-                String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getName();
-                synchronized (writer) {
-                    try {
-                        writer.write("-- [ERROR] " + errMsg + "\n");
+                    synchronized (writer) {
+                        writer.write(sql);
                         writer.flush();
-                    } catch (IOException ignored) {}
+                    }
+                } catch (Throwable e) {
+                    // 捕获 Throwable 而非 Exception，确保 OOM / StackOverflow 等 Error 也能上报
+                    log.error("[upgradeScript/batch/stream] 生成失败", e);
+                    String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getName();
+                    synchronized (writer) {
+                        try {
+                            writer.write("-- [ERROR] " + errMsg + "\n");
+                            writer.flush();
+                        } catch (IOException ignored) {}
+                    }
+                } finally {
+                    finished.set(true);
+                    heartbeatSvc.shutdown();
                 }
             } finally {
-                finished.set(true);
-                heartbeatSvc.shutdown();
+                EnvContext.clear();
             }
         };
 
@@ -611,6 +602,21 @@ public class ImpactController {
     }
 
     // ─── 私有辅助方法 ────────────────────────────────────────────────────────
+
+    /** 流式/异步场景在请求线程捕获工作环境（基准环境），供后续分析图使用。 */
+    private static String resolveWorkEnv(String headerEnv, UpgradeScriptBatchRequest req) {
+        if (headerEnv != null && !headerEnv.isBlank()) {
+            return headerEnv.trim();
+        }
+        String ctx = EnvContext.currentOrNull();
+        if (ctx != null && !ctx.isBlank()) {
+            return ctx.trim();
+        }
+        if (req.baseEnv != null && !req.baseEnv.isBlank()) {
+            return req.baseEnv.trim();
+        }
+        return null;
+    }
 
     /** 将请求体中的 roots 列表解析为 Entry 列表。 */
     private List<Map.Entry<String, String>> parseRoots(UpgradeScriptBatchRequest req) {
@@ -626,22 +632,22 @@ public class ImpactController {
     }
 
     /**
-     * 从比较库拉取最新字段定义（若请求中包含 compareDbUrl）。
+     * 从比较环境拉取最新字段定义（若请求中包含 compareEnv）。
      *
      * @param progress 进度回调，可为 null
-     * @return 字段 map（key = "ObjectType.camelField"）；未配置比较库时返回 null
+     * @return 字段 map（key = "ObjectType.camelField"）；未配置比较环境时返回 null
      */
     private Map<String, BaseappObjectField> fetchLatestFieldDefs(
             UpgradeScriptBatchRequest req,
             java.util.function.Consumer<String> progress) {
-        if (req.compareDbUrl == null || req.compareDbUrl.trim().isEmpty()) {
+        if (req.compareEnv == null || req.compareEnv.trim().isEmpty()) {
             return null;
         }
-        if (progress != null) progress.accept("正在从比较库加载最新字段定义...");
+        if (progress != null) progress.accept("正在从比较环境 " + req.compareEnv.trim() + " 加载最新字段定义...");
         try {
-            List<String> compareApps = parseAppNames(req.compareDbAppName);
-            List<BaseappObjectField> compareFields = snapshotService.fetchCompareDbFields(
-                    req.compareDbUrl.trim(), req.compareDbUser, req.compareDbPassword, compareApps);
+            List<String> compareApps = parseAppNames(req.compareAppName);
+            List<BaseappObjectField> compareFields = snapshotService.fetchFieldsByEnv(
+                    req.compareEnv.trim(), compareApps);
             Map<String, BaseappObjectField> defs = new LinkedHashMap<>();
             for (BaseappObjectField f : compareFields) {
                 String obj = f.getObjectType();
@@ -655,11 +661,11 @@ public class ImpactController {
                     defs.putIfAbsent(obj + "." + camel, f);
                 }
             }
-            if (progress != null) progress.accept("比较库字段加载完成（" + defs.size() + " 条记录）");
+            if (progress != null) progress.accept("比较环境字段加载完成（" + defs.size() + " 条记录）");
             return defs;
         } catch (Exception e) {
-            log.warn("[upgradeScript/batch] 拉取比较库字段定义失败，降级为本地定义: {}", e.getMessage());
-            if (progress != null) progress.accept("比较库加载失败，降级为本地定义");
+            log.warn("[upgradeScript/batch] 拉取比较环境字段定义失败，降级为本地定义: {}", e.getMessage());
+            if (progress != null) progress.accept("比较环境加载失败，降级为本地定义");
             return null;
         }
     }
@@ -668,11 +674,12 @@ public class ImpactController {
         public List<RootItem> roots;
         public Integer depth;
         public String relTypes;
-        /** 比较库 JDBC 连接（可选），用于以最新字段定义生成升级 SQL */
-        public String compareDbUrl;
-        public String compareDbUser;
-        public String compareDbPassword;
-        public String compareDbAppName;
+        /** 基准环境名（可选），流式生成时作为 X-Env 的 body 兜底 */
+        public String baseEnv;
+        /** 比较环境名（可选），用于以最新字段定义生成升级 SQL */
+        public String compareEnv;
+        /** 比较环境 appName 过滤（逗号分隔，可选） */
+        public String compareAppName;
         /** 是否在输出 SQL 中保留注释行，默认 false（不保留） */
         public Boolean includeComments;
         /** 回写 SQL API 的 Tenant-Id（可选），覆盖默认配置 */

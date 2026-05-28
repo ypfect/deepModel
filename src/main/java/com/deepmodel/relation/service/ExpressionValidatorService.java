@@ -7,6 +7,7 @@ import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.ValidationErrorItem;
 import com.deepmodel.relation.model.ValidationReport;
 import com.deepmodel.relation.model.WriteBackExpr;
+import com.deepmodel.relation.util.ExprUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -61,6 +62,13 @@ public class ExpressionValidatorService {
             "commentscount", "attachmentscount", "executepath"
     );
 
+    /** MVEL 关键字/内置，不作为字段引用校验 */
+    private static final Set<String> MVEL_SKIP_IDENTIFIERS = Set.of(
+            "if", "else", "foreach", "for", "while", "do", "return", "import", "def", "new",
+            "instanceof", "empty", "size", "contains", "matches", "with", "assert", "var",
+            "true", "false", "null", "this", "systemfields"
+    );
+
     private final ImpactAnalyzerService impactAnalyzerService;
     private final FormulaParserService formulaParserService;
     private final ObjectMapper objectMapper;
@@ -95,6 +103,7 @@ public class ExpressionValidatorService {
             validateFieldExpressions(field, groupedFields, report);
         }
 
+        enrichReportFieldDefinitions(report);
         return report;
     }
 
@@ -106,6 +115,8 @@ public class ExpressionValidatorService {
         public int scannedObjects;
         public int scannedFields;
         public String currentObject;
+        public int totalObjectCountInEnv;
+        public String filterAppName;
         public ValidationReport report; // 仅 complete 时非 null
 
         public ScanProgress(String type, int totalObjects, int totalFields,
@@ -130,16 +141,20 @@ public class ExpressionValidatorService {
         List<BaseappObjectField> allFields = impactAnalyzerService.getAllFields();
         if (allFields == null) allFields = Collections.emptyList();
 
-        List<BaseappObjectField> filteredFields = allFields;
-        if (appName != null && !appName.trim().isEmpty()) {
-            filteredFields = allFields.stream()
-                    .filter(f -> f.getAppName() != null && f.getAppName().contains(appName))
-                    .collect(Collectors.toList());
-        }
-
         Map<String, List<BaseappObjectField>> groupedFields = allFields.stream()
                 .filter(f -> f.getObjectType() != null)
                 .collect(Collectors.groupingBy(BaseappObjectField::getObjectType));
+
+        int totalObjectCountInEnv = groupedFields.size();
+        String filterAppName = (appName != null && !appName.trim().isEmpty()) ? appName.trim() : null;
+        Set<String> appFilters = parseAppNameFilters(filterAppName);
+
+        List<BaseappObjectField> filteredFields = allFields;
+        if (!appFilters.isEmpty()) {
+            filteredFields = allFields.stream()
+                    .filter(f -> matchesAppFilter(f.getAppName(), appFilters))
+                    .collect(Collectors.toList());
+        }
 
         // 按对象分组（保持扫描范围内的对象）
         Map<String, List<BaseappObjectField>> objectGroups = filteredFields.stream()
@@ -149,8 +164,14 @@ public class ExpressionValidatorService {
         int totalObjects = objectGroups.size();
         int totalFields  = filteredFields.size();
 
+        report.setTotalObjectCountInEnv(totalObjectCountInEnv);
+        report.setFilterAppName(filterAppName);
+
         if (progressCallback != null) {
-            progressCallback.accept(new ScanProgress("start", totalObjects, totalFields, 0, 0, null));
+            ScanProgress start = new ScanProgress("start", totalObjects, totalFields, 0, 0, null);
+            start.totalObjectCountInEnv = totalObjectCountInEnv;
+            start.filterAppName = filterAppName;
+            progressCallback.accept(start);
         }
 
         int scannedObjects = 0;
@@ -173,13 +194,114 @@ public class ExpressionValidatorService {
         }
 
         report.setScannedObjectCount(scannedObjects);
+        report.setIssueObjectCount((int) report.getItems().stream()
+                .map(ValidationErrorItem::getObjectType)
+                .filter(Objects::nonNull)
+                .distinct()
+                .count());
+        enrichReportFieldDefinitions(report);
         return report;
     }
 
+    /** 为每条诊断项附上字段 JSON 定义（实体元数据片段或库表字段快照）。 */
+    private void enrichReportFieldDefinitions(ValidationReport report) {
+        if (report.getItems() == null) {
+            return;
+        }
+        for (ValidationErrorItem item : report.getItems()) {
+            if (item.getFieldDefinitionJson() != null && !item.getFieldDefinitionJson().isBlank()) {
+                continue;
+            }
+            String def = resolveFieldDefinitionJson(item.getObjectType(), item.getFieldName());
+            if (def != null) {
+                item.setFieldDefinitionJson(def);
+            }
+        }
+    }
+
+    private String resolveFieldDefinitionJson(String objectType, String fieldName) {
+        if (objectType == null || fieldName == null || fieldName.isBlank() || "N/A".equals(fieldName)) {
+            return null;
+        }
+        BaseappObjectField field = impactAnalyzerService.getFieldInfo(objectType, fieldName);
+        if (field == null) {
+            List<BaseappObjectField> rows = impactAnalyzerService.getFieldsByObject(objectType);
+            if (rows != null) {
+                for (BaseappObjectField r : rows) {
+                    if (fieldName.equals(r.getName()) || fieldName.equals(r.getApiName())) {
+                        field = r;
+                        break;
+                    }
+                }
+            }
+        }
+        if (field == null) {
+            return null;
+        }
+        if (field.getMetadataJson() != null && !field.getMetadataJson().isBlank()) {
+            return field.getMetadataJson();
+        }
+        return buildFieldRowJsonFallback(field);
+    }
+
+    private String buildFieldRowJsonFallback(BaseappObjectField field) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("objectType", field.getObjectType());
+        map.put("name", field.getName());
+        if (field.getApiName() != null) map.put("apiName", field.getApiName());
+        if (field.getTitle() != null) map.put("title", field.getTitle());
+        if (field.getType() != null) map.put("type", field.getType());
+        if (field.getBizType() != null) map.put("bizType", field.getBizType());
+        if (field.getExpression() != null && !field.getExpression().isBlank()) map.put("expression", field.getExpression());
+        if (field.getTriggerExpr() != null && !field.getTriggerExpr().isBlank()) map.put("triggerExpr", field.getTriggerExpr());
+        if (field.getVirtualExpr() != null && !field.getVirtualExpr().isBlank()) map.put("virtualExpr", field.getVirtualExpr());
+        if (field.getWriteBackExpr() != null && !field.getWriteBackExpr().isBlank()) map.put("writeBackExpr", field.getWriteBackExpr());
+        if (field.getReferInfo() != null && !field.getReferInfo().isBlank()) map.put("referInfo", field.getReferInfo());
+        if (field.getSourceInfo() != null && !field.getSourceInfo().isBlank()) map.put("sourceInfo", field.getSourceInfo());
+        if (field.getEnumType() != null) map.put("enumType", field.getEnumType());
+        if (field.getIsDisabled() != null) map.put("isDisabled", field.getIsDisabled());
+        if (field.getIsMasterField() != null) map.put("isMasterField", field.getIsMasterField());
+        if (field.getIsCustomizedField() != null) map.put("isCustomizedField", field.getIsCustomizedField());
+        if (field.getDescription() != null) map.put("description", field.getDescription());
+        try {
+            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(map);
+        } catch (JsonProcessingException e) {
+            return map.toString();
+        }
+    }
+
+    /** 支持逗号分隔的多模块，精确匹配 appName（忽略大小写）。 */
+    private static Set<String> parseAppNameFilters(String appName) {
+        if (appName == null || appName.isBlank()) {
+            return Collections.emptySet();
+        }
+        Set<String> result = new LinkedHashSet<>();
+        for (String part : appName.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                result.add(trimmed.toLowerCase(Locale.ROOT));
+            }
+        }
+        return result;
+    }
+
+    private static boolean matchesAppFilter(String fieldAppName, Set<String> appFilters) {
+        if (fieldAppName == null || fieldAppName.isBlank() || appFilters.isEmpty()) {
+            return false;
+        }
+        String lower = fieldAppName.toLowerCase(Locale.ROOT);
+        for (String filter : appFilters) {
+            if (lower.equals(filter)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void validateFieldExpressions(BaseappObjectField field, Map<String, List<BaseappObjectField>> groupedFields, ValidationReport report) {
-        // 1. 普通 expression
+        // 1. 计算 expression（MVEL，非 SQL）
         if (field.getExpression() != null && !field.getExpression().trim().isEmpty()) {
-            validateSqlExpr(field, field.getExpression(), ExpressionType.EXPRESSION, field.getObjectType(), groupedFields, report);
+            validateMvelExpression(field, field.getExpression(), field.getObjectType(), groupedFields, report);
         }
 
         // 2. triggerExpr
@@ -580,6 +702,183 @@ public class ExpressionValidatorService {
                 }
             }
         }
+    }
+
+    /**
+     * 计算表达式（expression）为 MVEL，不做 SQL/JSQLParser 解析；
+     * 仅校验主表/子表/跨对象字段引用是否存在。
+     */
+    private void validateMvelExpression(BaseappObjectField currentField, String mvel,
+                                        String contextObject,
+                                        Map<String, List<BaseappObjectField>> groupedFields,
+                                        ValidationReport report) {
+        if (mvel == null || mvel.isBlank() || contextObject == null) {
+            return;
+        }
+        List<BaseappObjectField> contextFields = groupedFields.getOrDefault(contextObject, Collections.emptyList());
+        if (contextFields.isEmpty()) {
+            report.addItem(new ValidationErrorItem(currentField.getObjectType(), currentField.getName(),
+                    ExpressionType.EXPRESSION, ErrorCategory.OBJECT_NOT_FOUND, SeverityLevel.ERROR,
+                    "Context object not found: " + contextObject));
+            return;
+        }
+
+        Map<String, Set<String>> varsByScope = ExprUtils.extractVariablesFromExpression(mvel);
+        for (Map.Entry<String, Set<String>> entry : varsByScope.entrySet()) {
+            String scope = entry.getKey();
+            for (String varName : entry.getValue()) {
+                if (shouldSkipMvelIdentifier(varName)) {
+                    continue;
+                }
+                if (ExprUtils.KEY_MAIN.equals(scope)) {
+                    if (!fieldExistsInObject(contextFields, varName) && !isRelationRefOnObject(contextFields, varName)) {
+                        report.addItem(new ValidationErrorItem(currentField.getObjectType(), currentField.getName(),
+                                ExpressionType.EXPRESSION, ErrorCategory.FIELD_NOT_FOUND, SeverityLevel.ERROR,
+                                "MVEL 表达式引用了不存在的字段 `" + varName + "`（对象 `" + contextObject + "`）"));
+                    }
+                } else {
+                    String detailObject = findDetailObjectForListField(scope, contextFields);
+                    List<BaseappObjectField> detailFields = detailObject != null
+                            ? groupedFields.getOrDefault(detailObject, Collections.emptyList())
+                            : Collections.emptyList();
+                    if (detailFields.isEmpty()) {
+                        continue;
+                    }
+                    if (!fieldExistsInObject(detailFields, varName)) {
+                        report.addItem(new ValidationErrorItem(currentField.getObjectType(), currentField.getName(),
+                                ExpressionType.EXPRESSION, ErrorCategory.FIELD_NOT_FOUND, SeverityLevel.ERROR,
+                                "MVEL 子表引用 `" + scope + "." + varName + "` 在对象 `"
+                                        + (detailObject != null ? detailObject : scope) + "` 中未找到对应字段"));
+                    }
+                }
+            }
+        }
+
+        Map<String, String> crossRefs = ExprUtils.extractCrossObjectRefs(mvel);
+        for (Map.Entry<String, String> ref : crossRefs.entrySet()) {
+            String fkField = ref.getKey();
+            String refField = ref.getValue();
+            if (shouldSkipMvelIdentifier(fkField) || shouldSkipMvelIdentifier(refField)) {
+                continue;
+            }
+            if (!fieldExistsInObject(contextFields, fkField) && !isRelationRefOnObject(contextFields, fkField)) {
+                report.addItem(new ValidationErrorItem(currentField.getObjectType(), currentField.getName(),
+                        ExpressionType.EXPRESSION, ErrorCategory.FIELD_NOT_FOUND, SeverityLevel.ERROR,
+                        "MVEL 外键字段 `" + fkField + "` 在对象 `" + contextObject + "` 中不存在"));
+                continue;
+            }
+            String targetObject = resolveReferTargetObject(contextFields, fkField);
+            if (targetObject == null) {
+                continue;
+            }
+            List<BaseappObjectField> targetFields = groupedFields.getOrDefault(targetObject, Collections.emptyList());
+            if (!targetFields.isEmpty()
+                    && !fieldExistsInObject(targetFields, refField)
+                    && !isRelationRefOnObject(targetFields, refField)) {
+                report.addItem(new ValidationErrorItem(currentField.getObjectType(), currentField.getName(),
+                        ExpressionType.EXPRESSION, ErrorCategory.FIELD_NOT_FOUND, SeverityLevel.ERROR,
+                        "MVEL 引用 `" + fkField + "." + refField + "` 在对象 `" + targetObject + "` 中未找到字段"));
+            }
+        }
+    }
+
+    private static boolean shouldSkipMvelIdentifier(String name) {
+        if (name == null || name.isBlank()) {
+            return true;
+        }
+        return MVEL_SKIP_IDENTIFIERS.contains(name.toLowerCase(Locale.ROOT))
+                || SQL_SKIP_IDENTIFIERS.contains(name.toLowerCase(Locale.ROOT));
+    }
+
+    private static boolean fieldExistsInObject(List<BaseappObjectField> fields, String fieldName) {
+        String normalized = fieldName.replace("_", "").toLowerCase(Locale.ROOT);
+        for (BaseappObjectField f : fields) {
+            String name = f.getName() != null ? f.getName().replace("_", "").toLowerCase(Locale.ROOT) : "";
+            String apiName = f.getApiName() != null ? f.getApiName().replace("_", "").toLowerCase(Locale.ROOT) : "";
+            if (normalized.equals(name) || normalized.equals(apiName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isRelationRefOnObject(List<BaseappObjectField> fields, String fieldName) {
+        String normalized = fieldName.replace("_", "").toLowerCase(Locale.ROOT);
+        String withId = normalized + "id";
+        for (BaseappObjectField f : fields) {
+            String name = f.getName() != null ? f.getName().replace("_", "").toLowerCase(Locale.ROOT) : "";
+            String apiName = f.getApiName() != null ? f.getApiName().replace("_", "").toLowerCase(Locale.ROOT) : "";
+            if (withId.equals(name) || withId.equals(apiName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String findDetailObjectForListField(String listFieldName, List<BaseappObjectField> fields) {
+        for (BaseappObjectField f : fields) {
+            if (!listFieldName.equals(f.getName()) && !listFieldName.equals(f.getApiName())) {
+                continue;
+            }
+            if (f.getType() == null || !"list".equalsIgnoreCase(f.getType().trim())) {
+                continue;
+            }
+            if (f.getRefObjectType() != null && !f.getRefObjectType().isBlank()) {
+                return f.getRefObjectType();
+            }
+            if (f.getSourceInfo() == null || f.getSourceInfo().isBlank()) {
+                continue;
+            }
+            try {
+                JsonNode si = objectMapper.readTree(f.getSourceInfo());
+                String sourceEntity = si.path("sourceEntityName").asText(null);
+                if (sourceEntity != null && !sourceEntity.isBlank()) {
+                    return sourceEntity;
+                }
+            } catch (JsonProcessingException ignored) {
+                // 与 ExpressionFieldService 一致的宽松解析
+                int idx = f.getSourceInfo().indexOf("sourceEntityName");
+                if (idx >= 0) {
+                    String after = f.getSourceInfo().substring(idx);
+                    int firstQuote = after.indexOf('"', after.indexOf(':'));
+                    if (firstQuote >= 0) {
+                        int secondQuote = after.indexOf('"', firstQuote + 1);
+                        if (secondQuote > firstQuote) {
+                            return after.substring(firstQuote + 1, secondQuote);
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private String resolveReferTargetObject(List<BaseappObjectField> contextFields, String fkFieldName) {
+        String norm = fkFieldName.replace("_", "").toLowerCase(Locale.ROOT);
+        for (BaseappObjectField f : contextFields) {
+            String name = f.getName() != null ? f.getName().replace("_", "").toLowerCase(Locale.ROOT) : "";
+            String api = f.getApiName() != null ? f.getApiName().replace("_", "").toLowerCase(Locale.ROOT) : "";
+            if (!norm.equals(name) && !norm.equals(api)) {
+                continue;
+            }
+            if (f.getRefObjectType() != null && !f.getRefObjectType().isBlank()) {
+                return f.getRefObjectType();
+            }
+            if (f.getReferInfo() != null && !f.getReferInfo().isBlank()) {
+                try {
+                    JsonNode ri = objectMapper.readTree(f.getReferInfo());
+                    JsonNode entities = ri.path("referEntities");
+                    if (entities.isArray() && !entities.isEmpty()) {
+                        String refer = entities.get(0).path("referEntityName").asText(null);
+                        if (refer != null && !refer.isBlank()) {
+                            return refer;
+                        }
+                    }
+                } catch (JsonProcessingException ignored) {
+                }
+            }
+        }
+        return null;
     }
 
     private void validateSqlExpr(BaseappObjectField currentField, String sql, ExpressionType type, String contextObject, Map<String, List<BaseappObjectField>> groupedFields, ValidationReport report) {

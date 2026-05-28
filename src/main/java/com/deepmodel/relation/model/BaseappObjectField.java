@@ -30,6 +30,9 @@ public class BaseappObjectField {
     private Boolean isMasterField;
     private Boolean isCustomizedField;
 
+    /** 实体元数据 JSON（baseapp_system_metadata.content.fields[]）中该字段的原始定义片段 */
+    private String metadataJson;
+
     public String getId() {
         return id;
     }
@@ -188,5 +191,13 @@ public class BaseappObjectField {
 
     public void setIsCustomizedField(Boolean isCustomizedField) {
         this.isCustomizedField = isCustomizedField;
+    }
+
+    public String getMetadataJson() {
+        return metadataJson;
+    }
+
+    public void setMetadataJson(String metadataJson) {
+        this.metadataJson = metadataJson;
     }
 }

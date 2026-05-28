@@ -5,6 +5,7 @@
     <title>DeepModel Insight - 引用查询</title>
     <link rel="icon" type="image/svg+xml"
           href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='0.5' stop-color='%236366f1'/%3E%3Cstop offset='1' stop-color='%23a855f7'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='18' height='18' rx='4' fill='url(%23g)'/%3E%3Cpath d='M8 15.5 10.8 9l2.4 6 1.8-3.5L17 15.5' fill='none' stroke='%23f9fafb' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
     <style>
         *, *::before, *::after { box-sizing: border-box; }
 
@@ -72,19 +73,15 @@
             text-transform: uppercase;
             letter-spacing: 0.04em;
         }
-        .panel input[type="text"] {
-            width: 100%;
-            padding: 8px 10px;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            font-size: 13px;
-            color: #1e293b;
-            outline: none;
-            transition: border-color 0.15s, box-shadow 0.15s;
-        }
-        .panel input[type="text"]:focus {
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+        #ref-panel-app { width: 100%; }
+        #ref-panel-app .panel-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
         .panel button.primary {
             width: 100%;
@@ -341,32 +338,20 @@
     </style>
 </head>
 <body>
+<script src="/env-common.js"></script>
 
 <header class="page-header">
     <div class="logo-mark"></div>
     <h1>引用查询</h1>
     <span class="sub">反向引用链 — 查询哪些对象引用了目标对象</span>
+    <span style="flex:1"></span>
+    <span id="envMount"></span>
 </header>
 
 <div class="main">
     <!-- 左侧控制面板 -->
     <aside class="panel">
-        <div>
-            <label for="ref-entity-input">目标对象名</label>
-            <input type="text" id="ref-entity-input" placeholder="例如 ArContract" autocomplete="off" />
-        </div>
-
-        <!-- 过滤视图开关 -->
-        <div class="toggle-row">
-            <span>过滤视图对象</span>
-            <span class="badge">*View</span>
-            <label class="switch">
-                <input type="checkbox" id="ref-exclude-view" checked>
-                <span class="slider"></span>
-            </label>
-        </div>
-
-        <button class="primary" id="ref-query-btn" type="button">🔍 查询</button>
+        <div id="ref-panel-app"></div>
 
         <p class="hint">
             结果按 <b>服务 → 类型 → 字母</b> 排序。<br>
@@ -393,6 +378,163 @@
     </section>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/element-plus@2.4.4/dist/index.full.js"></script>
+
+<script>
+(function () {
+    const { createApp, ref, onMounted, onBeforeUnmount } = Vue;
+    const { ElMessage } = ElementPlus;
+
+    const refPanel = createApp({
+        template: `
+<div style="display:flex;flex-direction:column;gap:14px;width:100%">
+  <div>
+    <label class="panel-label">目标对象名</label>
+    <el-select
+      v-model="entityName"
+      filterable
+      :filter-method="filterObjects"
+      default-first-option
+      clearable
+      placeholder="输入对象名或标题搜索..."
+      :loading="metaLoading"
+      style="width:100%"
+      @keyup.enter="triggerQuery"
+    >
+      <el-option
+        v-for="item in filteredObjectOptions"
+        :key="item.value"
+        :label="item.label"
+        :value="item.value"
+      >
+        <div style="display:flex;flex-direction:column;justify-content:center;line-height:1.2;padding:4px 0">
+          <div style="font-weight:600;font-size:13px">{{ item.value }}</div>
+          <div style="color:#64748b;font-size:11px" v-if="item.title">{{ item.title }}</div>
+        </div>
+      </el-option>
+    </el-select>
+  </div>
+  <div class="toggle-row">
+    <span>过滤视图对象</span>
+    <span class="badge">*View</span>
+    <el-switch v-model="excludeView" />
+  </div>
+  <el-button type="primary" style="width:100%" @click="triggerQuery">🔍 查询</el-button>
+</div>
+        `,
+        setup() {
+            const entityName = ref('');
+            const excludeView = ref(true);
+            const objectOptions = ref([]);
+            const filteredObjectOptions = ref([]);
+            const metaLoading = ref(false);
+
+            const filterObjects = (query) => {
+                const q = (query || '').trim();
+                if (!q) {
+                    filteredObjectOptions.value = objectOptions.value.slice(0, 100);
+                    return;
+                }
+                const qLower = q.toLowerCase();
+                const matched = objectOptions.value.filter(item => {
+                    const v = String(item.value || '');
+                    const t = String(item.title || '');
+                    return v.includes(q) || t.includes(q) ||
+                        v.toLowerCase().includes(qLower) || t.toLowerCase().includes(qLower);
+                });
+                filteredObjectOptions.value = matched.slice(0, 100);
+            };
+
+            const loadObjects = async () => {
+                if (!DM.getEnv()) return;
+                metaLoading.value = true;
+                try {
+                    let list = [];
+                    let usingLegacy = false;
+                    try {
+                        const res = await fetch('/api/impact/meta/objectDetails');
+                        if (res.ok) {
+                            list = (await res.json()).map(d => ({
+                                value: d.name,
+                                label: d.name,
+                                title: d.title
+                            }));
+                        } else {
+                            usingLegacy = true;
+                        }
+                    } catch (e) {
+                        usingLegacy = true;
+                    }
+                    if (usingLegacy) {
+                        const res = await fetch('/api/impact/meta/objects');
+                        if (res.ok) {
+                            const data = await res.json();
+                            list = data.map(s => ({ value: s, label: s, title: null }));
+                        }
+                    }
+                    if (list.length > 0) {
+                        const score = (name) => {
+                            const n = String(name || '').toLowerCase();
+                            return n.includes('bill') ? 0 : 1;
+                        };
+                        list.sort((a, b) => {
+                            const sa = score(a.value);
+                            const sb = score(b.value);
+                            if (sa !== sb) return sa - sb;
+                            return String(a.value).localeCompare(String(b.value));
+                        });
+                        objectOptions.value = list;
+                        filterObjects('');
+                    }
+                } catch (e) {
+                    console.error(e);
+                    ElMessage.error('加载对象列表失败');
+                } finally {
+                    metaLoading.value = false;
+                }
+            };
+
+            const triggerQuery = () => {
+                const val = (entityName.value || '').trim();
+                if (!val) {
+                    ElMessage.warning('请先选择目标对象');
+                    return;
+                }
+                document.dispatchEvent(new CustomEvent('ref-query', {
+                    detail: { entityName: val, excludeView: excludeView.value }
+                }));
+            };
+
+            const onEnvChanged = () => loadObjects();
+
+            onMounted(() => {
+                window.refPage = {
+                    getEntity: () => entityName.value,
+                    setEntity: (name) => { entityName.value = name || ''; },
+                    getExcludeView: () => excludeView.value
+                };
+                loadObjects();
+                window.addEventListener('dm-env-changed', onEnvChanged);
+                window.addEventListener('dm-env-ready', onEnvChanged);
+            });
+
+            onBeforeUnmount(() => {
+                window.removeEventListener('dm-env-changed', onEnvChanged);
+                window.removeEventListener('dm-env-ready', onEnvChanged);
+            });
+
+            return {
+                entityName, excludeView, metaLoading, filteredObjectOptions,
+                filterObjects, triggerQuery
+            };
+        }
+    });
+    refPanel.use(ElementPlus);
+    refPanel.mount('#ref-panel-app');
+})();
+</script>
+
 <script>
 (function () {
     'use strict';
@@ -400,36 +542,53 @@
     const refStack = []; // 面包屑历史 [{entityName}]
 
     // --- DOM refs ---
-    const inputEl   = document.getElementById('ref-entity-input');
-    const queryBtn  = document.getElementById('ref-query-btn');
-    const exViewEl  = document.getElementById('ref-exclude-view');
     const breadEl   = document.getElementById('ref-breadcrumb');
     const statsEl   = document.getElementById('ref-stats');
     const resultEl  = document.getElementById('ref-result');
 
-    // --- Entry points ---
-    queryBtn.addEventListener('click', function () {
-        const val = inputEl.value.trim();
-        if (!val) { inputEl.focus(); return; }
+    // 顶部环境选择器
+    DM.mountEnvSelector(document.getElementById('envMount'), {
+        scope: 'global',
+        label: '环境',
+        width: '240px'
+    });
+
+    function getEntityName() {
+        return window.refPage && window.refPage.getEntity
+            ? (window.refPage.getEntity() || '').trim()
+            : '';
+    }
+
+    function startQuery(val) {
         refStack.length = 0;
         refStack.push(val);
         _fetch(val);
-    });
+    }
 
-    inputEl.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') queryBtn.click();
+    document.addEventListener('ref-query', function (e) {
+        const val = (e.detail && e.detail.entityName) || '';
+        if (!val) return;
+        startQuery(val);
     });
 
     function drillIn(entityName) {
         if (refStack[refStack.length - 1] === entityName) return;
         refStack.push(entityName);
-        inputEl.value = entityName;
+        if (window.refPage && window.refPage.setEntity) {
+            window.refPage.setEntity(entityName);
+        }
         _fetch(entityName);
     }
 
     // --- Fetch ---
     async function _fetch(entityName) {
-        const excludeView = exViewEl.checked;
+        if (!DM.getEnv()) {
+            resultEl.innerHTML = '<div class="state-msg" style="color:#dc2626;">请先在右上角选择工作环境</div>';
+            return;
+        }
+        const excludeView = window.refPage && window.refPage.getExcludeView
+            ? window.refPage.getExcludeView()
+            : true;
         const url = '/api/reference/incoming?entityName=' + encodeURIComponent(entityName)
                   + '&excludeView=' + excludeView;
 
@@ -470,7 +629,9 @@
                 const capturedIdx = idx;
                 chip.onclick = function () {
                     refStack.splice(capturedIdx + 1);
-                    inputEl.value = name;
+                    if (window.refPage && window.refPage.setEntity) {
+                        window.refPage.setEntity(name);
+                    }
                     _fetch(name);
                 };
             }

@@ -37,7 +37,7 @@ public class DecisionTableSimulatorService {
     private String scanPath;
 
     @Autowired
-    private com.deepmodel.relation.dao.BaseappObjectFieldMapper mapper;
+    private com.deepmodel.relation.dao.MetadataRepository repository;
 
     // folderName → { csvFileName → absolutePath }
     private Map<String, Map<String, String>> folderIndex = new LinkedHashMap<>();
@@ -154,17 +154,17 @@ public class DecisionTableSimulatorService {
     public Map<String, Object> debugCustomizers(String objectName) {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
-            result.put("objectTypeFuncUnits", mapper.selectObjectTypeFuncUnits(objectName));
+            result.put("objectTypeFuncUnits", repository.selectObjectTypeFuncUnits(objectName));
         } catch (Exception e) {
             result.put("objectTypeFuncUnits_error", e.getMessage());
         }
         try {
-            result.put("entityBusinessRules", mapper.selectEntityBusinessRules(objectName));
+            result.put("entityBusinessRules", repository.selectEntityBusinessRules(objectName));
         } catch (Exception e) {
             result.put("entityBusinessRules_error", e.getMessage());
         }
         try {
-            result.put("preDoRules", mapper.selectPreDoRules(objectName));
+            result.put("preDoRules", repository.selectPreDoRules(objectName));
         } catch (Exception e) {
             result.put("preDoRules_error", e.getMessage());
         }
@@ -256,7 +256,7 @@ public class DecisionTableSimulatorService {
         String methodName = extractMethodName(csvFileName);
         try {
             // ① ObjectTypeFuncUnitCustomizer: 对象绑定的 FuncUnit
-            List<Map<String, Object>> otfuList = mapper.selectObjectTypeFuncUnits(objectName);
+            List<Map<String, Object>> otfuList = repository.selectObjectTypeFuncUnits(objectName);
             for (Map<String, Object> row : otfuList) {
                 String fuName = (String) row.get("func_unit_name");
                 String stepType = (String) row.get("method_step_type");
@@ -291,7 +291,7 @@ public class DecisionTableSimulatorService {
             }
 
             // ② EntityBusinessRuleCustomizer: 实体业务规则
-            List<Map<String, Object>> ebrList = mapper.selectEntityBusinessRules(objectName);
+            List<Map<String, Object>> ebrList = repository.selectEntityBusinessRules(objectName);
             for (Map<String, Object> row : ebrList) {
                 String fuName = (String) row.get("func_unit_name");
                 String stepType = (String) row.get("func_unit_step");
@@ -324,7 +324,7 @@ public class DecisionTableSimulatorService {
 
             // ③ PreDoRule: 仅记录数量，不混入步骤（运行时动态）
             try {
-                List<Map<String, Object>> preDoList = mapper.selectPreDoRules(objectName);
+                List<Map<String, Object>> preDoList = repository.selectPreDoRules(objectName);
                 for (Map<String, Object> row : preDoList) {
                     customizedFuncUnits.add(new CustomizedFuncUnit(
                         (String) row.get("name"), "ValidateParameter", "PreDoRule(dynamic)", null, (String) row.get("id")));

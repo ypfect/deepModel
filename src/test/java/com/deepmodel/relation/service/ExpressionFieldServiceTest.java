@@ -1,7 +1,11 @@
 package com.deepmodel.relation.service;
 
+import com.deepmodel.relation.env.EnvSnapshot;
+import com.deepmodel.relation.env.EnvSnapshotManager;
+import com.deepmodel.relation.env.TestEnvSupport;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.ExpressionFieldInfo;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -11,11 +15,20 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ExpressionFieldServiceTest {
 
+    private EnvSnapshotManager snapshotManager;
+    private EnvSnapshot snapshot;
     private ExpressionFieldService service;
 
     @BeforeEach
     void setUp() {
-        service = new ExpressionFieldService();
+        snapshotManager = TestEnvSupport.createManager();
+        snapshot = TestEnvSupport.snapshot(snapshotManager);
+        service = new ExpressionFieldService(snapshotManager);
+    }
+
+    @AfterEach
+    void tearDown() {
+        TestEnvSupport.teardown(snapshotManager);
     }
 
     private BaseappObjectField createField(String objectType, String name, String expression) {
@@ -34,7 +47,7 @@ class ExpressionFieldServiceTest {
                 createField("Order", "unitPrice", null),
                 createField("Order", "amount", "qty * unit_price"));
 
-        service.buildIndex(rows, Collections.emptyMap());
+        service.buildIndex(snapshot, rows, Collections.emptyMap());
 
         ExpressionFieldInfo info = service.getExpressionFieldInfo("Order");
         assertNotNull(info);
@@ -61,7 +74,7 @@ class ExpressionFieldServiceTest {
                 createField("Order", "amount", "qty * price"),
                 createField("Order", "amountWithTax", "amount + tax_amount"));
 
-        service.buildIndex(rows, Collections.emptyMap());
+        service.buildIndex(snapshot, rows, Collections.emptyMap());
 
         ExpressionFieldInfo info = service.getExpressionFieldInfo("Order");
         assertNotNull(info);
@@ -86,7 +99,7 @@ class ExpressionFieldServiceTest {
                 createField("OrderItem", "lineAmount", "qty * price"),
                 createField("Order", "totalAmount", "sum(qty * price)"));
 
-        service.buildIndex(rows, mainToDetails);
+        service.buildIndex(snapshot, rows, mainToDetails);
 
         // 子表的 ExpressionFieldInfo 应该合并到主表
         ExpressionFieldInfo info = service.getExpressionFieldInfo("Order");
@@ -103,7 +116,7 @@ class ExpressionFieldServiceTest {
                 createField("Entity", "b", "a"));
 
         // 不应抛异常
-        assertDoesNotThrow(() -> service.buildIndex(rows, Collections.emptyMap()));
+        assertDoesNotThrow(() -> service.buildIndex(snapshot, rows, Collections.emptyMap()));
 
         ExpressionFieldInfo info = service.getExpressionFieldInfo("Entity");
         assertNotNull(info);
@@ -117,14 +130,14 @@ class ExpressionFieldServiceTest {
                 createField("Simple", "name", null),
                 createField("Simple", "code", null));
 
-        service.buildIndex(rows, Collections.emptyMap());
+        service.buildIndex(snapshot, rows, Collections.emptyMap());
 
         assertNull(service.getExpressionFieldInfo("Simple"));
     }
 
     @Test
     void buildIndex_emptyData_returnsNull() {
-        service.buildIndex(Collections.emptyList(), Collections.emptyMap());
+        service.buildIndex(snapshot, Collections.emptyList(), Collections.emptyMap());
         assertNull(service.getExpressionFieldInfo("Anything"));
     }
 
@@ -135,7 +148,7 @@ class ExpressionFieldServiceTest {
                 createField("Order", "amount", "qty * 10"),
                 createField("Order", "discountAmount", "qty * 5"));
 
-        service.buildIndex(rows, Collections.emptyMap());
+        service.buildIndex(snapshot, rows, Collections.emptyMap());
 
         ExpressionFieldInfo info = service.getExpressionFieldInfo("Order");
         assertNotNull(info);

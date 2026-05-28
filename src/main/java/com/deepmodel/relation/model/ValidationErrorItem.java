@@ -11,6 +11,8 @@ public class ValidationErrorItem {
     private ErrorCategory errorCategory;
     private SeverityLevel severity;
     private String message;
+    /** 字段在实体元数据 JSON 中的定义；无 MDD 片段时为由库表字段拼成的 JSON */
+    private String fieldDefinitionJson;
 
     public ValidationErrorItem(String objectType, String fieldName, ExpressionType expressionType, ErrorCategory errorCategory, SeverityLevel severity, String message) {
         this.objectType = objectType;
@@ -39,4 +41,7 @@ public class ValidationErrorItem {
 
     public String getMessage() { return message; }
     public void setMessage(String message) { this.message = message; }
+
+    public String getFieldDefinitionJson() { return fieldDefinitionJson; }
+    public void setFieldDefinitionJson(String fieldDefinitionJson) { this.fieldDefinitionJson = fieldDefinitionJson; }
 }

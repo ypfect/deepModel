@@ -7,6 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'><path d='M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.18l6.9 3.45L12 11.09 5.1 7.63 12 4.18zM4 8.82l7 3.5v7.36l-7-3.5V8.82zm9 10.86v-7.36l7-3.5v7.36l-7 3.5z'/></svg>">
     <!-- 引入样式 -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
+    <script src="/env-common.js"></script>
     <!-- 使用系统字体，避免 Google Fonts CDN 抖动 -->
     <style>
         :root {
@@ -79,6 +80,9 @@
             box-shadow: 0 4px 16px #00000060;
             margin-bottom: 20px;
             padding: 22px;
+        }
+        .glass-card .el-tabs__content {
+            overflow: visible;
         }
 
 
@@ -397,6 +401,99 @@
         .el-form-item__label { color: var(--text-secondary) !important; }
         .el-skeleton { --el-skeleton-color: #1e2a3d !important; --el-skeleton-to-color: #28374f !important; }
 
+        /* ===== 扫描工具栏 ===== */
+        .scan-source-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px 20px;
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #2a3347;
+        }
+        .scan-source-bar > label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin: 0;
+            flex-shrink: 0;
+        }
+        .scan-source-hint {
+            font-size: 12px;
+            color: #94a3b8;
+            line-height: 1.5;
+            flex: 1;
+            min-width: 200px;
+        }
+        .scan-toolbar {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 16px;
+            align-items: end;
+            margin-bottom: 12px;
+        }
+        .scan-source-group .el-radio-button__inner {
+            background: #111622 !important;
+            border-color: #2a3347 !important;
+            color: var(--text-secondary) !important;
+        }
+        .scan-source-group .el-radio-button__original-radio:checked + .el-radio-button__inner {
+            background: #1e3a5c !important;
+            border-color: #3b82f6 !important;
+            color: #93c5fd !important;
+            box-shadow: none !important;
+        }
+        @media (max-width: 720px) {
+            .scan-toolbar { grid-template-columns: 1fr; }
+        }
+        .scan-field label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .scan-app-select { width: 100%; }
+
+        /* Element Plus 多选下拉 — 深色主题 */
+        .scan-app-select .el-select__wrapper {
+            background: #111622 !important;
+            border: 1px solid #2a3347 !important;
+            box-shadow: none !important;
+            min-height: 38px;
+        }
+        .scan-app-select .el-select__placeholder { color: var(--text-secondary) !important; }
+        .scan-app-select .el-select__selected-item { color: var(--text-primary) !important; }
+        .scan-app-select .el-tag {
+            background: #1e3a5c !important;
+            border-color: #2d5a8e !important;
+            color: #93c5fd !important;
+        }
+        .scan-app-select .el-tag .el-tag__close { color: #93c5fd !important; }
+        .scan-app-select .el-tag .el-tag__close:hover {
+            background: rgba(147, 197, 253, 0.15) !important;
+            color: #fff !important;
+        }
+
+        /* 下拉面板 teleport 到 body，需全局样式 */
+        .el-select-dropdown {
+            background: #161b27 !important;
+            border: 1px solid #2a3347 !important;
+        }
+        .el-select-dropdown__item {
+            color: var(--text-primary) !important;
+        }
+        .el-select-dropdown__item.is-hovering {
+            background: #1e2a3d !important;
+        }
+        .el-select-dropdown__item.is-selected {
+            color: var(--accent-blue) !important;
+            font-weight: 600;
+        }
+        .el-popper.is-light,
+        .el-popper.is-light > .el-popper__arrow:before {
+            background: #161b27 !important;
+            border-color: #2a3347 !important;
+        }
+
         /* ===== 原生 Data Table ===== */
         .data-table-wrap {
             overflow-x: auto;
@@ -448,7 +545,28 @@
         .data-table .col-type   { width: 140px; }
         .data-table .col-cat    { width: 200px; }
         .data-table .col-sev    { width: 100px; }
-        .data-table .col-msg    { min-width: 280px; }
+        .data-table .col-def    { width: 280px; max-width: 360px; }
+        .data-table .col-msg    { min-width: 240px; }
+        .field-def-cell {
+            margin: 0;
+            padding: 8px 10px;
+            max-height: 140px;
+            overflow: auto;
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 11px;
+            line-height: 1.45;
+            color: #cbd5e1;
+            background: #0f1419;
+            border: 1px solid #2a3347;
+            border-radius: 6px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .field-def-empty {
+            font-size: 12px;
+            color: #64748b;
+            font-style: italic;
+        }
         .sort-icon { margin-left: 4px; opacity: 0.4; font-style: normal; }
         .sort-icon.asc  { opacity: 1; }
         .sort-icon.desc { opacity: 1; }
@@ -474,20 +592,52 @@
             <h1>配置一致性体检中心</h1>
             <p class="subtitle">Expression Consistency Checker Dashboard</p>
             <div class="header-badge">v3.0 — 支持回写表达式 & validateExpr & 枚举值深度校验</div>
+            <div style="position:absolute;top:0;right:0;background:#161b27;padding:6px 12px;border-radius:8px;border:1px solid #2a3347;">
+                <span id="envMount"></span>
+            </div>
         </div>
 
         <!-- 控制面板 -->
         <div class="glass-card">
+            <div class="scan-source-bar">
+                <label>数据来源</label>
+                <el-radio-group v-model="dataSource" class="scan-source-group" @change="onDataSourceChange">
+                    <el-radio-button label="env">环境 GraphQL</el-radio-button>
+                    <el-radio-button label="local">本地数据库</el-radio-button>
+                </el-radio-group>
+                <span class="scan-source-hint">
+                    <template v-if="dataSource === 'local'">
+                        本地检查：{{ localDbHint }} — 两个 Tab 的扫描均从本地 PostgreSQL 读取元数据。
+                    </template>
+                    <template v-else>
+                        环境 GraphQL（右上角所选环境）— 两个 Tab 的扫描均从该环境拉取元数据。
+                    </template>
+                </span>
+            </div>
+
             <el-tabs v-model="activeMode">
-                <el-tab-pane label="全量模块扫描" name="appScan">
-                    <el-form :inline="true" @submit.prevent="runAppScan">
-                        <el-form-item label="应用模块名">
-                            <el-input v-model="appForm.appName" placeholder="例如 arap, 留空则扫全库" clearable style="width: 300px"></el-input>
-                        </el-form-item>
-                        <el-form-item>
-                            <el-button type="primary" native-type="submit" :loading="isLoading">执行全量体检</el-button>
-                        </el-form-item>
-                    </el-form>
+                <el-tab-pane label="模块 / 全库扫描" name="appScan">
+                    <div class="scan-toolbar">
+                        <div class="scan-field">
+                            <label>App 模块（不选 = 全库扫描）</label>
+                            <el-select
+                                v-model="selectedApps"
+                                class="scan-app-select"
+                                multiple
+                                filterable
+                                collapse-tags
+                                collapse-tags-tooltip
+                                clearable
+                                :teleported="true"
+                                placeholder="选择 App 模块，支持多选">
+                                <el-option v-for="app in appOptions" :key="app" :label="app" :value="app" />
+                            </el-select>
+                        </div>
+                        <el-button type="primary" :loading="isLoading" @click="runAppScan">执行体检</el-button>
+                    </div>
+                    <p style="font-size:12px;color:#94a3b8;margin:0;">
+                        全库约 {{ totalObjectsHint || '—' }} 个对象；选定模块后只扫描该模块下的对象。下方结果表仅展示<strong style="color:#e2e8f0">有问题</strong>的对象。
+                    </p>
                 </el-tab-pane>
                 <el-tab-pane label="单一对象靶向扫描" name="objectScan">
                     <el-form :inline="true" @submit.prevent="runObjectScan">
@@ -534,9 +684,17 @@
         <!-- 统计面板 -->
         <div class="stat-card-row">
             <div class="stat-card info">
-                <div class="stat-title">已扫描单据对象</div>
+                <div class="stat-title">已扫描对象</div>
                 <el-skeleton v-if="isLoading" animated :rows="1"></el-skeleton>
-                <div v-else class="stat-value info-color">{{ reportData.scannedCount }}</div>
+                <div v-else class="stat-value info-color">{{ scannedCountLabel }}</div>
+                <div v-if="!isLoading && reportData.scannedCount > 0" style="font-size:11px;color:#94a3b8;margin-top:4px;">
+                    {{ scanScopeHint }}
+                </div>
+            </div>
+            <div class="stat-card info">
+                <div class="stat-title">有问题对象</div>
+                <el-skeleton v-if="isLoading" animated :rows="1"></el-skeleton>
+                <div v-else class="stat-value info-color">{{ reportData.issueObjectCount }}</div>
             </div>
             <div class="stat-card fatal">
                 <div class="stat-title">致命错误 (FATAL)</div>
@@ -593,6 +751,7 @@
                                     <th class="col-type" @click="toggleSort('expressionType')">表达式种类</th>
                                     <th class="col-cat" @click="toggleSort('errorCategory')">异常类型</th>
                                     <th class="col-sev" @click="toggleSort('severity')">严重级别</th>
+                                    <th class="col-def">字段 JSON 定义</th>
                                     <th class="col-msg">诊断详情</th>
                                 </tr>
                             </thead>
@@ -607,6 +766,10 @@
                                     <td><span :class="['expr-type-badge', row.expressionType]">{{ exprTypeLabel(row.expressionType) }}</span></td>
                                     <td><span :class="['category-badge', row.errorCategory]">{{ categoryLabel(row.errorCategory) }}</span></td>
                                     <td><span :class="['severity-badge', row.severity]">{{ row.severity }}</span></td>
+                                    <td>
+                                        <pre v-if="row.fieldDefinitionJson" class="field-def-cell">{{ row.fieldDefinitionJson }}</pre>
+                                        <span v-else class="field-def-empty">—</span>
+                                    </td>
                                     <td><div class="message-cell" v-html="formatMessage(row.message)"></div></td>
                                 </tr>
                             </tbody>
@@ -623,7 +786,7 @@
     </div>
 
     <script>
-        const { createApp, ref, reactive, computed } = Vue;
+        const { createApp, ref, reactive, computed, onMounted, onBeforeUnmount } = Vue;
         const { ElMessage } = ElementPlus;
 
         const app = createApp({
@@ -633,11 +796,18 @@
                 const filterSeverity = ref('');
                 const filterExprType = ref('');
 
-                const appForm = reactive({ appName: '' });
+                const dataSource = ref('env');
+                const localDbHint = ref('localhost:5432 / testapp（postgres）');
+
                 const objectForm = reactive({ objectType: '' });
+                const selectedApps = ref([]);
+                const appOptions = ref([]);
 
                 const reportData = reactive({
                     scannedCount: 0,
+                    totalObjectCountInEnv: 0,
+                    filterAppName: '',
+                    issueObjectCount: 0,
                     totalErrors: 0,
                     totalWarnings: 0,
                     items: []
@@ -649,12 +819,50 @@
                     totalFields:    0,
                     scannedObjects: 0,
                     scannedFields:  0,
-                    currentObject:  ''
+                    currentObject:  '',
+                    totalObjectCountInEnv: 0
                 });
 
                 const fatalCount = computed(() => {
                     return reportData.items.filter(i => i.severity === 'FATAL').length;
                 });
+
+                const scannedCountLabel = computed(() => {
+                    if (!reportData.scannedCount) return '0';
+                    if (reportData.filterAppName && reportData.totalObjectCountInEnv > reportData.scannedCount) {
+                        return `${reportData.scannedCount} / ${reportData.totalObjectCountInEnv}`;
+                    }
+                    return String(reportData.scannedCount);
+                });
+
+                const scanScopeHint = computed(() => {
+                    if (dataSource.value === 'local') {
+                        const scope = reportData.filterAppName
+                            ? `模块 ${reportData.filterAppName}`
+                            : '全库';
+                        return `本地库 · ${scope}`;
+                    }
+                    if (reportData.filterAppName) {
+                        return `环境 GraphQL · 模块 ${reportData.filterAppName}`;
+                    }
+                    return '环境 GraphQL · 全库扫描';
+                });
+
+                const totalObjectsHint = computed(() => {
+                    return reportData.totalObjectCountInEnv > 0
+                        ? reportData.totalObjectCountInEnv
+                        : (scanProg.totalObjectCountInEnv || '');
+                });
+
+                const buildScanCompleteMessage = () => {
+                    const n = reportData.scannedCount;
+                    const total = reportData.totalObjectCountInEnv;
+                    const issues = reportData.issueObjectCount;
+                    if (reportData.filterAppName) {
+                        return `模块 ${reportData.filterAppName} 扫描完成：${n} 个对象（全库共 ${total} 个），${issues} 个对象有问题`;
+                    }
+                    return `全库扫描完成：${n} 个对象，${issues} 个对象有问题`;
+                };
 
                 const filteredItems = computed(() => {
                     let items = reportData.items;
@@ -669,9 +877,59 @@
 
                 const mapResponseData = (data) => {
                     reportData.scannedCount = data.scannedObjectCount || 0;
+                    reportData.totalObjectCountInEnv = data.totalObjectCountInEnv || 0;
+                    reportData.filterAppName = data.filterAppName || '';
+                    reportData.issueObjectCount = data.issueObjectCount != null
+                        ? data.issueObjectCount
+                        : new Set((data.items || []).map(i => i.objectType).filter(Boolean)).size;
                     reportData.totalErrors = data.totalErrors || 0;
                     reportData.totalWarnings = data.totalWarnings || 0;
                     reportData.items = data.items || [];
+                };
+
+                const loadLocalDbInfo = async () => {
+                    try {
+                        const res = await fetch('/api/validation/local/info');
+                        if (!res.ok) return;
+                        const info = await res.json();
+                        localDbHint.value = `${info.host || 'localhost'}:${info.port || 5432} / ${info.database || 'testapp'}（${info.username || 'postgres'}）`;
+                    } catch (e) {
+                        console.warn('加载本地库信息失败', e);
+                    }
+                };
+
+                const loadAppOptions = async () => {
+                    if (dataSource.value === 'local') {
+                        try {
+                            const res = await fetch('/api/validation/local/apps');
+                            if (!res.ok) throw new Error('HTTP ' + res.status);
+                            appOptions.value = await res.json();
+                        } catch (e) {
+                            console.error('加载本地 App 列表失败', e);
+                            appOptions.value = [];
+                        }
+                        return;
+                    }
+                    const env = DM.getEnv();
+                    if (!env) {
+                        appOptions.value = [];
+                        selectedApps.value = [];
+                        return;
+                    }
+                    try {
+                        appOptions.value = await DM.loadApps(env);
+                    } catch (e) {
+                        console.error('加载 App 列表失败', e);
+                        appOptions.value = [];
+                    }
+                };
+
+                const onDataSourceChange = () => {
+                    selectedApps.value = [];
+                    loadAppOptions().catch(console.error);
+                    if (dataSource.value === 'local') {
+                        loadLocalDbInfo().catch(console.error);
+                    }
                 };
 
                 const runAppScan = () => {
@@ -686,7 +944,19 @@
                     scanProg.scannedFields  = 0;
                     scanProg.currentObject  = '';
 
-                    const url = `/api/validation/report/stream${appForm.appName ? '?appName=' + encodeURIComponent(appForm.appName) : ''}`;
+                    const qs = ['source=' + encodeURIComponent(dataSource.value)];
+                    const appNames = selectedApps.value.join(',');
+                    if (appNames) qs.push('appName=' + encodeURIComponent(appNames));
+                    if (dataSource.value === 'env') {
+                        const env = DM.getEnv();
+                        if (!env) {
+                            isLoading.value = false;
+                            ElMessage.warning('请先在右上角选择工作环境');
+                            return;
+                        }
+                        qs.push('env=' + encodeURIComponent(env));
+                    }
+                    const url = `/api/validation/report/stream?${qs.join('&')}`;
                     const es = new EventSource(url);
 
                     es.onmessage = (event) => {
@@ -695,6 +965,7 @@
                             if (data.type === 'start') {
                                 scanProg.totalObjects = data.totalObjects;
                                 scanProg.totalFields  = data.totalFields;
+                                scanProg.totalObjectCountInEnv = data.totalObjectCountInEnv || 0;
                             } else if (data.type === 'progress') {
                                 scanProg.scannedObjects = data.scannedObjects;
                                 scanProg.scannedFields  = data.scannedFields;
@@ -703,7 +974,7 @@
                                 es.close();
                                 mapResponseData(data.report);
                                 isLoading.value = false;
-                                ElMessage.success(`全量扫描完成！已分析 ${reportData.scannedCount} 个对象`);
+                                ElMessage.success(buildScanCompleteMessage());
                             } else if (data.type === 'error') {
                                 es.close();
                                 isLoading.value = false;
@@ -726,11 +997,22 @@
                         ElMessage.warning('请输入对象标识符');
                         return;
                     }
+                    if (dataSource.value === 'env' && !DM.getEnv()) {
+                        ElMessage.warning('请先在右上角选择工作环境');
+                        return;
+                    }
                     isLoading.value = true;
                     filterSeverity.value = '';
                     filterExprType.value = '';
                     try {
-                        const response = await fetch(`/api/validation/check?objectType=${encodeURIComponent(objectForm.objectType)}`);
+                        const params = new URLSearchParams({
+                            objectType: objectForm.objectType.trim(),
+                            source: dataSource.value
+                        });
+                        if (dataSource.value === 'env' && DM.getEnv()) {
+                            params.set('env', DM.getEnv());
+                        }
+                        const response = await fetch(`/api/validation/check?${params}`);
                         if (!response.ok) throw new Error('API Error');
                         const data = await response.json();
                         mapResponseData(data);
@@ -830,14 +1112,46 @@
                         .replace(/(PostgreSQL|不允许嵌套调用聚合函数)/g, '<strong style="color:var(--accent-red)">$1</strong>');
                 };
 
+                onMounted(async () => {
+                    if (typeof DM !== 'undefined') {
+                        DM.mountEnvSelector(document.getElementById('envMount'), {
+                            scope: 'global',
+                            label: '环境',
+                            width: '240px',
+                            theme: 'dark',
+                            onChange: () => {
+                                if (dataSource.value !== 'env') return;
+                                selectedApps.value = [];
+                                loadAppOptions().catch(console.error);
+                            }
+                        });
+                        await loadLocalDbInfo();
+                        await loadAppOptions();
+                    }
+                    const onEnvChanged = () => {
+                        if (dataSource.value !== 'env') return;
+                        selectedApps.value = [];
+                        loadAppOptions().catch(console.error);
+                    };
+                    window.addEventListener('dm-env-changed', onEnvChanged);
+                    onBeforeUnmount(() => window.removeEventListener('dm-env-changed', onEnvChanged));
+                });
+
                 return {
                     activeMode,
                     isLoading,
-                    appForm,
+                    dataSource,
+                    localDbHint,
+                    onDataSourceChange,
+                    selectedApps,
+                    appOptions,
                     objectForm,
                     reportData,
                     scanProg,
                     fatalCount,
+                    scannedCountLabel,
+                    scanScopeHint,
+                    totalObjectsHint,
                     filteredItems,
                     sortedItems,
                     filterSeverity,

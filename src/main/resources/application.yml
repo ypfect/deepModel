@@ -1,37 +1,39 @@
 server:
   port: 18080
 
-# 回写 SQL 接口（默认从 spring.datasource.url 自动推导 arap 服务地址）
+# GraphQL 元数据：tenant 固定为 0；URL 由前端选择环境后通过 X-Env 动态解析
+metadata-source:
+  tenant-id: "0"
+  page-size: 10000000
+  # 内网 GraphQL 多为企业/自签证书，Java 默认不信任会报 PKIX path building failed
+  trust-all-ssl: true
+
+# 配置体检中心「本地检查」：直连本机租户库（开发态，未部署环境时使用）
+metadata-local:
+  host: localhost
+  port: 5432
+  database: testapp
+  username: postgres
+  password: "123"
+
 writeback-sql:
   tenant-id: 3XNLNA60G34006P
-# 表达式引擎配置
+
 expression-engine:
-  local-writeback-sql: false  # true=本地生成回写SQL, false=HTTP远程调用(默认)
-# 决策表分析配置
+  local-writeback-sql: false
+
 decision-table:
-  scan-path: /Users/pengfyu/workspace/feature/dev  # opus77 代码库根目录，用于扫描 CSV 决策表
-#连接数据库
+  scan-path: /Users/pengfyu/workspace/feature/dev
+
 spring:
   mvc:
     async:
-      request-timeout: -1   # 关闭 Tomcat async 超时，流式响应按实际耗时完成
-  datasource:
-#    url: jdbc:postgresql://localhost:5432/testapp
-    url: jdbc:postgresql://postgres.test-tx-16.e7link.com:5432/tenant711FNX50G6V0009
-#    url: jdbc:postgresql://postgres.release-tx-1.e7link.com:5432/tenant-public
-    password: stet44{czars
-#    password: 123
-    username: postgres
-    driver-class-name: org.postgresql.Driver
+      request-timeout: -1
   jackson:
     serialization:
       INDENT_OUTPUT: true
-mybatis:
-  mapper-locations: classpath:mapper/*.xml
-  configuration:
-    map-underscore-to-camel-case: true
+
 logging:
   level:
     root: INFO
     com.deepmodel.relation: DEBUG
-

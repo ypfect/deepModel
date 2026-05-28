@@ -1,6 +1,6 @@
 package com.deepmodel.relation.service;
 
-import com.deepmodel.relation.dao.BaseappObjectFieldMapper;
+import com.deepmodel.relation.dao.MetadataRepository;
 import com.deepmodel.relation.model.WriteBackExpr;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,25 +12,23 @@ import static org.mockito.Mockito.when;
 
 /**
  * WriteBackSqlGenerator 单元测试。
- * 使用 Mockito mock mapper 和 impactAnalyzerService，仅验证 SQL 模板组装逻辑。
+ * 使用 Mockito mock repository 和 impactAnalyzerService，仅验证 SQL 模板组装逻辑。
  */
 class WriteBackSqlGeneratorTest {
 
     private WriteBackSqlGenerator generator;
-    private BaseappObjectFieldMapper mockMapper;
+    private MetadataRepository mockRepository;
     private ImpactAnalyzerService mockImpact;
 
     @BeforeEach
     void setUp() {
-        mockMapper = Mockito.mock(BaseappObjectFieldMapper.class);
+        mockRepository = Mockito.mock(MetadataRepository.class);
         mockImpact = Mockito.mock(ImpactAnalyzerService.class);
 
-        // 默认 appName 返回空（无前缀）
-        when(mockMapper.selectAppNameByObjectType(anyString())).thenReturn("");
-        // 默认 fieldInfo 返回 null（使用 camelToSnake 转换）
+        when(mockRepository.selectAppNameByObjectType(anyString())).thenReturn("");
         when(mockImpact.getFieldInfo(anyString(), anyString())).thenReturn(null);
 
-        generator = new WriteBackSqlGenerator(mockImpact, mockMapper);
+        generator = new WriteBackSqlGenerator(mockImpact, mockRepository);
     }
 
     @Test
@@ -61,7 +59,7 @@ class WriteBackSqlGeneratorTest {
         String sql = generator.generateSql("SalesOrder", "totalPaid", wb);
 
         assertNotNull(sql);
-        assertTrue(sql.contains("AND bill_status='APPROVED'"));
+        assertTrue(sql.contains("bill_status='APPROVED'"));
     }
 
     @Test
@@ -74,7 +72,6 @@ class WriteBackSqlGeneratorTest {
         String sql = generator.generateSql("ArContract", "totalAmount", wb);
 
         assertNotNull(sql);
-        // expression 中的字段应被转为 snake_case
         assertTrue(sql.contains("sum(quantity * unit_price)") || sql.contains("sum(quantity*unit_price)"));
     }
 
@@ -88,7 +85,6 @@ class WriteBackSqlGeneratorTest {
     void generateSql_incompleteWriteBackExpr_returnsNull() {
         WriteBackExpr wb = new WriteBackExpr();
         wb.setSrcObjectType("SomeObject");
-        // expression 为空
         String sql = generator.generateSql("ArContract", "amount", wb);
         assertNull(sql);
     }
@@ -103,7 +99,6 @@ class WriteBackSqlGeneratorTest {
         String sql = generator.generateSql("ArContract", "invoicedAmount", wb);
 
         assertNotNull(sql);
-        // 级联路径只取第一段 contractId → contract_id
         assertTrue(sql.contains("contract_id = m.id"));
     }
 
@@ -111,7 +106,6 @@ class WriteBackSqlGeneratorTest {
     void generateSql_noIdField_defaultInferred() {
         WriteBackExpr wb = new WriteBackExpr();
         wb.setSrcObjectType("InvoiceItem");
-        // idField 为空，应从目标对象名推导：ArContract → arContractId → ar_contract_id
         wb.setExpression("sum(qty)");
 
         String sql = generator.generateSql("ArContract", "totalQty", wb);
