@@ -601,17 +601,8 @@
         <div class="glass-card">
             <div class="scan-source-bar">
                 <label>数据来源</label>
-                <el-radio-group v-model="dataSource" class="scan-source-group" @change="onDataSourceChange">
-                    <el-radio-button label="env">环境 GraphQL</el-radio-button>
-                    <el-radio-button label="local">本地数据库</el-radio-button>
-                </el-radio-group>
                 <span class="scan-source-hint">
-                    <template v-if="dataSource === 'local'">
-                        本地检查：{{ localDbHint }} — 两个 Tab 的扫描均从本地 PostgreSQL 读取元数据。
-                    </template>
-                    <template v-else>
-                        环境 GraphQL（右上角所选环境）— 两个 Tab 的扫描均从该环境拉取元数据。
-                    </template>
+                    环境 GraphQL（右上角所选环境）— 两个 Tab 的扫描均从该环境拉取元数据。
                 </span>
             </div>
 
@@ -796,9 +787,6 @@
                 const filterSeverity = ref('');
                 const filterExprType = ref('');
 
-                const dataSource = ref('env');
-                const localDbHint = ref('localhost:5432 / testapp（postgres）');
-
                 const objectForm = reactive({ objectType: '' });
                 const selectedApps = ref([]);
                 const appOptions = ref([]);
@@ -836,12 +824,6 @@
                 });
 
                 const scanScopeHint = computed(() => {
-                    if (dataSource.value === 'local') {
-                        const scope = reportData.filterAppName
-                            ? `模块 ${reportData.filterAppName}`
-                            : '全库';
-                        return `本地库 · ${scope}`;
-                    }
                     if (reportData.filterAppName) {
                         return `环境 GraphQL · 模块 ${reportData.filterAppName}`;
                     }
@@ -887,29 +869,7 @@
                     reportData.items = data.items || [];
                 };
 
-                const loadLocalDbInfo = async () => {
-                    try {
-                        const res = await fetch('/api/validation/local/info');
-                        if (!res.ok) return;
-                        const info = await res.json();
-                        localDbHint.value = `${info.host || 'localhost'}:${info.port || 5432} / ${info.database || 'testapp'}（${info.username || 'postgres'}）`;
-                    } catch (e) {
-                        console.warn('加载本地库信息失败', e);
-                    }
-                };
-
                 const loadAppOptions = async () => {
-                    if (dataSource.value === 'local') {
-                        try {
-                            const res = await fetch('/api/validation/local/apps');
-                            if (!res.ok) throw new Error('HTTP ' + res.status);
-                            appOptions.value = await res.json();
-                        } catch (e) {
-                            console.error('加载本地 App 列表失败', e);
-                            appOptions.value = [];
-                        }
-                        return;
-                    }
                     const env = DM.getEnv();
                     if (!env) {
                         appOptions.value = [];
@@ -921,14 +881,6 @@
                     } catch (e) {
                         console.error('加载 App 列表失败', e);
                         appOptions.value = [];
-                    }
-                };
-
-                const onDataSourceChange = () => {
-                    selectedApps.value = [];
-                    loadAppOptions().catch(console.error);
-                    if (dataSource.value === 'local') {
-                        loadLocalDbInfo().catch(console.error);
                     }
                 };
 
@@ -944,18 +896,16 @@
                     scanProg.scannedFields  = 0;
                     scanProg.currentObject  = '';
 
-                    const qs = ['source=' + encodeURIComponent(dataSource.value)];
+                    const qs = [];
                     const appNames = selectedApps.value.join(',');
                     if (appNames) qs.push('appName=' + encodeURIComponent(appNames));
-                    if (dataSource.value === 'env') {
-                        const env = DM.getEnv();
-                        if (!env) {
-                            isLoading.value = false;
-                            ElMessage.warning('请先在右上角选择工作环境');
-                            return;
-                        }
-                        qs.push('env=' + encodeURIComponent(env));
+                    const env = DM.getEnv();
+                    if (!env) {
+                        isLoading.value = false;
+                        ElMessage.warning('请先在右上角选择工作环境');
+                        return;
                     }
+                    qs.push('env=' + encodeURIComponent(env));
                     const url = `/api/validation/report/stream?${qs.join('&')}`;
                     const es = new EventSource(url);
 
@@ -997,7 +947,7 @@
                         ElMessage.warning('请输入对象标识符');
                         return;
                     }
-                    if (dataSource.value === 'env' && !DM.getEnv()) {
+                    if (!DM.getEnv()) {
                         ElMessage.warning('请先在右上角选择工作环境');
                         return;
                     }
@@ -1007,11 +957,8 @@
                     try {
                         const params = new URLSearchParams({
                             objectType: objectForm.objectType.trim(),
-                            source: dataSource.value
+                            env: DM.getEnv()
                         });
-                        if (dataSource.value === 'env' && DM.getEnv()) {
-                            params.set('env', DM.getEnv());
-                        }
                         const response = await fetch(`/api/validation/check?${params}`);
                         if (!response.ok) throw new Error('API Error');
                         const data = await response.json();
@@ -1120,16 +1067,13 @@
                             width: '240px',
                             theme: 'dark',
                             onChange: () => {
-                                if (dataSource.value !== 'env') return;
                                 selectedApps.value = [];
                                 loadAppOptions().catch(console.error);
                             }
                         });
-                        await loadLocalDbInfo();
                         await loadAppOptions();
                     }
                     const onEnvChanged = () => {
-                        if (dataSource.value !== 'env') return;
                         selectedApps.value = [];
                         loadAppOptions().catch(console.error);
                     };
@@ -1140,9 +1084,6 @@
                 return {
                     activeMode,
                     isLoading,
-                    dataSource,
-                    localDbHint,
-                    onDataSourceChange,
                     selectedApps,
                     appOptions,
                     objectForm,

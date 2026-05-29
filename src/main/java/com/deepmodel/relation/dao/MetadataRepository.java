@@ -1,6 +1,5 @@
 package com.deepmodel.relation.dao;
 
-import com.deepmodel.relation.env.EnvContext;
 import com.deepmodel.relation.model.BaseappObjectField;
 import com.deepmodel.relation.model.ObjectTypeMeta;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -36,17 +35,11 @@ public class MetadataRepository {
             """;
 
     private final MetadataGraphQLClient client;
-    private final LocalPostgresMetadataRepository localRepo;
     private final ObjectMapper objectMapper;
 
-    public MetadataRepository(MetadataGraphQLClient client, LocalPostgresMetadataRepository localRepo) {
+    public MetadataRepository(MetadataGraphQLClient client) {
         this.client = client;
-        this.localRepo = localRepo;
         this.objectMapper = client.getObjectMapper();
-    }
-
-    private boolean useLocalDatasource() {
-        return EnvContext.isLocalEnv(EnvContext.currentOrNull());
     }
 
     public List<BaseappObjectField> selectByObjectType(String objectType) {
@@ -70,9 +63,6 @@ public class MetadataRepository {
     }
 
     public List<BaseappObjectField> selectAll() {
-        if (useLocalDatasource()) {
-            return localRepo.selectAll();
-        }
         return mapObjectFields(client.queryAllPages("ObjectField", "1=1", OBJECT_FIELD_SELECTION));
     }
 
@@ -186,9 +176,6 @@ public class MetadataRepository {
     }
 
     public List<String> selectViewDefinitions() {
-        if (useLocalDatasource()) {
-            return localRepo.selectViewDefinitions();
-        }
         String criteria = "name like '%View%' and isDeleted=false and typeId='MetaType.entity' "
                 + "and name in (select name from ObjectType where COALESCE(type,'')='bill' "
                 + "and lower(COALESCE(appName,'')) in ('arap','purchase','sales','contract'))";
@@ -214,9 +201,6 @@ public class MetadataRepository {
     }
 
     public List<ObjectTypeMeta> selectObjectTitles() {
-        if (useLocalDatasource()) {
-            return localRepo.selectObjectTitles();
-        }
         String selection = """
                 name
                 title
@@ -284,9 +268,6 @@ public class MetadataRepository {
     }
 
     public List<String> selectEnumDefinitions() {
-        if (useLocalDatasource()) {
-            return localRepo.selectEnumDefinitions();
-        }
         List<JsonNode> rows = client.queryAllPages(
                 "SystemMetadata", "isDeleted=false and lower(typeId) like '%enum%'", "content");
         List<String> result = new ArrayList<>();
@@ -314,9 +295,6 @@ public class MetadataRepository {
     }
 
     public List<String> selectChangeBillSupportedEntities() {
-        if (useLocalDatasource()) {
-            return localRepo.selectChangeBillSupportedEntities();
-        }
         List<JsonNode> rows = client.queryAllPages(
                 "SystemMetadata",
                 "isDeleted=false and typeId='MetaType.entity' and content::jsonb->>'isSupportChangeBill'='true'",
@@ -332,9 +310,6 @@ public class MetadataRepository {
     }
 
     public List<Map<String, Object>> selectEntityMetadataContents() {
-        if (useLocalDatasource()) {
-            return localRepo.selectEntityMetadataContents();
-        }
         return mapNameContentRows(client.queryAllPages(
                 "SystemMetadata",
                 "isDeleted=false and typeId='MetaType.entity' and content IS NOT NULL",
@@ -342,9 +317,6 @@ public class MetadataRepository {
     }
 
     public List<Map<String, Object>> selectCustomizedMetadataContents() {
-        if (useLocalDatasource()) {
-            return localRepo.selectCustomizedMetadataContents();
-        }
         return mapNameContentRows(client.queryAllPages(
                 "CustomizedMetadata",
                 "isDeleted=false and typeId='MetaType.entity' and content IS NOT NULL",
