@@ -1,0 +1,8 @@
+target/
+.git/
+.idea/
+*.md
+specs/
+.agent/
+.specify/
+.github/
