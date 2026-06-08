@@ -1,41 +1,44 @@
 pipeline {
-  agent {
-    docker {
-      image 'maven:3.9-eclipse-temurin-21'
-      args '-v /var/run/docker.sock:/var/run/docker.sock -v maven-m2:/root/.m2 --group-add 991'
-    }
-  }
+  agent none
 
   stages {
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
-    }
-
     stage('Build') {
-      steps {
-        sh 'mvn -B clean package -DskipTests'
+      agent {
+        docker {
+          image 'maven:3.9-eclipse-temurin-21'
+          args '-v maven-m2:/root/.m2'
+        }
+      }
+      stages {
+        stage('Checkout') {
+          steps {
+            checkout scm
+          }
+        }
+        stage('Package') {
+          steps {
+            sh 'mvn -B clean package -DskipTests'
+            stash includes: 'target/*.jar,Dockerfile,.dockerignore', name: 'artifacts'
+          }
+        }
       }
     }
 
     stage('Docker') {
+      agent { label 'built-in' }
       steps {
-        sh '''
-          if ! command -v docker >/dev/null 2>&1; then
-            curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.9.tgz -o /tmp/docker.tgz
-            tar xzf /tmp/docker.tgz -C /tmp
-            export PATH="/tmp/docker:$PATH"
-          fi
-          docker build -t deepmodel:${BUILD_NUMBER} .
-        '''
+        unstash 'artifacts'
+        sh 'docker build -t deepmodel:${BUILD_NUMBER} .'
       }
     }
   }
 
   post {
     success {
-      archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+      node('built-in') {
+        unstash 'artifacts'
+        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+      }
     }
   }
 }
