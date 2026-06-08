@@ -22,11 +22,12 @@ pipeline {
     stage('Docker') {
       steps {
         sh '''
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v "$PWD:/w" -w /w \
-            docker:24-cli \
-            docker build -t deepmodel:${BUILD_NUMBER} .
+          if ! command -v docker >/dev/null 2>&1; then
+            curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.9.tgz -o /tmp/docker.tgz
+            tar xzf /tmp/docker.tgz -C /tmp
+            export PATH="/tmp/docker:$PATH"
+          fi
+          docker build -t deepmodel:${BUILD_NUMBER} .
         '''
       }
     }
