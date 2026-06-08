@@ -2,7 +2,7 @@ pipeline {
   agent {
     docker {
       image 'maven:3.9-eclipse-temurin-21'
-      args '-v /var/run/docker.sock:/var/run/docker.sock -v maven-m2:/root/.m2'
+      args '-v /var/run/docker.sock:/var/run/docker.sock -v maven-m2:/root/.m2 --group-add 991'
     }
   }
 
