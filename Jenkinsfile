@@ -18,7 +18,7 @@ pipeline {
         stage('Package') {
           steps {
             sh 'mvn -B clean package -DskipTests'
-            stash includes: 'target/*.jar,Dockerfile,.dockerignore', name: 'artifacts'
+            stash includes: 'target/**,Dockerfile,.dockerignore', name: 'artifacts'
           }
         }
       }
