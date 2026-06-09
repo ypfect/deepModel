@@ -1,3 +1,6 @@
+def REGISTRY = 'localhost:5050'
+def IMAGE_NAME = 'deepmodel'
+
 pipeline {
   agent none
 
@@ -5,10 +8,11 @@ pipeline {
     stage('Log') {
       agent { label 'built-in' }
       steps {
-        echo "=== deepModel CI ==="
+        echo "=== deepModel CI/CD ==="
         echo "Job: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
         echo "Branch: ${env.BRANCH_NAME ?: 'main'}"
         echo "Source: https://github.com/ypfect/deepModel.git"
+        echo "Registry: ${REGISTRY}/${IMAGE_NAME}"
         echo "Build URL: ${env.BUILD_URL}"
       }
     }
@@ -42,7 +46,26 @@ pipeline {
       agent { label 'built-in' }
       steps {
         unstash 'artifacts'
-        sh 'docker build -t deepmodel:${BUILD_NUMBER} .'
+        sh "docker build -t ${REGISTRY}/${IMAGE_NAME}:${BUILD_NUMBER} -t ${REGISTRY}/${IMAGE_NAME}:latest ."
+      }
+    }
+
+    stage('Push') {
+      agent { label 'built-in' }
+      steps {
+        sh "docker push ${REGISTRY}/${IMAGE_NAME}:${BUILD_NUMBER}"
+        sh "docker push ${REGISTRY}/${IMAGE_NAME}:latest"
+      }
+    }
+
+    stage('Deploy') {
+      agent { label 'built-in' }
+      steps {
+        build job: 'deepModel-deploy',
+              parameters: [
+                string(name: 'IMAGE', value: "${REGISTRY}/${IMAGE_NAME}:${BUILD_NUMBER}")
+              ],
+              wait: true
       }
     }
   }
