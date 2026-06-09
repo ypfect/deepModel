@@ -17,7 +17,10 @@ pipeline {
       agent {
         docker {
           image 'maven:3.9-eclipse-temurin-21'
-          args '-v maven-m2:/root/.m2'
+          args '-v maven-m2:/root/.m2 ' +
+               '-e HTTP_PROXY=http://host.docker.internal:7890 ' +
+               '-e HTTPS_PROXY=http://host.docker.internal:7890 ' +
+               '-e NO_PROXY=localhost,127.0.0.1'
         }
       }
       stages {
