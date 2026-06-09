@@ -2,6 +2,17 @@ pipeline {
   agent none
 
   stages {
+    stage('Log') {
+      agent { label 'built-in' }
+      steps {
+        echo "=== deepModel CI ==="
+        echo "Job: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+        echo "Branch: ${env.BRANCH_NAME ?: 'main'}"
+        echo "Source: https://github.com/ypfect/deepModel.git"
+        echo "Build URL: ${env.BUILD_URL}"
+      }
+    }
+
     stage('Build') {
       agent {
         docker {
