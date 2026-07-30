@@ -6,16 +6,9 @@ package com.deepmodel.relation.env;
  */
 public final class EnvContext {
 
-    /** 本地 PostgreSQL 元数据快照的 env 键（与运维环境名区分）。 */
-    public static final String LOCAL_ENV_KEY = "@local";
-
     private static final ThreadLocal<String> CURRENT = new ThreadLocal<>();
 
     private EnvContext() {}
-
-    public static boolean isLocalEnv(String env) {
-        return LOCAL_ENV_KEY.equals(env);
-    }
 
     public static void set(String env) {
         if (env == null || env.isBlank()) {

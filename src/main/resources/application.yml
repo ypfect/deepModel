@@ -8,22 +8,11 @@ metadata-source:
   # 内网 GraphQL 多为企业/自签证书，Java 默认不信任会报 PKIX path building failed
   trust-all-ssl: true
 
-# 配置体检中心「本地检查」：直连本机租户库（开发态，未部署环境时使用）
-metadata-local:
-  host: localhost
-  port: 5432
-  database: testapp
-  username: postgres
-  password: "123"
-
 writeback-sql:
   tenant-id: 3XNLNA60G34006P
 
 expression-engine:
   local-writeback-sql: false
-
-decision-table:
-  scan-path: /Users/pengfyu/workspace/feature/dev
 
 spring:
   mvc:

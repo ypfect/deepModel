@@ -1,8 +1,6 @@
 package com.deepmodel.relation.controller;
 
-import com.deepmodel.relation.dao.LocalPostgresMetadataRepository;
 import com.deepmodel.relation.env.EnvContext;
-import com.deepmodel.relation.env.EnvSnapshotManager;
 import com.deepmodel.relation.model.ValidationReport;
 import com.deepmodel.relation.service.ExpressionValidatorService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,8 +12,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -27,18 +23,12 @@ import java.util.concurrent.Executors;
 public class ValidationController {
 
     private final ExpressionValidatorService validatorService;
-    private final EnvSnapshotManager snapshotManager;
-    private final LocalPostgresMetadataRepository localRepo;
     private final ObjectMapper objectMapper;
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     @Autowired
-    public ValidationController(ExpressionValidatorService validatorService,
-                                EnvSnapshotManager snapshotManager,
-                                LocalPostgresMetadataRepository localRepo) {
+    public ValidationController(ExpressionValidatorService validatorService) {
         this.validatorService = validatorService;
-        this.snapshotManager = snapshotManager;
-        this.localRepo = localRepo;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -50,33 +40,14 @@ public class ValidationController {
     @GetMapping("/check")
     public ValidationReport checkObject(
             @RequestParam("objectType") String objectType,
-            @RequestParam(value = "source", required = false, defaultValue = "env") String source,
             @RequestParam(value = "env", required = false) String env) {
-        String scanEnv = resolveScanEnv(source, env);
+        String scanEnv = resolveScanEnv(env);
         try {
             EnvContext.set(scanEnv);
-            if (EnvContext.isLocalEnv(scanEnv)) {
-                snapshotManager.invalidate(scanEnv);
-            }
             return validatorService.checkSingleObject(objectType);
         } finally {
             EnvContext.clear();
         }
-    }
-
-    /** 本地库 App 模块列表（供体检中心下拉）。 */
-    @GetMapping("/local/apps")
-    public List<String> localApps() {
-        return localRepo.selectDistinctAppNames();
-    }
-
-    /** 本地库连接信息（不含密码）。 */
-    @GetMapping("/local/info")
-    public Map<String, Object> localInfo() {
-        Map<String, Object> info = localRepo.connectionInfo();
-        info.put("mode", "local");
-        info.put("envKey", EnvContext.LOCAL_ENV_KEY);
-        return info;
     }
 
     /**
@@ -85,14 +56,10 @@ public class ValidationController {
     @GetMapping("/report")
     public ValidationReport checkAppModule(
             @RequestParam(value = "appName", required = false) String appName,
-            @RequestParam(value = "source", required = false, defaultValue = "env") String source,
             @RequestParam(value = "env", required = false) String env) {
-        String scanEnv = resolveScanEnv(source, env);
+        String scanEnv = resolveScanEnv(env);
         try {
             EnvContext.set(scanEnv);
-            if (EnvContext.isLocalEnv(scanEnv)) {
-                snapshotManager.invalidate(scanEnv);
-            }
             return validatorService.checkAllObjectsInApp(appName);
         } finally {
             EnvContext.clear();
@@ -110,16 +77,12 @@ public class ValidationController {
     @GetMapping(value = "/report/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamAppScan(
             @RequestParam(value = "appName", required = false) String appName,
-            @RequestParam(value = "env", required = false) String env,
-            @RequestParam(value = "source", required = false, defaultValue = "env") String source) {
+            @RequestParam(value = "env", required = false) String env) {
         SseEmitter emitter = new SseEmitter(10 * 60 * 1_000L);
 
         final String scanEnv;
         try {
-            scanEnv = resolveScanEnv(source, env);
-            if (EnvContext.isLocalEnv(scanEnv)) {
-                localRepo.ping();
-            }
+            scanEnv = resolveScanEnv(env);
         } catch (RuntimeException e) {
             SseEmitter errEmitter = new SseEmitter(5_000L);
             executor.execute(() -> {
@@ -139,9 +102,6 @@ public class ValidationController {
         executor.execute(() -> {
             try {
                 EnvContext.set(scanEnv);
-                if (EnvContext.isLocalEnv(scanEnv)) {
-                    snapshotManager.invalidate(scanEnv);
-                }
                 ValidationReport report = validatorService.checkAllObjectsInApp(appName, progress -> {
                     try {
                         String json = objectMapper.writeValueAsString(progress);
@@ -174,13 +134,7 @@ public class ValidationController {
         return emitter;
     }
 
-    /**
-     * @param source {@code env}（默认，走 GraphQL + X-Env/运维环境）或 {@code local}（本地 PostgreSQL）
-     */
-    private static String resolveScanEnv(String source, String envParam) {
-        if ("local".equalsIgnoreCase(source != null ? source.trim() : "")) {
-            return EnvContext.LOCAL_ENV_KEY;
-        }
+    private static String resolveScanEnv(String envParam) {
         if (envParam != null && !envParam.isBlank()) {
             return envParam.trim();
         }
@@ -188,7 +142,6 @@ public class ValidationController {
         if (fromHeader != null && !fromHeader.isBlank()) {
             return fromHeader.trim();
         }
-        throw new IllegalStateException("未指定工作环境：请选择右上角环境，或使用 source=local 进行本地库检查");
+        throw new IllegalStateException("未指定工作环境：请选择右上角环境");
     }
 }
-

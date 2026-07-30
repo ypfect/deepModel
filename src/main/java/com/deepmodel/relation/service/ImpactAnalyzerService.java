@@ -11,6 +11,7 @@ import com.deepmodel.relation.model.EnumTypeMeta;
 import com.deepmodel.relation.model.EnumValueMeta;
 import com.deepmodel.relation.model.WriteBackExpr;
 import com.deepmodel.relation.util.ExprUtils;
+import com.deepmodel.relation.util.JiebaUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -42,14 +43,8 @@ public class ImpactAnalyzerService {
             .configure(JsonParser.Feature.ALLOW_COMMENTS, true)
             .configure(JsonParser.Feature.ALLOW_TRAILING_COMMA, true);
 
-    private static final Map<String, List<String>> GLOBAL_SYNONYMS = new HashMap<>();
-    static {
-        GLOBAL_SYNONYMS.put("User", Arrays.asList("人员", "员工", "操作人", "经办人"));
-        GLOBAL_SYNONYMS.put("Org", Arrays.asList("部门", "组织", "机构", "科室"));
-        GLOBAL_SYNONYMS.put("ArContract", Arrays.asList("合同", "应收合同", "销售合同", "收款协议"));
-        GLOBAL_SYNONYMS.put("Project", Arrays.asList("项目", "工程"));
-        GLOBAL_SYNONYMS.put("Customer", Arrays.asList("客户", "甲方", "付款方"));
-    }
+    private static final Map<String, List<String>> GLOBAL_SYNONYMS =
+            Collections.unmodifiableMap(new HashMap<>(JiebaUtils.loadSynonyms()));
 
     private final FormulaParserService formulaParserService;
     private final WriteBackRelationService writeBackRelationService;
